@@ -1,8 +1,8 @@
 <%- include('partials/head') %>
 <section class="panel">
-  <form method="get" class="filters">
+  <form method="get" class="filters compact">
     <select name="account_id">
-      <% accounts.forEach(account => { %><option value="<%= account.id %>" <%= selected && selected.id === account.id ? 'selected' : '' %>><%= account.username %> - <%= account.status %></option><% }) %>
+      <% accounts.forEach(account => { %><option value="<%= account.id %>" <%= selected && selected.id === account.id ? 'selected' : '' %>><%= account.display_name || account.legacy_login || account.username %> - <%= account.status %></option><% }) %>
     </select>
     <button class="button">Load</button>
   </form>
@@ -10,14 +10,19 @@
 <% if (selected) { %>
   <section class="workflow-hero">
     <div>
-      <p class="eyebrow"><%= selected.account_type %> account</p>
-      <h2><%= selected.display_name || selected.username %></h2>
-      <span class="status <%= selected.status %>"><%= selected.status %></span>
+      <p class="eyebrow"><%= selected.account_type %> manual workflow</p>
+      <h2><%= selected.display_name || selected.legacy_login || selected.username %></h2>
+      <p class="muted"><%= nextStep %></p>
+      <div class="actions">
+        <span class="status <%= selected.status %>"><%= selected.status %></span>
+        <span class="tag"><%= selected.email_creation_status %> email</span>
+        <span class="tag"><%= selected.upgrade_status %> upgrade</span>
+      </div>
     </div>
-    <div class="actions">
-      <button class="button copy-api" data-url="/accounts/<%= selected.id %>/copy/username">Copy username</button>
-      <button class="button copy-api" data-url="/accounts/<%= selected.id %>/copy/password">Copy password</button>
-      <% if (selected.otp_secret_encrypted) { %><button class="button copy-api" data-url="/accounts/<%= selected.id %>/copy/otp_code">Copy OTP</button><% } %>
+    <div class="copy-grid tight">
+      <button class="button small copy-api" data-url="/accounts/<%= selected.id %>/copy/legacy_login">Copy login</button>
+      <button class="button small copy-api" data-url="/accounts/<%= selected.id %>/copy/legacy_password">Copy password</button>
+      <% if (selected.otp_secret_encrypted) { %><button class="button small copy-api" data-url="/accounts/<%= selected.id %>/copy/otp_code">Copy OTP</button><% } %>
     </div>
   </section>
   <section class="steps">
@@ -25,10 +30,11 @@
       <article class="panel step">
         <span class="step-num"><%= index + 1 %></span>
         <h2><%= step %></h2>
-        <p class="muted"><%= index === 0 ? 'Confirm saved fields, proxy assignment, and OTP availability.' : 'Use the copied values manually in external pages only when you choose to.' %></p>
+        <p class="muted"><%= index === 0 ? 'Confirm saved fields, proxy assignment, and OTP availability.' : 'Use copied values manually in external pages only when you choose to.' %></p>
         <div class="actions">
-          <% if (index === 1) { %><a class="button small" target="_blank" rel="noopener" href="https://outlook.live.com/">Open Outlook</a><% } %>
-          <% if (index === 2 || index === 3) { %><a class="button small" target="_blank" rel="noopener" href="https://www.jagex.com/">Open Jagex</a><% } %>
+          <% if (index === 1) { %><a class="button small" target="_blank" rel="noopener" href="<%= settings.email_signup_url || 'https://signup.live.com/' %>">Open email signup</a><% } %>
+          <% if (index === 2) { %><a class="button small" target="_blank" rel="noopener" href="<%= settings.email_signin_url || 'https://outlook.live.com/' %>">Open email sign-in</a><% } %>
+          <% if (index === 3) { %><a class="button small" target="_blank" rel="noopener" href="<%= settings.upgrade_url || 'https://account.jagex.com/' %>">Open upgrade page</a><% } %>
         </div>
       </article>
     <% }) %>
@@ -37,7 +43,7 @@
     <h2>Mark Workflow Status</h2>
     <form method="post" action="/workflow/<%= selected.id %>/status" class="actions">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <% ['in_progress','needs_review','blocked','skipped','upgraded'].forEach(status => { %><button class="button" name="status" value="<%= status %>"><%= status %></button><% }) %>
+      <% ['in_progress','needs_review','blocked','skipped','upgraded','exported','archived'].forEach(status => { %><button class="button" name="status" value="<%= status %>"><%= status.replace('_', ' ') %></button><% }) %>
     </form>
   </section>
 <% } else { %>

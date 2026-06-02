@@ -4,20 +4,45 @@
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
     <h2>App Settings</h2>
     <label>App Name<input name="app_name" value="<%= settings.app_name || appName %>"></label>
+    <label>Theme<input name="theme_name" value="<%= settings.theme_name || 'Premium Dark' %>"></label>
     <label>Default Account Type<select name="default_account_type"><% accountTypes.forEach(t => { %><option value="<%= t %>" <%= settings.default_account_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select></label>
     <label>Default Proxy Type<select name="default_proxy_type"><% proxyTypes.forEach(t => { %><option value="<%= t %>" <%= settings.default_proxy_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select></label>
-    <label>Max Accounts Per Proxy<input type="number" name="max_accounts_per_proxy" value="<%= settings.max_accounts_per_proxy || '5' %>"></label>
-    <label>Export Format Default<input name="export_format_default" value="<%= settings.export_format_default || 'USERNAME:PASSWORD' %>"></label>
+    <label>Default Email Provider<input name="default_email_provider" value="<%= settings.default_email_provider || 'Outlook' %>"></label>
+    <label>Password Length<input type="number" min="4" max="64" name="password_length" value="<%= settings.password_length || '9' %>"></label>
+    <label>Max Accounts Per Proxy<input type="number" min="1" name="max_accounts_per_proxy" value="<%= settings.max_accounts_per_proxy || '5' %>"></label>
+    <label>Export Format Default<select name="export_format_default">
+      <% ['legacy_user_pass','legacy_user_pass_otp','jagex_email_pass','jagex_email_pass_otp','safe_csv'].forEach(f => { %><option value="<%= f %>" <%= settings.export_format_default === f ? 'selected' : '' %>><%= f %></option><% }) %>
+    </select></label>
+    <label>Export Behavior Default<select name="export_behavior_default">
+      <% ['keep','mark_exported','archive','delete'].forEach(f => { %><option value="<%= f %>" <%= settings.export_behavior_default === f ? 'selected' : '' %>><%= f %></option><% }) %>
+    </select></label>
     <label>Mask Sensitive Values<select name="mask_sensitive_values"><option value="true" <%= settings.mask_sensitive_values === 'true' ? 'selected' : '' %>>true</option><option value="false" <%= settings.mask_sensitive_values === 'false' ? 'selected' : '' %>>false</option></select></label>
+    <label>OTP Refresh Interval<input type="number" min="15" max="60" name="otp_refresh_interval" value="<%= settings.otp_refresh_interval || '30' %>"></label>
     <button class="button primary">Save settings</button>
   </form>
-  <section class="panel">
-    <h2>Render Checklist</h2>
-    <p class="row-line"><span>DATABASE_URL</span><strong>required</strong></p>
-    <p class="row-line"><span>ENCRYPTION_KEY</span><strong>required</strong></p>
-    <p class="row-line"><span>SESSION_SECRET</span><strong>required</strong></p>
-    <p class="row-line"><span>ADMIN_USERNAME / ADMIN_PASSWORD</span><strong>required</strong></p>
-    <p class="row-line"><span>Discord OAuth</span><strong>prepared</strong></p>
+  <section class="panel form-grid">
+    <h2>Manual Page URLs</h2>
+    <form method="post" action="/settings" class="form-grid">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <% ['app_name','theme_name','default_account_type','default_proxy_type','default_email_provider','password_length','max_accounts_per_proxy','export_format_default','export_behavior_default','mask_sensitive_values','otp_refresh_interval'].forEach(key => { %><input type="hidden" name="<%= key %>" value="<%= settings[key] || '' %>"><% }) %>
+      <label>Email Signup URL<input name="email_signup_url" value="<%= settings.email_signup_url || 'https://signup.live.com/' %>"></label>
+      <label>Email Sign-In URL<input name="email_signin_url" value="<%= settings.email_signin_url || 'https://outlook.live.com/' %>"></label>
+      <label>Account Settings URL<input name="account_settings_url" value="<%= settings.account_settings_url || 'https://account.jagex.com/' %>"></label>
+      <label>Upgrade URL<input name="upgrade_url" value="<%= settings.upgrade_url || 'https://account.jagex.com/' %>"></label>
+      <button class="button">Save URLs</button>
+    </form>
   </section>
+</section>
+<section class="panel">
+  <h2>Render Checklist</h2>
+  <p class="row-line"><span>Root Directory</span><strong>blank / repository root</strong></p>
+  <p class="row-line"><span>Build Command</span><strong>npm install</strong></p>
+  <p class="row-line"><span>Start Command</span><strong>npm start</strong></p>
+  <p class="row-line"><span>Health Check Path</span><strong>/healthz</strong></p>
+  <p class="row-line"><span>DATABASE_URL</span><strong>required</strong></p>
+  <p class="row-line"><span>ENCRYPTION_KEY</span><strong>32 decoded bytes</strong></p>
+  <p class="row-line"><span>SESSION_SECRET</span><strong>required</strong></p>
+  <p class="row-line"><span>Admin login</span><strong>env based</strong></p>
+  <p class="row-line"><span>App Version</span><strong><%= appVersion %></strong></p>
 </section>
 <%- include('partials/foot') %>

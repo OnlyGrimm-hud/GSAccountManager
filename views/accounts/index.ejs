@@ -5,7 +5,7 @@
     <a class="button primary" href="/accounts/new">Add account</a>
   </div>
   <form class="filters" method="get">
-    <input name="q" placeholder="Search username or display" value="<%= filters.q || '' %>">
+    <input name="q" placeholder="Search login, username, display" value="<%= filters.q || '' %>">
     <select name="account_type"><option value="">All types</option><% accountTypes.forEach(t => { %><option value="<%= t %>" <%= filters.account_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select>
     <select name="status"><option value="">All statuses</option><% accountStatuses.forEach(s => { %><option value="<%= s %>" <%= filters.status === s ? 'selected' : '' %>><%= s %></option><% }) %></select>
     <input name="category" placeholder="Category" value="<%= filters.category || '' %>">
@@ -15,23 +15,24 @@
     <button class="button">Filter</button>
   </form>
   <table>
-    <thead><tr><th>Username</th><th>Type</th><th>Display</th><th>Category</th><th>Status</th><th>Proxy</th><th>Updated</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Login</th><th>Type</th><th>Status</th><th>Credentials</th><th>Upgrade</th><th>Proxy</th><th>Notes</th><th>Updated</th><th>Actions</th></tr></thead>
     <tbody>
       <% accounts.forEach(account => { %>
         <tr>
-          <td><%= mask(account.username) %></td>
+          <td><strong><%= mask(account.legacy_login || account.username) %></strong><br><span class="muted"><%= account.display_name || '' %></span></td>
           <td><span class="tag"><%= account.account_type %></span></td>
-          <td><%= account.display_name || '' %></td>
-          <td><%= account.category || '' %></td>
           <td><span class="status <%= account.status %>"><%= account.status %></span></td>
-          <td><%= account.proxy_host ? `${account.proxy_host}:${account.proxy_port}` : '' %></td>
+          <td><span class="tag"><%= account.credential_status || 'partial' %></span></td>
+          <td><span class="tag"><%= account.upgrade_status || 'pending' %></span></td>
+          <td><%= account.proxy_host ? `${account.proxy_host}:${account.proxy_port}` : 'Unassigned' %><br><span class="muted"><%= account.proxy_status || '' %></span></td>
+          <td><%= account.notes ? account.notes.slice(0, 80) : '' %></td>
           <td><%= new Date(account.updated_at).toLocaleDateString() %></td>
           <td class="actions">
-            <a class="button small" href="/accounts/<%= account.id %>">View/Edit</a>
-            <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/username">Copy username</button>
-            <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/password">Copy password</button>
+            <a class="button small" href="/accounts/<%= account.id %>">Edit</a>
+            <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_login">Copy login</button>
+            <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_password">Copy pass</button>
             <% if (account.otp_secret_encrypted) { %><button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP</button><% } %>
-            <a class="button small" href="/workflow?account_id=<%= account.id %>">Workflow</a>
+            <a class="button small" href="/?account_id=<%= account.id %>">Dashboard</a>
           </td>
         </tr>
       <% }) %>

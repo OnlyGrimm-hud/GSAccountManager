@@ -1,9 +1,14 @@
 <%- include('partials/head') %>
+<section class="metric-grid proxy-metrics">
+  <% [['total','Total'],['assigned','Assigned'],['unassigned','Unassigned'],['online','Online'],['blocked','Blocked'],['review','Review']].forEach(item => { %>
+    <article class="metric"><span><%= item[1] %></span><strong><%= counts[item[0]] || 0 %></strong></article>
+  <% }) %>
+</section>
 <section class="content-grid">
   <form method="post" action="/proxies" class="panel form-grid">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
     <h2>Add Proxy</h2>
-    <label>Type<select name="proxy_type"><% proxyTypes.forEach(t => { %><option value="<%= t %>"><%= t %></option><% }) %></select></label>
+    <label>Type<select name="proxy_type"><% proxyTypes.forEach(t => { %><option value="<%= t %>" <%= t === 'HTTP' ? 'selected' : '' %>><%= t %></option><% }) %></select></label>
     <label>Host<input name="host"></label>
     <label>Port<input name="port" type="number" min="1" max="65535"></label>
     <label>Username<input name="username" type="password"></label>
@@ -17,17 +22,24 @@
   <form method="post" action="/proxies" class="panel form-grid">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
     <h2>Import Proxies</h2>
-    <p class="muted">Format: IP:PORT:USERNAME:PASSWORD</p>
-    <label>Default Type<select name="proxy_type"><% proxyTypes.forEach(t => { %><option value="<%= t %>"><%= t %></option><% }) %></select></label>
+    <p class="muted">Formats: host:port, host:port:user:pass, http://user:pass@host:port</p>
+    <label>Default Type<select name="proxy_type"><option value="HTTP">HTTP</option><option value="SOCKS5">SOCKS5</option></select></label>
     <textarea name="bulk" rows="10"></textarea>
     <button class="button">Import proxies</button>
   </form>
 </section>
 <section class="panel">
-  <h2>Saved Proxies</h2>
+  <div class="panel-head">
+    <h2>Saved Proxies</h2>
+    <form method="post" action="/proxies/auto-assign">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <button class="button">Auto assign HTTP proxies</button>
+    </form>
+  </div>
+  <p class="muted">Max accounts per proxy: <%= settings.max_accounts_per_proxy || 5 %>. Proxy passwords stay hidden in tables.</p>
   <table>
-    <thead><tr><th>Proxy</th><th>Type</th><th>Category</th><th>Country</th><th>Status</th><th>Assigned</th><th>Updated</th></tr></thead>
-    <tbody><% proxies.forEach(proxy => { %><tr><td><%= proxy.host %>:<%= proxy.port %></td><td><%= proxy.proxy_type %></td><td><%= proxy.category || '' %></td><td><%= proxy.country_code || '' %></td><td><span class="status <%= proxy.status %>"><%= proxy.status %></span></td><td><%= proxy.assigned_count %></td><td><%= new Date(proxy.updated_at).toLocaleDateString() %></td></tr><% }) %></tbody>
+    <thead><tr><th>Proxy</th><th>Type</th><th>Category</th><th>Country</th><th>Status</th><th>Assigned</th><th>Notes</th><th>Updated</th></tr></thead>
+    <tbody><% proxies.forEach(proxy => { %><tr><td><%= proxy.host %>:<%= proxy.port %></td><td><%= proxy.proxy_type %></td><td><%= proxy.category || '' %></td><td><%= proxy.country_code || '' %></td><td><span class="status <%= proxy.status %>"><%= proxy.status %></span></td><td><%= proxy.assigned_count %></td><td><%= proxy.notes || '' %></td><td><%= new Date(proxy.updated_at).toLocaleDateString() %></td></tr><% }) %></tbody>
   </table>
 </section>
 <%- include('partials/foot') %>

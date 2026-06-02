@@ -1,4 +1,37 @@
 <%- include('partials/head') %>
+<section class="dashboard-hero">
+  <form method="get" class="account-picker">
+    <label>Current Account
+      <select name="account_id">
+        <% selectable.forEach(item => { %>
+          <option value="<%= item.id %>" <%= selected && selected.id === item.id ? 'selected' : '' %>>
+            <%= item.display_name || item.legacy_login || item.username %> - <%= item.status %>
+          </option>
+        <% }) %>
+      </select>
+    </label>
+    <button class="button">Load</button>
+  </form>
+  <% if (selected) { %>
+    <div class="current-account">
+      <p class="eyebrow"><%= selected.account_type %> workflow</p>
+      <h2><%= selected.display_name || selected.legacy_login || selected.username %></h2>
+      <p class="muted"><%= nextStep %></p>
+      <div class="actions">
+        <span class="status <%= selected.status %>"><%= selected.status %></span>
+        <span class="tag"><%= selected.credential_status %> credentials</span>
+        <span class="tag"><%= selected.upgrade_status %> upgrade</span>
+      </div>
+    </div>
+  <% } else { %>
+    <div class="current-account">
+      <h2>No current account</h2>
+      <p class="muted">Import or add an account to start the manual workflow.</p>
+      <a class="button primary" href="/imports-exports">Import accounts</a>
+    </div>
+  <% } %>
+</section>
+
 <section class="metric-grid">
   <% const countMap = Object.fromEntries(counts.map(c => [c.status, c.count])); %>
   <% accountStatuses.forEach(status => { %>
@@ -8,22 +41,51 @@
     </article>
   <% }) %>
 </section>
+
+<section class="step-grid">
+  <% ['Prepare Account','Create Email Manually','Login + Authenticator','Upgrade / Jagex Info','Save Result Locally'].forEach((step, index) => { %>
+    <article class="panel step">
+      <span class="step-num"><%= index + 1 %></span>
+      <h2><%= step %></h2>
+      <p class="muted"><%= index === 0 ? 'Check credentials, proxy, OTP, and notes.' : 'Complete this step manually and update local status.' %></p>
+    </article>
+  <% }) %>
+</section>
+
 <section class="content-grid">
   <article class="panel">
     <div class="panel-head">
-      <h2>Account Flow</h2>
-      <a class="button small" href="/accounts/new">New account</a>
+      <h2>Quick Copy</h2>
+      <% if (selected) { %><a class="button small" href="/accounts/<%= selected.id %>">Edit account</a><% } %>
     </div>
-    <div class="status-lane">
-      <span>Pending</span><span>In progress</span><span>Needs review</span><span>Upgraded</span>
-    </div>
+    <% if (selected) { %>
+      <div class="copy-grid">
+        <% [
+          ['legacy_login','Legacy login'], ['legacy_password','Legacy password'], ['otp_code','OTP code'], ['otp_secret','OTP secret/note'],
+          ['target_email','Target email'], ['email_password','Email password'], ['first_name','First name'], ['last_name','Last name'],
+          ['birth_date','Birth date'], ['birth_month','Birth month'], ['birth_day','Birth day'], ['birth_year','Birth year'],
+          ['jagex_email','Jagex email'], ['jagex_password','Jagex password'], ['jagex_name','Jagex name']
+        ].forEach(item => { %>
+          <button class="button small copy-api" data-url="/accounts/<%= selected.id %>/copy/<%= item[0] %>"><%= item[1] %></button>
+        <% }) %>
+      </div>
+    <% } else { %>
+      <p class="muted">Select an account to enable copy buttons.</p>
+    <% } %>
   </article>
+
   <article class="panel">
-    <h2>Proxy Health</h2>
-    <% if (!proxyCounts.length) { %><p class="muted">No proxies saved yet.</p><% } %>
-    <% proxyCounts.forEach(item => { %><p class="row-line"><span><%= item.status %></span><strong><%= item.count %></strong></p><% }) %>
+    <h2>Open Pages</h2>
+    <div class="copy-grid">
+      <a class="button" target="_blank" rel="noopener" href="<%= settings.email_signup_url || 'https://signup.live.com/' %>">Open email signup page</a>
+      <a class="button" target="_blank" rel="noopener" href="<%= settings.email_signin_url || 'https://outlook.live.com/' %>">Open email sign-in page</a>
+      <a class="button" target="_blank" rel="noopener" href="<%= settings.account_settings_url || 'https://account.jagex.com/' %>">Open account settings page</a>
+      <a class="button" target="_blank" rel="noopener" href="<%= settings.upgrade_url || 'https://account.jagex.com/' %>">Open upgrade page</a>
+    </div>
+    <p class="muted">Buttons only open pages. The app never types, submits, creates accounts, or bypasses checks.</p>
   </article>
 </section>
+
 <section class="panel">
   <div class="panel-head">
     <h2>Recent Safe Activity</h2>

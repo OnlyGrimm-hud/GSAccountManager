@@ -28,3 +28,23 @@ document.querySelectorAll('[data-countdown]').forEach(el => {
     else el.textContent = `${remaining}s`;
   }, 1000);
 });
+
+document.addEventListener('click', event => {
+  const button = event.target.closest('.reveal-secret');
+  if (!button) return;
+  const input = button.parentElement.querySelector('input');
+  if (!input) return;
+  input.type = input.type === 'password' ? 'text' : 'password';
+  button.textContent = input.type === 'password' ? 'Reveal' : 'Hide';
+});
+
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-generate-password]');
+  if (!button) return;
+  event.preventDefault();
+  const target = document.querySelector(button.dataset.generatePassword);
+  if (!target) return;
+  const response = await fetch('/generate/password', { credentials: 'same-origin' });
+  const data = await response.json();
+  target.value = data.value || '';
+});

@@ -1,5 +1,7 @@
 const crypto = require('crypto');
+const path = require('path');
 require('dotenv').config();
+const pkg = require('../package.json');
 
 function required(name) {
   const value = process.env[name];
@@ -28,9 +30,12 @@ module.exports = {
   sessionSecret: required('SESSION_SECRET'),
   adminUsername: required('ADMIN_USERNAME'),
   adminPassword: required('ADMIN_PASSWORD'),
+  adminPasswordHash: process.env.ADMIN_PASSWORD_HASH || '',
   nodeEnv: process.env.NODE_ENV || 'development',
   cookieSecure: process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production',
   autoMigrate: process.env.AUTO_MIGRATE !== 'false',
+  appVersion: pkg.version,
+  rootDirectory: process.env.RENDER_ROOT_DIRECTORY || path.basename(path.join(__dirname, '..')),
   discord: {
     clientId: process.env.DISCORD_CLIENT_ID || '',
     clientSecret: process.env.DISCORD_CLIENT_SECRET || '',

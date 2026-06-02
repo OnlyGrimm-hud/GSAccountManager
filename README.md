@@ -1,8 +1,8 @@
 # GS Account Manager
 
-GS Account Manager is a Render-ready, server-rendered MVP for secure account storage and manual workflow tracking.
+GS Account Manager is a Render-ready, server-rendered web app for secure account storage and manual workflow tracking.
 
-It is intentionally manual only. It does not automate third-party logins, submit forms, create external accounts, type into external websites, solve CAPTCHA, bypass checks, or route requests through stored proxies. Copy buttons and external links are provided for user-directed work.
+The app is intentionally manual-only. It stores encrypted account data, provides copy buttons, opens configured pages in new tabs, and tracks local progress. It does not automate third-party logins, submit forms, create external accounts, solve CAPTCHA, bypass security checks, or perform unattended browser actions.
 
 ## Stack
 
@@ -11,8 +11,53 @@ It is intentionally manual only. It does not automate third-party logins, submit
 - PostgreSQL with `pg`
 - `express-session` with PostgreSQL session storage
 - AES-256-GCM field encryption using `ENCRYPTION_KEY`
+- Helmet secure headers
+- Login rate limiting
+- CSRF protection for forms
 - Built-in TOTP generation for saved OTP secrets
-- Custom CSRF token for forms
+
+## Render Settings
+
+Use these exact settings for the GitHub repo `OnlyGrimm-hud/GSAccountManager`:
+
+- Root Directory: leave blank / repository root
+- Build Command: `npm install`
+- Start Command: `npm start`
+- Health Check Path: `/healthz`
+- Runtime: Node
+
+The app listens on `process.env.PORT`.
+
+## Required Environment Variables
+
+- `DATABASE_URL`: Render Postgres internal connection string.
+- `ENCRYPTION_KEY`: 32 random bytes encoded as base64, or a 64-character hex string.
+- `SESSION_SECRET`: long random session secret.
+- `ADMIN_USERNAME`: temporary local admin username.
+- `ADMIN_PASSWORD`: temporary local admin password.
+- `NODE_ENV=production`
+- `COOKIE_SECURE=true`
+- `AUTO_MIGRATE=true`
+
+Optional:
+
+- `ADMIN_PASSWORD_HASH`: optional `scrypt:salt:hexhash` admin password hash.
+- `APP_NAME=GS Account Manager`
+- `DISCORD_CLIENT_ID`
+- `DISCORD_CLIENT_SECRET`
+- `DISCORD_REDIRECT_URI`
+
+Generate an encryption key in PowerShell:
+
+```powershell
+$bytes = New-Object byte[] 32
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+[Convert]::ToBase64String($bytes)
+$rng.Dispose()
+```
+
+Do not change `ENCRYPTION_KEY` after storing real account data, or existing encrypted fields will no longer decrypt.
 
 ## Local Setup
 
@@ -26,119 +71,73 @@ It is intentionally manual only. It does not automate third-party logins, submit
 npm install
 ```
 
-6. Start the app:
-
-```bash
-npm start
-```
-
-The app listens on `process.env.PORT` and exposes `/healthz`.
-
-## Required Environment Variables
-
-- `DATABASE_URL`: PostgreSQL connection string.
-- `ENCRYPTION_KEY`: 32 random bytes encoded as base64 or 64-character hex.
-- `SESSION_SECRET`: long random string for session signing.
-- `ADMIN_USERNAME`: temporary local admin username.
-- `ADMIN_PASSWORD`: temporary local admin password.
-- `NODE_ENV`: use `production` on Render.
-- `COOKIE_SECURE`: use `true` on Render.
-- `AUTO_MIGRATE`: defaults to `true`.
-
-Generate an encryption key:
-
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-```
-
-## Render Setup
-
-1. Create a new Render PostgreSQL database.
-2. Copy its internal database URL.
-3. Create a Render Web Service from this repository.
-4. Use these service settings:
-
-- Runtime: Node
-- Build Command: `npm install`
-- Start Command: `npm start`
-- Health Check Path: `/healthz`
-- Environment: `NODE_ENV=production`
-- Add `DATABASE_URL` from Render Postgres.
-- Add `ENCRYPTION_KEY`, `SESSION_SECRET`, `ADMIN_USERNAME`, and `ADMIN_PASSWORD`.
-- Set `COOKIE_SECURE=true`.
-
-Do not deploy until you have generated real secrets and chosen a strong admin password.
-
-## TXT Import Formats
-
-One account per line:
-
-- `USERNAME:PASSWORD`
-- `USERNAME:PASSWORD:OTP_KEY`
-- `USERNAME:PASSWORD:BANK_PIN:OTP_KEY`
-- `USERNAME:PASSWORD:BANK_PIN:OTP_KEY:RECOVERY_EMAIL:RECOVERY_EMAIL_PASSWORD`
-
-Duplicate handling defaults to skipping duplicate usernames, with an update option on the import page.
-
-## TXT Export Formats
-
-- `USERNAME:PASSWORD`
-- `USERNAME:PASSWORD:OTP_KEY`
-- `USERNAME:PASSWORD:BANK_PIN:OTP_KEY`
-- `TARGET_EMAIL:JAGEX_PASSWORD`
-- `TARGET_EMAIL:JAGEX_PASSWORD:DISPLAY_NAME`
-
-Masked exports are the default. Full export requires explicit confirmation. Delete-after-export is review-only and never deletes automatically.
-
-## Database
-
-Schema lives in `db/init.sql`. The app runs it at startup by default when `AUTO_MIGRATE` is not `false`.
-
-Tables:
-
-- `accounts`
-- `proxies`
-- `activity_logs`
-- `settings`
-- session table created by `connect-pg-simple`
-
-## Smoke Test
+6. Run smoke checks:
 
 ```bash
 npm run smoke
 ```
 
-The smoke test checks import parsing and TOTP generation without connecting to a real database.
+7. Start the app:
 
-## Future Discord OAuth
+```bash
+npm start
+```
 
-Placeholders are included:
+## Database
 
-- `DISCORD_CLIENT_ID`
-- `DISCORD_CLIENT_SECRET`
-- `DISCORD_REDIRECT_URI`
+Schema and idempotent startup migrations live in `db/init.sql`. `AUTO_MIGRATE=true` runs the schema on startup.
 
-Future setup tasks:
+Existing MVP columns are preserved. The v1 migration adds:
 
-- Register a Discord application.
-- Add the Render callback URL to Discord OAuth redirects.
-- Add Passport or a small OAuth client flow.
-- Map Discord user IDs to admin access rules.
-- Replace or supplement the temporary local admin login.
+- `legacy_login`
+- `legacy_password_encrypted`
+- `email_password_encrypted`
+- `jagex_email_encrypted`
+- `jagex_name`
+- `first_name`
+- `last_name`
+- `birth_month`
+- `birth_day`
+- `birth_year`
+- `assigned_http_proxy_id`
+- `assigned_socks5_proxy_id`
+- `credential_status`
+- `upgrade_status`
+- `email_creation_status`
+- `exported_at`
+- `archived_at`
 
-## Future Cloudflare Custom Domain
+No database reset should be required for normal upgrades.
 
-For `gsaccountmanager.com`:
+## Import Formats
 
-1. Add the domain to Cloudflare.
-2. Point DNS to Render using Render's custom domain instructions.
-3. Enable HTTPS on Render.
-4. Keep Cloudflare SSL mode compatible with Render's certificate.
-5. Add security headers and a stricter CSP before wider use.
+Default delimiter is `:`.
+
+- `username:password`
+- `username:password:otp`
+- `username:password:bank_pin:otp`
+- `username:password:otp:notes`
+
+The import page shows valid rows, duplicate rows, and invalid rows before committing.
+
+## Export Formats
+
+- `legacy username:password`
+- `legacy username:password:otp`
+- `jagex email:password`
+- `jagex email:password:otp`
+- `full safe CSV export`
+
+After export, accounts can be kept, marked exported, or archived. Delete-after-export is review-only and never deletes automatically.
 
 ## Security Notes
 
-- Sensitive values are encrypted at rest.
-- Sensitive values are masked in lists by default.
-- Passwords, OTP secrets, generated OTP codes, proxy passwords, and encryption keys are not written to activity logs.
-- Keep `.env` private and never commit real secrets.
+- Sensitive account fields are encrypted at rest.
+- Sensitive values are masked by default in list views.
+- Copy actions log the field name only, never the copied value.
+- Passwords, OTP secrets, OTP codes, proxy passwords, and encryption keys are not written to logs.
+- `.env` is ignored and must not be committed.
+
+## Future Discord OAuth
+
+Discord placeholders are included for a later OAuth login upgrade. The current v1 keeps env-based admin login.

@@ -6,38 +6,77 @@
       <h2>Account Identity</h2>
       <a class="button small" href="/accounts">Back</a>
     </div>
-    <div class="form-grid two">
-      <label>Username<input name="username" value="<%= account.username || '' %>" required></label>
-      <label>Password<input name="password" type="password" value="<%= decrypted.password || '' %>" required></label>
-      <label>Bank PIN<input name="bank_pin" type="password" value="<%= decrypted.bank_pin || '' %>"></label>
-      <label>OTP Key<input name="otp_secret" type="password" value="<%= decrypted.otp_secret || '' %>"></label>
+    <div class="form-grid three">
+      <label>Username / Legacy Login<input name="legacy_login" value="<%= account.legacy_login || account.username || '' %>" required></label>
+      <label>Legacy Password
+        <span class="secret-control"><input name="legacy_password" type="password" value="<%= decrypted.legacy_password || decrypted.password || '' %>" required><button type="button" class="icon-button reveal-secret">Reveal</button></span>
+      </label>
+      <label>OTP Key
+        <span class="secret-control"><input name="otp_secret" type="password" value="<%= decrypted.otp_secret || '' %>"><button type="button" class="icon-button reveal-secret">Reveal</button></span>
+      </label>
+      <label>Bank PIN
+        <span class="secret-control"><input name="bank_pin" type="password" value="<%= decrypted.bank_pin || '' %>"><button type="button" class="icon-button reveal-secret">Reveal</button></span>
+      </label>
       <label>Display Name<input name="display_name" value="<%= account.display_name || '' %>"></label>
       <label>Account Type<select name="account_type"><% accountTypes.forEach(t => { %><option value="<%= t %>" <%= account.account_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select></label>
       <label>Category<input name="category" value="<%= account.category || '' %>"></label>
       <label>Country Code<input name="country_code" maxlength="2" value="<%= account.country_code || '' %>"></label>
       <label>Status<select name="status"><% accountStatuses.forEach(s => { %><option value="<%= s %>" <%= account.status === s ? 'selected' : '' %>><%= s %></option><% }) %></select></label>
-      <label>Assigned Proxy<select name="proxy_id"><option value="">No proxy</option><% proxies.forEach(proxy => { %><option value="<%= proxy.id %>" <%= account.proxy_id == proxy.id ? 'selected' : '' %>><%= proxy.host %>:<%= proxy.port %></option><% }) %></select></label>
+      <label>Credential Status<select name="credential_status"><% credentialStatuses.forEach(s => { %><option value="<%= s %>" <%= account.credential_status === s ? 'selected' : '' %>><%= s %></option><% }) %></select></label>
+      <label>Upgrade Status<select name="upgrade_status"><% workflowStatuses.forEach(s => { %><option value="<%= s %>" <%= account.upgrade_status === s ? 'selected' : '' %>><%= s %></option><% }) %></select></label>
+      <label>Email Creation Status<select name="email_creation_status"><% workflowStatuses.forEach(s => { %><option value="<%= s %>" <%= account.email_creation_status === s ? 'selected' : '' %>><%= s %></option><% }) %></select></label>
     </div>
     <label>Notes<textarea name="notes"><%= account.notes || '' %></textarea></label>
   </section>
+
   <section class="panel">
-    <h2>Recovery and Jagex Target</h2>
-    <div class="form-grid two">
-      <label>Recovery Email<input name="recovery_email" type="password" value="<%= decrypted.recovery_email || '' %>"></label>
-      <label>Recovery Email Password<input name="recovery_email_password" type="password" value="<%= decrypted.recovery_email_password || '' %>"></label>
-      <label>Target/Jagex Email<input name="target_email" type="password" value="<%= decrypted.target_email || '' %>"></label>
-      <label>Target/Jagex Password<input name="jagex_password" type="password" value="<%= decrypted.jagex_password || '' %>"></label>
-      <label>Target Email Password<input name="target_email_password" type="password" value="<%= decrypted.target_email_password || '' %>"></label>
+    <h2>Target / Jagex Info</h2>
+    <div class="form-grid three">
+      <label>Recovery Email
+        <span class="secret-control"><input name="recovery_email" type="password" value="<%= decrypted.recovery_email || '' %>"><button type="button" class="icon-button reveal-secret">Reveal</button></span>
+      </label>
+      <label>Recovery Email Password
+        <span class="secret-control"><input name="recovery_email_password" type="password" value="<%= decrypted.recovery_email_password || '' %>"><button type="button" class="icon-button reveal-secret">Reveal</button></span>
+      </label>
+      <label>Target Email
+        <span class="secret-control"><input name="target_email" type="password" value="<%= decrypted.target_email || '' %>"><button type="button" class="icon-button reveal-secret">Reveal</button></span>
+      </label>
+      <label>Email Password
+        <span class="secret-control"><input name="email_password" type="password" value="<%= decrypted.email_password || decrypted.target_email_password || '' %>"><button type="button" class="icon-button reveal-secret">Reveal</button></span>
+      </label>
+      <label>Jagex Email
+        <span class="secret-control"><input name="jagex_email" type="password" value="<%= decrypted.jagex_email || decrypted.target_email || '' %>"><button type="button" class="icon-button reveal-secret">Reveal</button></span>
+      </label>
+      <label>Jagex Password
+        <span class="secret-control"><input name="jagex_password" type="password" value="<%= decrypted.jagex_password || '' %>"><button type="button" class="icon-button reveal-secret">Reveal</button></span>
+      </label>
+      <label>Jagex Name<input name="jagex_name" value="<%= account.jagex_name || '' %>"></label>
+      <label>First Name<input name="first_name" value="<%= account.first_name || '' %>"></label>
+      <label>Last Name<input name="last_name" value="<%= account.last_name || '' %>"></label>
+      <label>Birth Month<input name="birth_month" type="number" min="1" max="12" value="<%= account.birth_month || '' %>"></label>
+      <label>Birth Day<input name="birth_day" type="number" min="1" max="31" value="<%= account.birth_day || '' %>"></label>
+      <label>Birth Year<input name="birth_year" type="number" min="1900" max="2100" value="<%= account.birth_year || '' %>"></label>
     </div>
-    <% if (account.legacy_archived_at) { %><p class="notice">Legacy info archived locally on <%= new Date(account.legacy_archived_at).toLocaleString() %>.</p><% } %>
   </section>
+
+  <section class="panel">
+    <h2>Proxy Assignment</h2>
+    <div class="form-grid two">
+      <label>HTTP Proxy<select name="assigned_http_proxy_id"><option value="">No HTTP proxy</option><% proxies.filter(p => p.proxy_type === 'HTTP').forEach(proxy => { %><option value="<%= proxy.id %>" <%= (account.assigned_http_proxy_id || account.proxy_id) == proxy.id ? 'selected' : '' %>><%= proxy.host %>:<%= proxy.port %> - <%= proxy.status %></option><% }) %></select></label>
+      <label>SOCKS5 Proxy<select name="assigned_socks5_proxy_id"><option value="">No SOCKS5 proxy</option><% proxies.filter(p => p.proxy_type === 'SOCKS5').forEach(proxy => { %><option value="<%= proxy.id %>" <%= account.assigned_socks5_proxy_id == proxy.id ? 'selected' : '' %>><%= proxy.host %>:<%= proxy.port %> - <%= proxy.status %></option><% }) %></select></label>
+    </div>
+    <% if (account.archived_at) { %><p class="notice">Archived locally on <%= new Date(account.archived_at).toLocaleString() %>.</p><% } %>
+    <% if (account.exported_at) { %><p class="notice">Marked exported on <%= new Date(account.exported_at).toLocaleString() %>.</p><% } %>
+  </section>
+
   <% if (account.id) { %>
     <section class="panel">
       <h2>Manual Copy</h2>
-      <div class="actions">
-        <button type="button" class="button copy-api" data-url="/accounts/<%= account.id %>/copy/username">Copy username</button>
-        <button type="button" class="button copy-api" data-url="/accounts/<%= account.id %>/copy/password">Copy password</button>
-        <% if (otp && !otp.error) { %><button type="button" class="button copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP code</button><span class="pill" data-countdown="<%= otp.secondsRemaining %>"><%= otp.secondsRemaining %>s</span><% } %>
+      <div class="copy-grid">
+        <% ['legacy_login','legacy_password','otp_code','otp_secret','target_email','email_password','jagex_email','jagex_password','jagex_name','first_name','last_name','birth_date'].forEach(field => { %>
+          <button type="button" class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/<%= field %>">Copy <%= field.replace(/_/g, ' ') %></button>
+        <% }) %>
+        <% if (otp && !otp.error) { %><span class="pill" data-countdown="<%= otp.secondsRemaining %>"><%= otp.secondsRemaining %>s</span><% } %>
         <% if (otp && otp.error) { %><span class="notice danger"><%= otp.error %></span><% } %>
       </div>
     </section>

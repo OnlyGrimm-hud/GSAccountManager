@@ -21,4 +21,22 @@ function oneOf(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
 }
 
-module.exports = { csrf, requireAuth, escapeText, oneOf };
+function safeEqual(a, b) {
+  const left = Buffer.from(String(a || ''));
+  const right = Buffer.from(String(b || ''));
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+}
+
+function verifyAdminPassword(candidate, config) {
+  if (config.adminPasswordHash) {
+    const [scheme, salt, key] = config.adminPasswordHash.split(':');
+    if (scheme === 'scrypt' && salt && key) {
+      const derived = crypto.scryptSync(String(candidate || ''), salt, Buffer.from(key, 'hex').length).toString('hex');
+      return safeEqual(derived, key);
+    }
+  }
+  return safeEqual(candidate, config.adminPassword);
+}
+
+module.exports = { csrf, requireAuth, escapeText, oneOf, safeEqual, verifyAdminPassword };
