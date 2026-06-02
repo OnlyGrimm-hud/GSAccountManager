@@ -1,0 +1,47 @@
+<%- include('partials/head') %>
+<section class="content-grid">
+  <form method="post" action="/imports/preview" class="panel form-grid">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <h2>TXT Import</h2>
+    <label>Account Type<select name="account_type"><% accountTypes.forEach(t => { %><option value="<%= t %>" <%= options.account_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select></label>
+    <label>Category<input name="category" value="<%= options.category || '' %>"></label>
+    <label>Country Code<input name="country_code" maxlength="2" value="<%= options.country_code || '' %>"></label>
+    <label>Default Status<select name="status"><% accountStatuses.forEach(s => { %><option value="<%= s %>" <%= options.status === s ? 'selected' : '' %>><%= s %></option><% }) %></select></label>
+    <label>Duplicates<select name="duplicate_mode"><option value="skip">Skip duplicate username</option><option value="update" <%= options.duplicate_mode === 'update' ? 'selected' : '' %>>Update duplicate</option></select></label>
+    <textarea name="accounts_text" rows="12"><%= options.accounts_text || '' %></textarea>
+    <button class="button">Preview import</button>
+  </form>
+  <form method="post" action="/exports/preview" class="panel form-grid">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <h2>TXT Export</h2>
+    <label>Account Type<select name="account_type"><% accountTypes.forEach(t => { %><option value="<%= t %>"><%= t %></option><% }) %></select></label>
+    <label>Format<select name="format">
+      <% ['USERNAME:PASSWORD','USERNAME:PASSWORD:OTP_KEY','USERNAME:PASSWORD:BANK_PIN:OTP_KEY','TARGET_EMAIL:JAGEX_PASSWORD','TARGET_EMAIL:JAGEX_PASSWORD:DISPLAY_NAME'].forEach(f => { %><option value="<%= f %>"><%= f %></option><% }) %>
+    </select></label>
+    <label class="check"><input type="checkbox" name="full_export" value="yes"> Full export confirmation</label>
+    <label class="check"><input type="checkbox" name="delete_after_export" value="yes"> Mark for delete-after-export review</label>
+    <button class="button">Prepare export</button>
+  </form>
+</section>
+<% if (preview) { %>
+  <section class="panel">
+    <div class="panel-head"><h2>Import Preview</h2></div>
+    <table><thead><tr><th>Line</th><th>Username</th><th>OTP</th><th>Recovery Email</th><th>Valid</th></tr></thead><tbody>
+      <% preview.forEach(row => { %><tr><td><%= row.line %></td><td><%= row.username %></td><td><%= row.otp_secret ? 'yes' : 'no' %></td><td><%= row.recovery_email ? 'yes' : 'no' %></td><td><%= row.valid ? 'yes' : 'no' %></td></tr><% }) %>
+    </tbody></table>
+    <form method="post" action="/imports/commit">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <% Object.keys(options).forEach(key => { %><input type="hidden" name="<%= key %>" value="<%= options[key] %>"><% }) %>
+      <button class="button primary">Confirm import</button>
+    </form>
+  </section>
+<% } %>
+<% if (exportRows) { %>
+  <section class="panel">
+    <h2>Export Preview</h2>
+    <% if (options.full_export !== 'yes') { %><p class="notice">Masked export. Check full export and submit again when you intentionally need secrets.</p><% } %>
+    <% if (options.delete_after_export === 'yes') { %><p class="notice danger">Delete-after-export was selected for review only. Nothing was deleted automatically.</p><% } %>
+    <textarea rows="14" readonly><%= exportRows.join('\n') %></textarea>
+  </section>
+<% } %>
+<%- include('partials/foot') %>
