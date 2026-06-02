@@ -1,0 +1,23 @@
+<%- include('partials/head') %>
+<section class="content-grid">
+  <form method="post" action="/settings" class="panel form-grid">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <h2>App Settings</h2>
+    <label>App Name<input name="app_name" value="<%= settings.app_name || appName %>"></label>
+    <label>Default Account Type<select name="default_account_type"><% accountTypes.forEach(t => { %><option value="<%= t %>" <%= settings.default_account_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select></label>
+    <label>Default Proxy Type<select name="default_proxy_type"><% proxyTypes.forEach(t => { %><option value="<%= t %>" <%= settings.default_proxy_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select></label>
+    <label>Max Accounts Per Proxy<input type="number" name="max_accounts_per_proxy" value="<%= settings.max_accounts_per_proxy || '5' %>"></label>
+    <label>Export Format Default<input name="export_format_default" value="<%= settings.export_format_default || 'USERNAME:PASSWORD' %>"></label>
+    <label>Mask Sensitive Values<select name="mask_sensitive_values"><option value="true" <%= settings.mask_sensitive_values === 'true' ? 'selected' : '' %>>true</option><option value="false" <%= settings.mask_sensitive_values === 'false' ? 'selected' : '' %>>false</option></select></label>
+    <button class="button primary">Save settings</button>
+  </form>
+  <section class="panel">
+    <h2>Render Checklist</h2>
+    <p class="row-line"><span>DATABASE_URL</span><strong>required</strong></p>
+    <p class="row-line"><span>ENCRYPTION_KEY</span><strong>required</strong></p>
+    <p class="row-line"><span>SESSION_SECRET</span><strong>required</strong></p>
+    <p class="row-line"><span>ADMIN_USERNAME / ADMIN_PASSWORD</span><strong>required</strong></p>
+    <p class="row-line"><span>Discord OAuth</span><strong>prepared</strong></p>
+  </section>
+</section>
+<%- include('partials/foot') %>
