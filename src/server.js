@@ -20,7 +20,13 @@ const {
   credentialStatuses,
   workflowStatuses,
   proxyTypes,
-  proxyStatuses
+  proxyStatuses,
+  userRoles,
+  subscriptionStatuses,
+  activeSubscriptionStatuses,
+  exportFormats,
+  workflowModes,
+  paymentMethods
 } = require('./app-constants');
 
 const app = express();
@@ -57,7 +63,14 @@ app.use(helmet({
 app.use(express.static(`${__dirname}/../public`));
 app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 app.use(express.json({ limit: '1mb' }));
-app.get('/healthz', (req, res) => res.status(200).send('OK'));
+app.get('/healthz', async (req, res) => {
+  try {
+    await db.query('SELECT 1');
+    res.status(200).type('text/plain').send('OK');
+  } catch (error) {
+    res.status(503).json({ ok: false, service: config.appName, database: 'unavailable' });
+  }
+});
 app.use(session({
   store: new PgSession({ pool: db.pool, createTableIfMissing: true }),
   name: 'gsam.sid',
@@ -81,6 +94,13 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
   skipSuccessfulRequests: true,
   message: 'Too many login attempts. Try again soon.'
+});
+const companionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many companion API requests.' }
 });
 
 app.get('/login', (req, res) => {
@@ -108,7 +128,7 @@ app.get('/auth/discord/callback', async (req, res, next) => {
     const profile = await discordAuth.fetchDiscordProfile(token.access_token);
     const user = await discordAuth.upsertDiscordUser(profile);
     setUserSession(req, user);
-    await activity.log(user.id, 'discord_login_success', 'user', user.id, `Discord login succeeded for ${user.username || user.discord_username}`);
+    await activity.log(user.id, 'login', 'user', user.id, `Discord login succeeded for ${user.username || user.discord_username}`, { provider: 'discord' });
     res.redirect('/');
   } catch (err) { next(err); }
 });
@@ -120,13 +140,306 @@ app.post('/login', loginLimiter, async (req, res, next) => {
     if (!ok) return res.status(401).render('login', { title: 'Login', error: 'Invalid admin username or password.' });
     const user = await discordAuth.upsertEmergencyAdminUser(config.adminUsername);
     setUserSession(req, user);
+    await activity.log(user.id, 'login', 'user', user.id, `Emergency admin login succeeded for ${user.username || user.discord_username}`, { provider: 'admin_fallback' });
     res.redirect('/');
+  } catch (err) { next(err); }
+});
+
+app.post('/api/companion/pair/complete', companionLimiter, async (req, res, next) => {
+  try {
+    const code = escapeText(req.body.code).toUpperCase();
+    const deviceName = escapeText(req.body.device_name || req.body.deviceName || 'GS Account Manager Companion');
+    if (!code) return res.status(400).json({ error: 'Pairing code is required.' });
+    const codeHash = hashPairingCode(code);
+    const pair = await db.query(
+      `SELECT id, user_id
+       FROM helper_pairing_codes
+       WHERE code_hash=$1 AND used_at IS NULL AND expires_at > NOW()
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [codeHash]
+    );
+    if (!pair.rows[0]) return res.status(404).json({ error: 'Pairing code is invalid or expired.' });
+    const token = crypto.randomBytes(32).toString('base64url');
+    const tokenHash = hashDeviceToken(token);
+    const result = await db.query(
+      `INSERT INTO companion_devices (user_id, device_name, device_token_hash, companion_version, status, last_seen_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'connected', NOW(), NOW())
+       RETURNING id, device_name, status, created_at`,
+      [pair.rows[0].user_id, deviceName, tokenHash, escapeText(req.body.companion_version || req.body.version)]
+    );
+    await db.query('UPDATE helper_pairing_codes SET used_at=NOW() WHERE id=$1', [pair.rows[0].id]);
+    await activity.log(pair.rows[0].user_id, 'companion_device_connected', 'companion_device', result.rows[0].id, `Companion device connected: ${deviceName}`);
+    await auditLog(null, pair.rows[0].user_id, 'companion_device_connected', 'companion_device', result.rows[0].id, 'Companion device connected');
+    res.json({ device: result.rows[0], token });
+  } catch (err) { next(err); }
+});
+
+app.post('/api/companion/heartbeat', companionLimiter, async (req, res, next) => {
+  try {
+    const device = await companionDeviceFromRequest(req);
+    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    await db.query(
+      `UPDATE companion_devices
+       SET status='connected', companion_version=COALESCE($1, companion_version), last_seen_at=NOW(), updated_at=NOW()
+       WHERE id=$2 AND user_id=$3`,
+      [escapeText(req.body.companion_version || req.body.version) || null, device.id, device.user_id]
+    );
+    res.json({ ok: true, user_id: device.user_id, device_id: device.id });
+  } catch (err) { next(err); }
+});
+
+app.post('/api/companion/browser/session', companionLimiter, async (req, res, next) => {
+  try {
+    const device = await companionDeviceFromRequest(req);
+    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    const accountId = req.body.selected_account_id ? Number(req.body.selected_account_id) : null;
+    const proxyId = req.body.selected_proxy_id ? Number(req.body.selected_proxy_id) : null;
+    if (accountId) await assertAccountOwnership(device.user_id, accountId);
+    if (proxyId) await assertProxyOwnership(device.user_id, proxyId);
+    const result = await db.query(
+      `INSERT INTO companion_sessions (user_id, companion_device_id, selected_account_id, selected_proxy_id, browser_status, current_url, current_domain, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       RETURNING id, browser_status, current_url, current_domain, created_at, updated_at`,
+      [
+        device.user_id,
+        device.id,
+        accountId,
+        proxyId,
+        oneOf(req.body.browser_status, ['idle', 'opening', 'running', 'paused', 'closed', 'error'], 'idle'),
+        escapeText(req.body.current_url),
+        escapeText(req.body.current_domain)
+      ]
+    );
+    res.json({ session: result.rows[0] });
+  } catch (err) { next(err); }
+});
+
+app.post('/api/companion/browser/fill', companionLimiter, async (req, res, next) => {
+  try {
+    const device = await companionDeviceFromRequest(req);
+    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    const accountId = req.body.account_id ? Number(req.body.account_id) : null;
+    if (accountId) await assertAccountOwnership(device.user_id, accountId);
+    await auditLog(device.user_id, device.user_id, 'companion_fill_event', 'account', accountId, 'Companion fill event recorded', {
+      field: escapeText(req.body.field),
+      mode: 'user_triggered_fill_only'
+    });
+    res.json({ ok: true, message: 'Fill event recorded. Final submissions must remain user-confirmed.' });
+  } catch (err) { next(err); }
+});
+
+app.post('/api/companion/status', companionLimiter, async (req, res, next) => {
+  try {
+    const device = await companionDeviceFromRequest(req);
+    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    const windows = Array.isArray(req.body.windows) ? req.body.windows.slice(0, 20) : [req.body];
+    for (const item of windows) {
+      await db.query(
+        `INSERT INTO companion_client_status (user_id, companion_device_id, process_name, window_title, running, metadata, last_seen_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+        [
+          device.user_id,
+          device.id,
+          escapeText(item.process_name || item.processName),
+          escapeText(item.window_title || item.windowTitle),
+          item.running !== false,
+          { source: 'companion', matched_account_hint: escapeText(item.matched_account_hint || item.matchedAccountHint) }
+        ]
+      );
+    }
+    res.json({ ok: true, count: windows.length });
+  } catch (err) { next(err); }
+});
+
+app.post('/api/companion/snapshot', companionLimiter, async (req, res, next) => {
+  try {
+    const device = await companionDeviceFromRequest(req);
+    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!device.allow_screenshots) return res.status(403).json({ error: 'Snapshots are disabled for this device.' });
+    const base64 = String(req.body.image_base64 || '').replace(/^data:image\/[a-z]+;base64,/i, '');
+    const image = base64 ? Buffer.from(base64, 'base64') : Buffer.alloc(0);
+    if (!image.length || image.length > 750 * 1024) return res.status(400).json({ error: 'Snapshot must be a PNG/JPEG under 750KB.' });
+    const result = await db.query(
+      `INSERT INTO live_snapshots (user_id, companion_device_id, window_title, content_type, image_data, image_size)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, created_at, image_size`,
+      [device.user_id, device.id, escapeText(req.body.window_title), escapeText(req.body.content_type || 'image/png'), image, image.length]
+    );
+    await activity.log(device.user_id, 'companion_screenshot_received', 'live_snapshot', result.rows[0].id, 'Companion snapshot received', { image_size: image.length });
+    await auditLog(device.user_id, device.user_id, 'companion_screenshot_received', 'live_snapshot', result.rows[0].id, 'Companion snapshot received', { image_size: image.length });
+    res.json({ snapshot: result.rows[0] });
   } catch (err) { next(err); }
 });
 
 app.use(requireAuth, requireUserRecord);
 
-app.post('/logout', requireAuth, (req, res) => req.session.destroy(() => res.redirect('/login')));
+app.post('/logout', requireAuth, async (req, res, next) => {
+  try {
+    await activity.log(req.currentUserId, 'logout', 'user', req.currentUserId, `Logout for ${req.currentUser && req.currentUser.username ? req.currentUser.username : 'user'}`);
+    req.session.destroy(() => res.redirect('/login'));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/locked', requireAuth, (req, res) => {
+  if (hasAppAccess(req.currentUserRecord)) return res.redirect('/');
+  res.status(403).render('locked', { title: 'Access Locked', lockedShell: true });
+});
+
+app.use(requireActiveSubscription);
+
+app.post('/api/companion/pair/start', companionLimiter, requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const code = generatePairingCode();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    await db.query(
+      `UPDATE helper_pairing_codes
+       SET expires_at=NOW()
+       WHERE user_id=$1 AND used_at IS NULL AND expires_at > NOW()`,
+      [userId]
+    );
+    await db.query(
+      `INSERT INTO helper_pairing_codes (user_id, code_hash, expires_at)
+       VALUES ($1, $2, $3)`,
+      [userId, hashPairingCode(code), expiresAt]
+    );
+    await activity.log(userId, 'companion_pairing_started', 'companion', null, 'Generated companion pairing code');
+    res.json({ code, expires_at: expiresAt.toISOString() });
+  } catch (err) { next(err); }
+});
+
+app.get('/api/companion/devices', requireAuth, async (req, res, next) => {
+  try {
+    const rows = await db.query(
+      `SELECT id, device_name, companion_version, status, allow_screenshots, last_seen_at, revoked_at, created_at, updated_at
+       FROM companion_devices
+       WHERE user_id=$1
+       ORDER BY updated_at DESC`,
+      [req.currentUserId]
+    );
+    res.json({ devices: rows.rows });
+  } catch (err) { next(err); }
+});
+
+app.post('/api/companion/devices/:id/revoke', requireAuth, async (req, res, next) => {
+  try {
+    const result = await db.query(
+      `UPDATE companion_devices
+       SET status='revoked', revoked_at=NOW(), updated_at=NOW()
+       WHERE id=$1 AND user_id=$2
+       RETURNING id, device_name`,
+      [req.params.id, req.currentUserId]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Companion device not found.' });
+    await activity.log(req.currentUserId, 'companion_device_revoked', 'companion_device', result.rows[0].id, `Revoked companion device ${result.rows[0].device_name || result.rows[0].id}`);
+    res.json({ ok: true, device: result.rows[0] });
+  } catch (err) { next(err); }
+});
+
+app.get('/admin', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const [userCounts, accountCounts, proxyCounts, companionCounts, auditRows] = await Promise.all([
+      db.query(`SELECT subscription_status, COUNT(*)::int count FROM users GROUP BY subscription_status`),
+      db.query(`SELECT COUNT(*)::int total FROM accounts`),
+      db.query(`SELECT COUNT(*)::int total FROM proxies`),
+      db.query(`SELECT status, COUNT(*)::int count FROM companion_devices GROUP BY status`),
+      db.query(`SELECT a.*, COALESCE(actor.global_name, actor.username, actor.discord_username) actor_name,
+                        COALESCE(target.global_name, target.username, target.discord_username) target_name
+                 FROM audit_logs a
+                 LEFT JOIN users actor ON actor.id = a.actor_user_id
+                 LEFT JOIN users target ON target.id = a.user_id
+                 ORDER BY a.created_at DESC
+                 LIMIT 25`)
+    ]);
+    res.render('admin/dashboard', {
+      title: 'Admin',
+      userCounts: userCounts.rows,
+      accountCount: accountCounts.rows[0].total,
+      proxyCount: proxyCounts.rows[0].total,
+      companionCounts: companionCounts.rows,
+      auditLogs: auditRows.rows
+    });
+  } catch (err) { next(err); }
+});
+
+app.get('/admin/users', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const users = await db.query(
+      `SELECT u.id, u.discord_id, u.username, u.global_name, u.avatar, u.email,
+              u.discord_username, u.discord_email, u.role, u.subscription_status,
+              u.created_at, u.updated_at, u.last_login_at, u.disabled_at,
+              COUNT(DISTINCT a.id)::int account_count,
+              COUNT(DISTINCT p.id)::int proxy_count
+       FROM users u
+       LEFT JOIN accounts a ON a.user_id = u.id
+       LEFT JOIN proxies p ON p.user_id = u.id
+       GROUP BY u.id
+       ORDER BY u.created_at DESC, u.id DESC`
+    );
+    res.render('admin/users', {
+      title: 'Admin Users',
+      users: users.rows,
+      userRoles,
+      subscriptionStatuses
+    });
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/users/:id', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const targetId = Number(req.params.id);
+    const role = oneOf(req.body.role, userRoles, 'user');
+    const subscriptionStatus = oneOf(req.body.subscription_status, subscriptionStatuses, 'inactive');
+    if (targetId === req.currentUserId && role !== 'admin') {
+      throw new Error('Admins cannot remove their own admin role.');
+    }
+    const before = await db.query('SELECT * FROM users WHERE id=$1', [targetId]);
+    if (!before.rows[0]) throw new Error('User not found.');
+    const disabledAtSql = subscriptionStatus === 'banned' ? 'NOW()' : 'NULL';
+    const disabledBySql = subscriptionStatus === 'banned' ? '$4' : 'NULL';
+    const result = await db.query(
+      `UPDATE users
+       SET role=$1,
+           subscription_status=$2,
+           disabled_at=${disabledAtSql},
+           disabled_by_user_id=${disabledBySql},
+           updated_at=NOW()
+       WHERE id=$3
+       RETURNING *`,
+      subscriptionStatus === 'banned'
+        ? [role, subscriptionStatus, targetId, req.currentUserId]
+        : [role, subscriptionStatus, targetId]
+    );
+    const user = result.rows[0];
+    await discordAuth.claimUnownedDataForAdmin(user);
+    if (before.rows[0].subscription_status !== user.subscription_status) {
+      await activity.log(user.id, 'subscription_status_changed_by_admin', 'user', user.id, `Subscription status changed to ${user.subscription_status}`, {
+        actor_user_id: req.currentUserId,
+        previous_subscription_status: before.rows[0].subscription_status,
+        subscription_status: user.subscription_status
+      });
+      await auditLog(req.currentUserId, user.id, 'admin_changed_subscription', 'user', user.id, `Subscription status changed to ${user.subscription_status}`, {
+        previous_subscription_status: before.rows[0].subscription_status,
+        subscription_status: user.subscription_status
+      });
+    }
+    if (before.rows[0].role !== user.role) {
+      await activity.log(user.id, 'role_changed_by_admin', 'user', user.id, `Role changed to ${user.role}`, {
+        actor_user_id: req.currentUserId,
+        previous_role: before.rows[0].role,
+        role: user.role
+      });
+      await auditLog(req.currentUserId, user.id, 'admin_changed_role', 'user', user.id, `Role changed to ${user.role}`, {
+        previous_role: before.rows[0].role,
+        role: user.role
+      });
+    }
+    res.redirect('/admin/users');
+  } catch (err) { next(err); }
+});
 
 app.get('/', requireAuth, async (req, res, next) => {
   try {
@@ -254,6 +567,21 @@ app.post('/accounts/:id', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+app.post('/accounts/:id/delete', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const result = await db.query(
+      `DELETE FROM accounts
+       WHERE id=$1 AND user_id=$2
+       RETURNING id, username, legacy_login`,
+      [req.params.id, userId]
+    );
+    if (!result.rows[0]) throw new Error('Account not found.');
+    await activity.log(userId, 'account_deleted', 'account', result.rows[0].id, `Deleted account ${result.rows[0].legacy_login || result.rows[0].username}`);
+    res.redirect('/accounts');
+  } catch (err) { next(err); }
+});
+
 app.get('/accounts/:id/copy/:field', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
@@ -377,8 +705,73 @@ app.post('/proxies/auto-assign', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-app.get('/imports-exports', requireAuth, (req, res) => {
-  res.render('imports-exports', { title: 'Imports / Exports', preview: null, exportRows: null, options: {}, stats: null });
+app.post('/proxies/:id', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const existing = await db.query('SELECT * FROM proxies WHERE id=$1 AND user_id=$2', [req.params.id, userId]);
+    if (!existing.rows[0]) throw new Error('Proxy not found.');
+    const host = escapeText(req.body.host);
+    const port = Number(req.body.port);
+    if (!host || !port) throw new Error('Proxy host and port are required.');
+    const fields = [
+      'proxy_type=$1',
+      'host=$2',
+      'port=$3',
+      'category=$4',
+      'country_code=$5',
+      'status=$6',
+      'notes=$7'
+    ];
+    const params = [
+      oneOf(req.body.proxy_type, proxyTypes, 'HTTP'),
+      host,
+      port,
+      escapeText(req.body.category) || null,
+      escapeText(req.body.country_code).toUpperCase() || null,
+      oneOf(req.body.status, proxyStatuses, 'untested'),
+      escapeText(req.body.notes) || null
+    ];
+    if (escapeText(req.body.username)) {
+      params.push(encrypt(req.body.username));
+      fields.push(`username_encrypted=$${params.length}`);
+    }
+    if (escapeText(req.body.password)) {
+      params.push(encrypt(req.body.password));
+      fields.push(`password_encrypted=$${params.length}`);
+    }
+    params.push(req.params.id, userId);
+    const idParam = params.length - 1;
+    const userParam = params.length;
+    await db.query(
+      `UPDATE proxies SET ${fields.join(', ')}, updated_at=NOW()
+       WHERE id=$${idParam} AND user_id=$${userParam}`,
+      params
+    );
+    await activity.log(userId, 'proxy_updated', 'proxy', req.params.id, `Updated proxy ${host}:${port}`);
+    res.redirect('/proxies');
+  } catch (err) { next(err); }
+});
+
+app.post('/proxies/:id/delete', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const result = await db.query(
+      `DELETE FROM proxies
+       WHERE id=$1 AND user_id=$2
+       RETURNING id, host, port`,
+      [req.params.id, userId]
+    );
+    if (!result.rows[0]) throw new Error('Proxy not found.');
+    await activity.log(userId, 'proxy_deleted', 'proxy', result.rows[0].id, `Deleted proxy ${result.rows[0].host}:${result.rows[0].port}`);
+    res.redirect('/proxies');
+  } catch (err) { next(err); }
+});
+
+app.get('/imports-exports', requireAuth, async (req, res, next) => {
+  try {
+    const settings = await getSettings(req.currentUserId);
+    res.render('imports-exports', { title: 'Imports / Exports', preview: null, exportRows: null, options: { format: settings.preferred_export_format }, stats: null, settings });
+  } catch (err) { next(err); }
 });
 
 app.post('/imports/preview', requireAuth, upload.single('accounts_file'), async (req, res, next) => {
@@ -388,7 +781,8 @@ app.post('/imports/preview', requireAuth, upload.single('accounts_file'), async 
     const preview = parseAccountImport(text, req.body.delimiter || ':');
     await markDuplicates(userId, preview);
     const stats = previewStats(preview);
-    res.render('imports-exports', { title: 'Imports / Exports', preview, exportRows: null, options: { ...req.body, accounts_text: text }, stats });
+    await recordImportExportRun(userId, 'import_preview', stats.valid, null, { duplicate: stats.duplicate, invalid: stats.invalid });
+    res.render('imports-exports', { title: 'Imports / Exports', preview, exportRows: null, options: { ...req.body, accounts_text: text }, stats, settings: await getSettings(userId) });
   } catch (err) { next(err); }
 });
 
@@ -404,6 +798,7 @@ app.post('/imports/commit', requireAuth, async (req, res, next) => {
       else await db.query(accountInsertSql('ON CONFLICT (user_id, username) DO NOTHING'), accountParams(account, userId));
       imported += 1;
     }
+    await recordImportExportRun(userId, 'import_commit', imported, null, { duplicate_mode: req.body.duplicate_mode || 'skip' });
     await activity.log(userId, 'accounts_imported', 'account', null, `Imported ${imported} account line(s)`, { duplicate_mode: req.body.duplicate_mode || 'skip' });
     res.redirect('/accounts');
   } catch (err) { next(err); }
@@ -412,10 +807,12 @@ app.post('/imports/commit', requireAuth, async (req, res, next) => {
 app.post('/exports/preview', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
+    const format = oneOf(req.body.format, exportFormats, 'legacy_user_pass');
     const rows = await exportRows(userId, req.body);
     if (req.body.confirm_export_action === 'yes') await applyExportAction(userId, req.body);
-    await activity.log(userId, 'accounts_export_previewed', 'account', null, `Prepared ${rows.length} account(s) for export`, { format: req.body.format, export_action: req.body.export_action || 'keep' });
-    res.render('imports-exports', { title: 'Imports / Exports', preview: null, exportRows: rows, options: req.body, stats: null });
+    await recordImportExportRun(userId, 'export_preview', rows.length, format, { account_type: req.body.account_type, export_action: req.body.export_action || 'keep' });
+    await activity.log(userId, 'account_exported', 'account', null, `Prepared ${rows.length} account(s) for export`, { format, export_action: req.body.export_action || 'keep' });
+    res.render('imports-exports', { title: 'Imports / Exports', preview: null, exportRows: rows, options: req.body, stats: null, settings: await getSettings(userId) });
   } catch (err) { next(err); }
 });
 
@@ -429,7 +826,7 @@ app.get('/local-helper', requireAuth, async (req, res, next) => {
     const pairingCode = req.session.helperPairingCode || null;
     req.session.helperPairingCode = null;
     res.render('local-helper', {
-      title: 'Local Helper',
+      title: 'Companion',
       helper,
       settings,
       pairingCode,
@@ -437,6 +834,8 @@ app.get('/local-helper', requireAuth, async (req, res, next) => {
     });
   } catch (err) { next(err); }
 });
+
+app.get('/companion', requireAuth, (req, res) => res.redirect('/local-helper'));
 
 app.post('/local-helper/pairing-code', requireAuth, async (req, res, next) => {
   try {
@@ -455,16 +854,26 @@ app.post('/local-helper/pairing-code', requireAuth, async (req, res, next) => {
       [userId, hashPairingCode(code), expiresAt]
     );
     req.session.helperPairingCode = { code, expiresAt: expiresAt.toISOString() };
-    await activity.log(userId, 'helper_pairing_code_created', 'helper', null, 'Generated a short-lived Local Helper pairing code');
+    await activity.log(userId, 'companion_pairing_code_created', 'companion', null, 'Generated a short-lived Companion pairing code');
     res.redirect('/local-helper');
   } catch (err) { next(err); }
 });
 
 app.get('/downloads/helper/windows', requireAuth, (req, res) => {
   res.status(404).render('helper-download', {
-    title: 'GS Local Helper Download',
+    title: 'GS Account Manager Companion Download',
     download: helperDownloadMetadata()
   });
+});
+
+app.get('/downloads', requireAuth, async (req, res, next) => {
+  try {
+    res.render('downloads', {
+      title: 'Downloads',
+      download: helperDownloadMetadata(),
+      companionName: 'GS Account Manager Companion'
+    });
+  } catch (err) { next(err); }
 });
 
 app.get('/settings', requireAuth, async (req, res, next) => {
@@ -481,19 +890,25 @@ app.post('/settings', requireAuth, async (req, res, next) => {
     const allowed = [
       'app_name', 'default_account_type', 'default_proxy_type', 'default_email_provider',
       'email_signup_url', 'email_signin_url', 'account_settings_url', 'upgrade_url',
-      'password_length', 'max_accounts_per_proxy', 'export_format_default',
+      'password_length', 'max_accounts_per_proxy', 'preferred_export_format', 'export_format_default',
       'export_behavior_default', 'mask_sensitive_values', 'otp_refresh_interval',
       'require_helper_for_proxy_actions', 'allow_website_only_browser_open',
       'warn_before_opening_without_helper', 'require_confirmation_before_direct_open',
-      'show_proxy_mode_before_open', 'enable_assisted_fill_buttons', 'theme_name'
+      'show_proxy_mode_before_open', 'enable_assisted_fill_buttons', 'theme_name', 'workflow_mode'
+      , 'dense_table_mode', 'screenshot_interval_seconds',
+      'payment_method_ltc_enabled', 'payment_method_btc_enabled', 'payment_method_eth_enabled',
+      'manual_admin_activation_enabled'
     ];
     for (const key of allowed) {
       if (Object.prototype.hasOwnProperty.call(req.body, key)) {
         await upsertSetting(userId, key, escapeText(req.body[key]));
       }
     }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'preferred_export_format')) {
+      await upsertSetting(userId, 'export_format_default', escapeText(req.body.preferred_export_format));
+    }
     await upsertSetting(userId, 'app_version', config.appVersion);
-    await activity.log(userId, 'settings_updated', 'settings', null, 'Updated application settings');
+    await activity.log(userId, 'settings_changed', 'settings', null, 'Updated application settings');
     res.redirect('/settings');
   } catch (err) { next(err); }
 });
@@ -501,23 +916,38 @@ app.post('/settings', requireAuth, async (req, res, next) => {
 app.get('/logs', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
+    const admin = isAdminUser(req.currentUserRecord);
     const filters = { q: escapeText(req.query.q), action: escapeText(req.query.action) };
-    const clauses = ['user_id = $1'];
-    const params = [userId];
+    const clauses = [];
+    const params = [];
+    if (!admin) {
+      params.push(userId);
+      clauses.push(`l.user_id = $${params.length}`);
+    }
     if (filters.q) {
       params.push(`%${filters.q}%`);
-      clauses.push(`(action ILIKE $${params.length} OR message ILIKE $${params.length})`);
+      clauses.push(`(l.action ILIKE $${params.length} OR l.message ILIKE $${params.length})`);
     }
     if (filters.action) {
       params.push(filters.action);
-      clauses.push(`action = $${params.length}`);
+      clauses.push(`l.action = $${params.length}`);
     }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const [rows, actions] = await Promise.all([
-      db.query(`SELECT * FROM activity_logs ${where} ORDER BY created_at DESC LIMIT 300`, params),
-      db.query(`SELECT DISTINCT action FROM activity_logs WHERE user_id=$1 ORDER BY action`, [userId])
+      db.query(
+        `SELECT l.*, COALESCE(u.global_name, u.username, u.discord_username, 'System') log_username
+         FROM activity_logs l
+         LEFT JOIN users u ON u.id = l.user_id
+         ${where}
+         ORDER BY l.created_at DESC
+         LIMIT 300`,
+        params
+      ),
+      admin
+        ? db.query(`SELECT DISTINCT action FROM activity_logs ORDER BY action`)
+        : db.query(`SELECT DISTINCT action FROM activity_logs WHERE user_id=$1 ORDER BY action`, [userId])
     ]);
-    res.render('logs', { title: 'Logs', logs: rows.rows, actions: actions.rows.map(row => row.action), filters });
+    res.render('logs', { title: 'Logs', logs: rows.rows, actions: actions.rows.map(row => row.action), filters, admin });
   } catch (err) { next(err); }
 });
 
@@ -537,7 +967,15 @@ const defaultSettings = {
   upgrade_url: 'https://account.jagex.com/',
   password_length: '9',
   max_accounts_per_proxy: '5',
+  preferred_export_format: 'legacy_user_pass',
   export_format_default: 'legacy_user_pass',
+  workflow_mode: 'manual',
+  dense_table_mode: 'false',
+  screenshot_interval_seconds: '30',
+  payment_method_ltc_enabled: 'false',
+  payment_method_btc_enabled: 'false',
+  payment_method_eth_enabled: 'false',
+  manual_admin_activation_enabled: 'true',
   export_behavior_default: 'keep',
   mask_sensitive_values: 'true',
   otp_refresh_interval: '30',
@@ -567,6 +1005,12 @@ function attachCurrentUser(req, res, next) {
   res.locals.workflowStatuses = workflowStatuses;
   res.locals.proxyTypes = proxyTypes;
   res.locals.proxyStatuses = proxyStatuses;
+  res.locals.userRoles = userRoles;
+  res.locals.subscriptionStatuses = subscriptionStatuses;
+  res.locals.exportFormats = exportFormats;
+  res.locals.workflowModes = workflowModes;
+  res.locals.paymentMethods = paymentMethods;
+  res.locals.isAdmin = req.currentUser && req.currentUser.role === 'admin';
   next();
 }
 
@@ -583,10 +1027,29 @@ async function requireUserRecord(req, res, next) {
     req.session.user = req.currentUser;
     req.session.discordId = user.discord_id;
     res.locals.user = req.currentUser;
+    res.locals.isAdmin = isAdminUser(user);
     next();
   } catch (error) {
     next(error);
   }
+}
+
+function isAdminUser(user) {
+  return Boolean(user && user.role === 'admin');
+}
+
+function hasAppAccess(user) {
+  return isAdminUser(user) || activeSubscriptionStatuses.includes(user && user.subscription_status);
+}
+
+function requireActiveSubscription(req, res, next) {
+  if (hasAppAccess(req.currentUserRecord)) return next();
+  return res.redirect('/locked');
+}
+
+function requireAdmin(req, res, next) {
+  if (isAdminUser(req.currentUserRecord)) return next();
+  return res.status(403).render('error', { title: 'Admin only', message: 'This page is only available to admins.' });
 }
 
 function helperDownloadMetadata() {
@@ -602,9 +1065,9 @@ function helperDownloadMetadata() {
 function proxyMode(account, helper, settings) {
   const hasProxy = Boolean(account && account.proxy_host);
   return {
-    browserMode: helper && helper.connected ? 'Local Helper mode' : 'Website-only mode',
+    browserMode: helper && helper.connected ? 'Companion mode' : 'Website-only mode',
     modeDescription: helper && helper.connected
-      ? 'Local Helper mode: opens Chrome through selected proxy when available.'
+      ? 'Companion mode: opens controlled Chrome through selected proxy when available.'
       : 'Website-only mode: opens in your current browser. No proxy control.',
     helperConnected: helper && helper.connected ? 'yes' : 'no',
     proxyType: hasProxy ? account.proxy_type || 'HTTP' : 'Direct',
@@ -628,8 +1091,8 @@ function maskEndpoint(host) {
 async function helperStatus(userId) {
   const [devices, activePairing, commands] = await Promise.all([
     db.query(
-      `SELECT id, device_name, helper_version, status, last_seen_at, created_at, updated_at
-       FROM helper_devices
+      `SELECT id, device_name, companion_version AS helper_version, status, last_seen_at, created_at, updated_at
+       FROM companion_devices
        WHERE user_id=$1 AND status <> 'revoked'
        ORDER BY
          CASE WHEN status='connected' THEN 0 ELSE 1 END,
@@ -684,6 +1147,36 @@ function hashPairingCode(code) {
     .digest('hex');
 }
 
+function hashDeviceToken(token) {
+  return crypto
+    .createHash('sha256')
+    .update(`${config.sessionSecret}:companion:${String(token || '').trim()}`)
+    .digest('hex');
+}
+
+async function companionDeviceFromRequest(req) {
+  const auth = String(req.get('authorization') || '');
+  const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : escapeText(req.body.device_token || req.query.device_token);
+  if (!token) return null;
+  const result = await db.query(
+    `SELECT id, user_id, device_name, companion_version, status, allow_screenshots
+     FROM companion_devices
+     WHERE device_token_hash=$1 AND status <> 'revoked' AND revoked_at IS NULL`,
+    [hashDeviceToken(token)]
+  );
+  return result.rows[0] || null;
+}
+
+async function assertAccountOwnership(userId, accountId) {
+  const result = await db.query('SELECT id FROM accounts WHERE id=$1 AND user_id=$2', [accountId, userId]);
+  if (!result.rows[0]) throw new Error('Account not found for this user.');
+}
+
+async function assertProxyOwnership(userId, proxyId) {
+  const result = await db.query('SELECT id FROM proxies WHERE id=$1 AND user_id=$2', [proxyId, userId]);
+  if (!result.rows[0]) throw new Error('Proxy not found for this user.');
+}
+
 function setUserSession(req, user) {
   req.session.authenticated = true;
   req.session.userId = user.id;
@@ -704,7 +1197,11 @@ async function passwordLength(userId) {
 
 async function getSettings(userId) {
   const rows = await db.query('SELECT key, value FROM settings WHERE user_id=$1 ORDER BY key', [userId]);
-  return { ...defaultSettings, ...Object.fromEntries(rows.rows.map(row => [row.key, row.value])) };
+  const settings = { ...defaultSettings, ...Object.fromEntries(rows.rows.map(row => [row.key, row.value])) };
+  settings.preferred_export_format = settings.preferred_export_format || settings.export_format_default || defaultSettings.preferred_export_format;
+  settings.export_format_default = settings.export_format_default || settings.preferred_export_format;
+  settings.workflow_mode = settings.workflow_mode || defaultSettings.workflow_mode;
+  return settings;
 }
 
 async function upsertSetting(userId, key, value) {
@@ -715,10 +1212,48 @@ async function upsertSetting(userId, key, value) {
   );
 }
 
+async function recordImportExportRun(userId, runType, itemCount, format, metadata = {}) {
+  await db.query(
+    `INSERT INTO import_export_runs (user_id, run_type, item_count, format, metadata)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [userId, runType, Number(itemCount || 0), format || null, metadata]
+  );
+  if (runType.startsWith('import')) {
+    await db.query(
+      `INSERT INTO import_logs (user_id, item_count, format, metadata)
+       VALUES ($1, $2, $3, $4)`,
+      [userId, Number(itemCount || 0), format || null, metadata]
+    );
+  }
+  if (runType.startsWith('export')) {
+    await db.query(
+      `INSERT INTO export_logs (user_id, item_count, format, archived_after_export, deleted_after_export, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        userId,
+        Number(itemCount || 0),
+        format || null,
+        metadata.export_action === 'archive',
+        metadata.export_action === 'delete',
+        metadata
+      ]
+    );
+  }
+}
+
+async function auditLog(actorUserId, userId, action, entityType, entityId, message, metadata = {}) {
+  await db.query(
+    `INSERT INTO audit_logs (actor_user_id, user_id, action, entity_type, entity_id, message, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [actorUserId || null, userId || null, action, entityType || null, entityId || null, message || null, metadata]
+  );
+}
+
 function accountFromBody(body, existing = {}) {
   const keep = value => value === undefined ? '' : escapeText(value);
   const legacyLogin = keep(body.legacy_login || body.username);
   const jagexEmail = keep(body.jagex_email || body.target_email);
+  const targetEmail = keep(body.target_email) || jagexEmail;
   const username = legacyLogin || jagexEmail;
   const legacyPassword = keep(body.legacy_password || body.password) || existing.legacy_password || existing.password || keep(body.jagex_password) || existing.jagex_password || '';
   const emailPassword = keep(body.email_password || body.target_email_password);
@@ -736,7 +1271,7 @@ function accountFromBody(body, existing = {}) {
     notes: keep(body.notes),
     recovery_email: keep(body.recovery_email),
     recovery_email_password: keep(body.recovery_email_password),
-    target_email: keep(body.target_email),
+    target_email: targetEmail,
     target_email_password: emailPassword,
     email_password: emailPassword,
     jagex_email: jagexEmail,
@@ -899,11 +1434,18 @@ function previewStats(rows) {
 
 async function exportRows(userId, options) {
   const type = oneOf(options.account_type, accountTypes, 'legacy');
+  const format = oneOf(options.format, exportFormats, 'legacy_user_pass');
+  const selectedIds = selectedAccountIds(options);
+  const params = [userId, type];
+  const selectedClause = selectedIds.length ? `AND a.id = ANY($3)` : '';
+  if (selectedIds.length) params.push(selectedIds);
   const result = await db.query(
     `SELECT a.*, p.host proxy_host, p.port proxy_port
      FROM accounts a LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id) AND p.user_id = a.user_id
      WHERE a.user_id=$1 AND a.account_type=$2 AND a.archived_at IS NULL
-     ORDER BY a.username`, [userId, type]
+       ${selectedClause}
+     ORDER BY a.username`,
+    params
   );
   return result.rows.map(account => {
     const d = {
@@ -912,7 +1454,7 @@ async function exportRows(userId, options) {
       jagex_email: decrypt(account.jagex_email_encrypted) || decrypt(account.target_email_encrypted),
       jagex_password: decrypt(account.jagex_password_encrypted)
     };
-    switch (options.format) {
+    switch (format) {
       case 'legacy_user_pass_otp':
         return `${account.legacy_login || account.username}:${d.legacy_password}:${d.otp_secret}`;
       case 'jagex_email_pass':
@@ -935,12 +1477,16 @@ async function exportRows(userId, options) {
 async function applyExportAction(userId, options) {
   const type = oneOf(options.account_type, accountTypes, 'legacy');
   const action = options.export_action || 'keep';
+  const selectedIds = selectedAccountIds(options);
+  const params = [userId, type];
+  const selectedClause = selectedIds.length ? `AND id = ANY($3)` : '';
+  if (selectedIds.length) params.push(selectedIds);
   if (action === 'mark_exported') {
-    await db.query(`UPDATE accounts SET status='exported', exported_at=NOW(), updated_at=NOW() WHERE user_id=$1 AND account_type=$2 AND archived_at IS NULL`, [userId, type]);
+    await db.query(`UPDATE accounts SET status='exported', exported_at=NOW(), updated_at=NOW() WHERE user_id=$1 AND account_type=$2 AND archived_at IS NULL ${selectedClause}`, params);
     await activity.log(userId, 'accounts_marked_exported', 'account', null, `Marked ${type} accounts exported`);
   }
   if (action === 'archive') {
-    await db.query(`UPDATE accounts SET status='archived', archived_at=NOW(), updated_at=NOW() WHERE user_id=$1 AND account_type=$2 AND archived_at IS NULL`, [userId, type]);
+    await db.query(`UPDATE accounts SET status='archived', archived_at=NOW(), updated_at=NOW() WHERE user_id=$1 AND account_type=$2 AND archived_at IS NULL ${selectedClause}`, params);
     await activity.log(userId, 'accounts_archived_after_export', 'account', null, `Archived ${type} accounts after export`);
   }
   if (action === 'delete') {
@@ -960,6 +1506,12 @@ async function enforceProxyOwnership(userId, account) {
 
 function csvLine(values) {
   return values.map(value => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',');
+}
+
+function selectedAccountIds(options) {
+  const raw = options.account_ids || options.selected_account_ids || [];
+  const values = Array.isArray(raw) ? raw : String(raw).split(',');
+  return [...new Set(values.map(value => Number(value)).filter(value => Number.isInteger(value) && value > 0))];
 }
 
 function workflowStep(account) {
@@ -995,4 +1547,15 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, parseAccountImport };
+module.exports = {
+  app,
+  parseAccountImport,
+  testInternals: {
+    hasAppAccess,
+    isAdminUser,
+    requireActiveSubscription,
+    requireAdmin,
+    loadAccount,
+    getSettings
+  }
+};

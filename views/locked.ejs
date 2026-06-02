@@ -1,0 +1,13 @@
+<%- include('partials/head') %>
+<section class="panel locked-panel">
+  <div class="login-brand"><span>GS</span><strong>GS Account Manager</strong></div>
+  <h2>GS Account Manager is currently in private build mode.</h2>
+  <p class="muted">This will be a subscription-based account manager.</p>
+  <p class="muted">Your Discord account is connected, but access has not been activated yet.</p>
+  <p class="muted">Access can be activated by an admin. Planned payment methods: LTC, BTC, ETH, and manual admin activation.</p>
+  <form method="post" action="/logout">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <button class="button">Logout</button>
+  </form>
+</section>
+<%- include('partials/foot') %>

@@ -29,13 +29,13 @@
     <div class="panel-head">
       <div>
         <p class="eyebrow">Browser Mode</p>
-        <h2><%= helper.connected ? 'Open with Local Helper' : 'Open in this browser' %></h2>
+        <h2><%= helper.connected ? 'Open with Companion' : 'Open in this browser' %></h2>
         <p class="muted"><%= helper.connected ? 'Uses assigned proxy if selected.' : 'No proxy control from website.' %></p>
       </div>
-      <a class="button small" href="/local-helper">Local Helper</a>
+      <a class="button small" href="/companion">Companion</a>
     </div>
     <% if (!helper.connected && settings.warn_before_opening_without_helper === 'true') { %>
-      <p class="notice">To use Chrome with proxies, install and connect GS Local Helper. Website-only opens use your normal browser session.</p>
+      <p class="notice">To use Chrome with proxies, install and connect GS Account Manager Companion. Website-only opens use your normal browser session.</p>
     <% } %>
     <% if (settings.show_proxy_mode_before_open !== 'false') { %>
       <div class="proxy-mode-grid">
@@ -64,9 +64,9 @@
         <h2><%= step %></h2>
         <p class="muted"><%= index === 0 ? 'Confirm saved fields, proxy assignment, and OTP availability.' : 'Use copied values manually in external pages only when you choose to.' %></p>
         <div class="actions">
-          <% if (index === 1) { %><a class="button small" target="_blank" rel="noopener" href="<%= settings.email_signup_url || 'https://signup.live.com/' %>"><%= helper.connected ? 'Open with Local Helper' : 'Open in this browser' %></a><% } %>
-          <% if (index === 2) { %><a class="button small" target="_blank" rel="noopener" href="<%= settings.email_signin_url || 'https://outlook.live.com/' %>"><%= helper.connected ? 'Open with Local Helper' : 'Open in this browser' %></a><% } %>
-          <% if (index === 3) { %><a class="button small" target="_blank" rel="noopener" href="<%= settings.upgrade_url || 'https://account.jagex.com/' %>"><%= helper.connected ? 'Open with Local Helper' : 'Open in this browser' %></a><% } %>
+          <% if (index === 1) { %><a class="button small" target="_blank" rel="noopener" href="<%= settings.email_signup_url || 'https://signup.live.com/' %>"><%= helper.connected ? 'Open with Companion' : 'Open in this browser' %></a><% } %>
+          <% if (index === 2) { %><a class="button small" target="_blank" rel="noopener" href="<%= settings.email_signin_url || 'https://outlook.live.com/' %>"><%= helper.connected ? 'Open with Companion' : 'Open in this browser' %></a><% } %>
+          <% if (index === 3) { %><a class="button small" target="_blank" rel="noopener" href="<%= settings.upgrade_url || 'https://account.jagex.com/' %>"><%= helper.connected ? 'Open with Companion' : 'Open in this browser' %></a><% } %>
         </div>
       </article>
     <% }) %>

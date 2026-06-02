@@ -9,8 +9,8 @@
     <button class="button">Filter</button>
   </form>
   <table>
-    <thead><tr><th>Time</th><th>Action</th><th>Entity</th><th>Message</th></tr></thead>
-    <tbody><% logs.forEach(log => { %><tr><td><%= new Date(log.created_at).toLocaleString() %></td><td><%= log.action %></td><td><%= log.entity_type || '' %> <%= log.entity_id || '' %></td><td><%= log.message || '' %></td></tr><% }) %></tbody>
+    <thead><tr><th>Time</th><% if (admin) { %><th>User</th><% } %><th>Action</th><th>Entity</th><th>Message</th></tr></thead>
+    <tbody><% logs.forEach(log => { %><tr><td><%= new Date(log.created_at).toLocaleString() %></td><% if (admin) { %><td><%= log.log_username || 'System' %></td><% } %><td><%= log.action %></td><td><%= log.entity_type || '' %> <%= log.entity_id || '' %></td><td><%= log.message || '' %></td></tr><% }) %></tbody>
   </table>
 </section>
 <%- include('partials/foot') %>

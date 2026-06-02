@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GS Account Manager Companion</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="logo">GS</div>
+      <div>
+        <p class="eyebrow">Local Companion</p>
+        <h1>GS Account Manager Companion</h1>
+        <p>Pair this app with your Discord-authenticated GS Account Manager workspace.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Pair Device</h2>
+      <label>Website URL <input id="baseUrl" value="https://gsaccountmanager.com"></label>
+      <label>Pairing Code <input id="pairingCode" placeholder="GS-XXXXXXXX"></label>
+      <button id="pairButton">Pair Companion</button>
+      <pre id="output">Not paired.</pre>
+    </section>
+
+    <section class="panel">
+      <h2>Safety Boundaries</h2>
+      <ul>
+        <li>Does not bypass CAPTCHA, MFA, Cloudflare, or security checks.</li>
+        <li>Does not hide automation or fake human behavior.</li>
+        <li>Does not auto-submit sensitive forms.</li>
+        <li>Field filling must be triggered by a user click.</li>
+      </ul>
+    </section>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>

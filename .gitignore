@@ -1,4 +1,6 @@
 node_modules/
+companion/dist/
+companion/out/
 .env
 npm-debug.log*
 *.log

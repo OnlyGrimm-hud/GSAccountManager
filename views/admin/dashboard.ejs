@@ -1,0 +1,51 @@
+<%- include('../partials/head') %>
+<section class="metric-grid">
+  <% const usersByStatus = Object.fromEntries(userCounts.map(row => [row.subscription_status, row.count])); %>
+  <article class="metric"><span>Total accounts</span><strong><%= accountCount %></strong></article>
+  <article class="metric"><span>Total proxies</span><strong><%= proxyCount %></strong></article>
+  <article class="metric"><span>Active users</span><strong><%= usersByStatus.active || 0 %></strong></article>
+  <article class="metric"><span>Inactive users</span><strong><%= usersByStatus.inactive || 0 %></strong></article>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Admin</p>
+        <h2>User Management</h2>
+      </div>
+      <a class="button primary" href="/admin/users">Open Users</a>
+    </div>
+    <p class="muted">Change roles, activate subscriptions, or ban users. Admins do not see decrypted user secrets here.</p>
+  </article>
+  <article class="panel">
+    <p class="eyebrow">Companion</p>
+    <h2>Device Status</h2>
+    <% const companionMap = Object.fromEntries(companionCounts.map(row => [row.status, row.count])); %>
+    <p class="row-line"><span>Connected</span><strong><%= companionMap.connected || 0 %></strong></p>
+    <p class="row-line"><span>Disconnected</span><strong><%= companionMap.disconnected || 0 %></strong></p>
+    <p class="row-line"><span>Revoked</span><strong><%= companionMap.revoked || 0 %></strong></p>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Recent Audit Logs</h2>
+    <a class="button small" href="/logs">Activity Logs</a>
+  </div>
+  <table>
+    <thead><tr><th>Time</th><th>Actor</th><th>User</th><th>Action</th><th>Message</th></tr></thead>
+    <tbody>
+      <% auditLogs.forEach(log => { %>
+        <tr>
+          <td><%= new Date(log.created_at).toLocaleString() %></td>
+          <td><%= log.actor_name || 'System/API' %></td>
+          <td><%= log.target_name || '' %></td>
+          <td><%= log.action %></td>
+          <td><%= log.message || '' %></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+<%- include('../partials/foot') %>

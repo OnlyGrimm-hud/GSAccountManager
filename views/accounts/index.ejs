@@ -4,6 +4,21 @@
     <h2>Accounts</h2>
     <a class="button primary" href="/accounts/new">Add account</a>
   </div>
+  <div class="actions bulk-actions">
+    <form id="bulk-export" method="post" action="/exports/preview" class="inline-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <select name="account_type"><% accountTypes.forEach(t => { %><option value="<%= t %>"><%= t %></option><% }) %></select>
+      <select name="format"><% exportFormats.forEach(format => { %><option value="<%= format %>"><%= format.replace(/_/g, ' ') %></option><% }) %></select>
+      <select name="export_action">
+        <option value="archive">Archive after export</option>
+        <option value="keep">Keep accounts</option>
+        <option value="mark_exported">Mark exported</option>
+        <option value="delete">Delete requested, review only</option>
+      </select>
+      <label class="check"><input type="checkbox" name="confirm_export_action" value="yes"> Apply after export</label>
+      <button class="button">Export selected</button>
+    </form>
+  </div>
   <form class="filters" method="get">
     <input name="q" placeholder="Search login, username, display" value="<%= filters.q || '' %>">
     <select name="account_type"><option value="">All types</option><% accountTypes.forEach(t => { %><option value="<%= t %>" <%= filters.account_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select>
@@ -15,10 +30,11 @@
     <button class="button">Filter</button>
   </form>
   <table>
-    <thead><tr><th>Login</th><th>Type</th><th>Status</th><th>Credentials</th><th>Upgrade</th><th>Proxy</th><th>Notes</th><th>Updated</th><th>Actions</th></tr></thead>
+    <thead><tr><th><input type="checkbox" data-select-all="[name='account_ids']"></th><th>Login</th><th>Type</th><th>Status</th><th>Credentials</th><th>Upgrade</th><th>Proxy</th><th>Notes</th><th>Updated</th><th>Actions</th></tr></thead>
     <tbody>
       <% accounts.forEach(account => { %>
         <tr>
+          <td><input form="bulk-export" type="checkbox" name="account_ids" value="<%= account.id %>"></td>
           <td><strong><%= mask(account.legacy_login || account.username) %></strong><br><span class="muted"><%= account.display_name || '' %></span></td>
           <td><span class="tag"><%= account.account_type %></span></td>
           <td><span class="status <%= account.status %>"><%= account.status %></span></td>
@@ -33,10 +49,38 @@
             <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_password">Copy pass</button>
             <% if (account.otp_secret_encrypted) { %><button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP</button><% } %>
             <a class="button small" href="/?account_id=<%= account.id %>">Dashboard</a>
+            <form method="post" action="/accounts/<%= account.id %>/delete" data-confirm="Delete this local account record?">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small danger">Delete</button>
+            </form>
           </td>
         </tr>
       <% }) %>
     </tbody>
   </table>
+</section>
+<section class="content-grid">
+  <form method="post" action="/imports/preview" enctype="multipart/form-data" class="panel form-grid">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <h2>Import Accounts</h2>
+    <label>Preset<select name="preset">
+      <option value="username_password">username:password</option>
+      <option value="username_password_bank_pin">username:password:bank_pin</option>
+      <option value="username_password_bank_pin_otp">username:password:bank_pin:otp_secret</option>
+      <option value="username_password_otp">username:password:otp_secret</option>
+      <option value="jagex_email_password">jagex_email:jagex_password</option>
+    </select></label>
+    <label>Delimiter<input name="delimiter" value=":"></label>
+    <label>Account Type<select name="account_type"><% accountTypes.forEach(t => { %><option value="<%= t %>"><%= t %></option><% }) %></select></label>
+    <label>Default Status<select name="status"><% accountStatuses.forEach(s => { %><option value="<%= s %>"><%= s %></option><% }) %></select></label>
+    <label>Upload TXT<input type="file" name="accounts_file" accept=".txt,text/plain"></label>
+    <textarea name="accounts_text" rows="8" placeholder="username:password"></textarea>
+    <button class="button primary">Preview import</button>
+  </form>
+  <article class="panel">
+    <h2>Export Safety</h2>
+    <p class="notice">You are exporting sensitive account information. Keep this file private.</p>
+    <p class="muted">Select accounts in the table, choose a format, and export. The safer default is archive after export, not permanent delete.</p>
+  </article>
 </section>
 <%- include('../partials/foot') %>

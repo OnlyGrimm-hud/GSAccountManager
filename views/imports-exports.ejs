@@ -18,11 +18,9 @@
     <h2>TXT / CSV Export</h2>
     <label>Account Type<select name="account_type"><% accountTypes.forEach(t => { %><option value="<%= t %>"><%= t %></option><% }) %></select></label>
     <label>Format<select name="format">
-      <option value="legacy_user_pass">legacy username:password</option>
-      <option value="legacy_user_pass_otp">legacy username:password:otp</option>
-      <option value="jagex_email_pass">jagex email:password</option>
-      <option value="jagex_email_pass_otp">jagex email:password:otp</option>
-      <option value="safe_csv">full safe CSV export</option>
+      <% exportFormats.forEach(format => { %>
+        <option value="<%= format %>" <%= (options.format || settings.preferred_export_format) === format ? 'selected' : '' %>><%= format.replace(/_/g, ' ') %></option>
+      <% }) %>
     </select></label>
     <label>After export<select name="export_action">
       <option value="keep">Keep accounts</option>

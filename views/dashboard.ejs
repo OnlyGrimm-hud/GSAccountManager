@@ -81,13 +81,13 @@
   <article class="panel">
     <div class="panel-head">
       <div>
-        <h2><%= helper.connected ? 'Open with Local Helper' : 'Open in this browser' %></h2>
+        <h2><%= helper.connected ? 'Open with Companion' : 'Open in this browser' %></h2>
         <p class="muted"><%= helper.connected ? 'Uses assigned proxy if selected.' : 'No proxy control from website.' %></p>
       </div>
-      <a class="button small" href="/local-helper">Local Helper</a>
+      <a class="button small" href="/companion">Companion</a>
     </div>
     <% if (!helper.connected && settings.warn_before_opening_without_helper === 'true') { %>
-      <p class="notice">To use Chrome with proxies, install and connect GS Local Helper. Website-only opens use your normal browser session.</p>
+      <p class="notice">To use Chrome with proxies, install and connect GS Account Manager Companion. Website-only opens use your normal browser session.</p>
     <% } %>
     <% if (selected && settings.show_proxy_mode_before_open !== 'false') { %>
       <div class="proxy-mode-grid">

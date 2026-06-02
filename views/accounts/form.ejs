@@ -86,4 +86,10 @@
     <a class="button" href="/accounts">Back</a>
   </div>
 </form>
+<% if (account.id) { %>
+  <form method="post" action="/accounts/<%= account.id %>/delete" class="delete-panel" data-confirm="Delete this local account record?">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <button class="button danger">Delete local account</button>
+  </form>
+<% } %>
 <%- include('../partials/foot') %>

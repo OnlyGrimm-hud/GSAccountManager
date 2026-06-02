@@ -78,9 +78,12 @@ async function fetchDiscordProfile(accessToken) {
 }
 
 async function upsertDiscordUser(profile) {
+  const isConfiguredAdmin = config.adminDiscordIdSet.has(String(profile.id));
+  const role = isConfiguredAdmin ? 'admin' : 'user';
+  const subscriptionStatus = isConfiguredAdmin ? 'active' : 'inactive';
   const result = await db.query(
-    `INSERT INTO users (discord_id, username, global_name, avatar, email, discord_username, discord_global_name, discord_avatar, discord_email, subscription_status, last_login_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $2, $3, $4, $5, 'inactive', NOW(), NOW())
+    `INSERT INTO users (discord_id, username, global_name, avatar, email, discord_username, discord_global_name, discord_avatar, discord_email, role, subscription_status, last_login_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $2, $3, $4, $5, $6, $7, NOW(), NOW())
      ON CONFLICT (discord_id) DO UPDATE SET
        username=EXCLUDED.username,
        global_name=EXCLUDED.global_name,
@@ -90,6 +93,8 @@ async function upsertDiscordUser(profile) {
        discord_global_name=EXCLUDED.discord_global_name,
        discord_avatar=EXCLUDED.discord_avatar,
        discord_email=EXCLUDED.discord_email,
+       role=CASE WHEN $6='admin' THEN 'admin' ELSE users.role END,
+       subscription_status=CASE WHEN $6='admin' THEN 'active' ELSE users.subscription_status END,
        last_login_at=NOW(),
        updated_at=NOW()
      RETURNING *`,
@@ -98,11 +103,13 @@ async function upsertDiscordUser(profile) {
       profile.username || profile.global_name || 'discord-user',
       profile.global_name || null,
       discordAvatarUrl(profile) || null,
-      profile.email || null
+      profile.email || null,
+      role,
+      subscriptionStatus
     ]
   );
   const user = result.rows[0];
-  await claimFirstOwnerData(user);
+  await claimUnownedDataForAdmin(user);
   return user;
 }
 
@@ -120,17 +127,18 @@ async function upsertEmergencyAdminUser(username) {
      RETURNING *`,
     [discordId, username || 'admin']
   );
-  return result.rows[0];
+  const user = result.rows[0];
+  await claimUnownedDataForAdmin(user);
+  return user;
 }
 
-async function claimFirstOwnerData(user) {
-  if (String(user.discord_id || '').startsWith('emergency:')) return;
+async function claimUnownedDataForAdmin(user) {
+  if (!user || user.role !== 'admin') return;
   const client = await db.pool.connect();
   try {
     await client.query('BEGIN');
     const ownership = await client.query(
       `SELECT
-        (SELECT COUNT(*)::int FROM users WHERE id <> $1 AND discord_id NOT LIKE 'emergency:%') other_discord_users,
         (SELECT COUNT(*)::int FROM accounts WHERE user_id IS NOT NULL) owned_accounts,
         (SELECT COUNT(*)::int FROM proxies WHERE user_id IS NOT NULL) owned_proxies,
         (SELECT COUNT(*)::int FROM settings WHERE user_id IS NOT NULL) owned_settings,
@@ -142,10 +150,9 @@ async function claimFirstOwnerData(user) {
       [user.id]
     );
     const counts = ownership.rows[0];
-    const hasOtherDiscordUser = counts.other_discord_users > 0;
     const hasOwner = counts.owned_accounts + counts.owned_proxies + counts.owned_settings + counts.owned_logs > 0;
     const hasUnowned = counts.unowned_accounts + counts.unowned_proxies + counts.unowned_settings + counts.unowned_logs > 0;
-    if (hasOtherDiscordUser || hasOwner || !hasUnowned) {
+    if (hasOwner || !hasUnowned) {
       await client.query('COMMIT');
       return;
     }
@@ -170,7 +177,7 @@ async function claimFirstOwnerData(user) {
         'setup_unowned_data_claimed',
         'user',
         user.id,
-        'Setup warning: unowned legacy records were assigned to the first Discord user because no prior owner existed.',
+        'Setup warning: unowned legacy records were assigned to the first admin user because no prior owner existed.',
         {
           unowned_accounts: counts.unowned_accounts,
           unowned_proxies: counts.unowned_proxies,
@@ -194,5 +201,6 @@ module.exports = {
   fetchDiscordProfile,
   sessionUser,
   upsertDiscordUser,
-  upsertEmergencyAdminUser
+  upsertEmergencyAdminUser,
+  claimUnownedDataForAdmin
 };

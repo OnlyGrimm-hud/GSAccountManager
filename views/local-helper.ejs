@@ -3,8 +3,8 @@
   <article class="panel helper-status-card">
     <div class="panel-head">
       <div>
-        <p class="eyebrow">GS Local Helper</p>
-        <h2>Helper Status</h2>
+        <p class="eyebrow">GS Companion</p>
+        <h2>Companion Status</h2>
       </div>
       <span class="status <%= helper.connected ? 'ready' : 'needs_review' %>"><%= helper.statusLabel %></span>
     </div>
@@ -16,13 +16,13 @@
       <p class="row-line"><span>Connection token</span><strong><%= helper.tokenStatus %></strong></p>
     </div>
     <% if (!helper.connected) { %>
-      <p class="notice">Install and run GS Local Helper to open Chrome with proxies and use assisted browser actions.</p>
+      <p class="notice">Install and run GS Account Manager Companion to open controlled Chrome with proxies and use assisted browser actions.</p>
     <% } %>
   </article>
 
   <article class="panel download-card">
     <p class="eyebrow">Download</p>
-    <h2>Download GS Local Helper</h2>
+    <h2>Download GS Account Manager Companion</h2>
     <div class="helper-detail-grid">
       <p class="row-line"><span>Latest version</span><strong><%= download.version %></strong></p>
       <p class="row-line"><span>Release date</span><strong><%= download.releaseDate %></strong></p>
@@ -64,7 +64,7 @@
     <p class="eyebrow">Setup</p>
     <h2>Setup Instructions</h2>
     <ol class="helper-list">
-      <li>Download GS Local Helper.</li>
+      <li>Download GS Account Manager Companion.</li>
       <li>Install or unzip it.</li>
       <li>Open the helper on your PC.</li>
       <li>Sign in or connect it to your GS Account Manager account.</li>

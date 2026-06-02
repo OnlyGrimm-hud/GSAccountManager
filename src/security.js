@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 
 function csrf(req, res, next) {
+  if (req.path && req.path.startsWith('/api/companion/')) return next();
   if (!req.session.csrfToken) req.session.csrfToken = crypto.randomBytes(24).toString('hex');
   res.locals.csrfToken = req.session.csrfToken;
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();

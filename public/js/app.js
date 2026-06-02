@@ -48,3 +48,17 @@ document.addEventListener('click', async event => {
   const data = await response.json();
   target.value = data.value || '';
 });
+
+document.addEventListener('submit', event => {
+  const form = event.target.closest('[data-confirm]');
+  if (!form) return;
+  if (!window.confirm(form.dataset.confirm || 'Continue?')) event.preventDefault();
+});
+
+document.addEventListener('change', event => {
+  const control = event.target.closest('[data-select-all]');
+  if (!control) return;
+  document.querySelectorAll(control.dataset.selectAll).forEach(input => {
+    input.checked = control.checked;
+  });
+});

@@ -1,0 +1,69 @@
+<%- include('../partials/head') %>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Admin</p>
+      <h2>Discord Users</h2>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>User</th>
+        <th>Discord ID</th>
+        <th>Email</th>
+        <th>Role</th>
+        <th>Subscription</th>
+        <th>Created</th>
+        <th>Last Login</th>
+        <th>Data</th>
+        <th>Save</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% users.forEach(item => { %>
+        <tr>
+          <td>
+            <div class="identity-cell">
+              <% if (item.avatar) { %>
+                <img class="avatar" src="<%= item.avatar %>" alt="">
+              <% } else { %>
+                <span class="avatar avatar-fallback"><%= (item.global_name || item.username || item.discord_username || 'U').slice(0, 1).toUpperCase() %></span>
+              <% } %>
+              <div>
+                <strong><%= item.global_name || item.username || item.discord_username %></strong>
+                <% if (item.disabled_at) { %><br><span class="tag danger">disabled</span><% } %>
+              </div>
+            </div>
+          </td>
+          <td><code><%= item.discord_id %></code></td>
+          <td><%= item.email || item.discord_email || '' %></td>
+          <td>
+            <select name="role" form="user-<%= item.id %>">
+              <% userRoles.forEach(role => { %>
+                <option value="<%= role %>" <%= item.role === role ? 'selected' : '' %>><%= role %></option>
+              <% }) %>
+            </select>
+          </td>
+          <td>
+            <select name="subscription_status" form="user-<%= item.id %>">
+              <% subscriptionStatuses.forEach(status => { %>
+                <option value="<%= status %>" <%= item.subscription_status === status ? 'selected' : '' %>><%= status %></option>
+              <% }) %>
+            </select>
+          </td>
+          <td><%= new Date(item.created_at).toLocaleString() %></td>
+          <td><%= item.last_login_at ? new Date(item.last_login_at).toLocaleString() : 'Never' %></td>
+          <td><%= item.account_count %> accounts<br><span class="muted"><%= item.proxy_count %> proxies</span></td>
+          <td>
+            <form id="user-<%= item.id %>" method="post" action="/admin/users/<%= item.id %>">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small">Save</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+<%- include('../partials/foot') %>

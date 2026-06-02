@@ -40,6 +40,8 @@ services:
         sync: false
       - key: DISCORD_CALLBACK_URL
         value: https://gsaccountmanager.com/auth/discord/callback
+      - key: ADMIN_DISCORD_IDS
+        sync: false
 
 databases:
   - name: gs-account-manager-db

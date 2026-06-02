@@ -39,6 +39,7 @@ The app listens on `process.env.PORT`.
 - `DISCORD_CALLBACK_URL`
 - `APP_BASE_URL`
 - `AUTH_MODE=discord`
+- `ADMIN_DISCORD_IDS`: comma-separated Discord IDs that should automatically receive admin access.
 - `NODE_ENV=production`
 - `COOKIE_SECURE=true`
 - `AUTO_MIGRATE=true`
@@ -101,7 +102,17 @@ Existing MVP columns are preserved. The v1 migration adds:
 
 - `users`
 - `username`, `global_name`, `avatar`, and `email` Discord profile fields on users
+- `disabled_at` and `disabled_by_user_id` on users
 - `subscription_status` on users, defaulting new Discord users to `inactive`
+- `import_export_runs`
+- `user_settings`
+- `import_logs`
+- `export_logs`
+- `audit_logs`
+- `companion_devices`
+- `companion_sessions`
+- `companion_client_status`
+- `live_snapshots`
 - `user_id` ownership columns on accounts, proxies, settings, and activity logs
 - `legacy_login`
 - `legacy_password_encrypted`
@@ -121,9 +132,28 @@ Existing MVP columns are preserved. The v1 migration adds:
 - `exported_at`
 - `archived_at`
 
+User roles are `user`, `staff`, or `admin`. Subscription statuses are `inactive`, `active`, `trial`, `expired`, and `banned`.
+
 No database reset should be required for normal upgrades.
 
-If old rows have no `user_id`, the first Discord user who logs in claims them only when no prior owner exists yet. The app writes a setup warning to activity logs when this happens. Existing data is not deleted.
+If old rows have no `user_id`, they are assigned to the first admin user when one exists and no prior data owner exists yet. The app writes a setup warning to activity logs when this happens. Existing data is not deleted. If no admin exists yet, old unowned rows remain hidden from normal users until an admin is created.
+
+## Admin And Subscription Access
+
+- New Discord users default to `role=user` and `subscription_status=inactive`.
+- Discord IDs listed in `ADMIN_DISCORD_IDS` are automatically set to admin and active on login.
+- Inactive, expired, or banned users only see the locked access page.
+- Active and trial users can access the dashboard.
+- Admin users bypass subscription gating.
+- Admins manage users at `/admin/users`.
+- Admins can set role and subscription status, including `banned` to disable a user.
+- To make a Discord account admin directly in PostgreSQL:
+
+```sql
+UPDATE users
+SET role = 'admin', subscription_status = 'active', updated_at = NOW()
+WHERE discord_id = 'YOUR_DISCORD_ID';
+```
 
 ## Import Formats
 
@@ -146,23 +176,26 @@ The import page shows valid rows, duplicate rows, and invalid rows before commit
 
 After export, accounts can be kept, marked exported, or archived. Delete-after-export is review-only and never deletes automatically.
 
-## GS Local Helper
+## GS Account Manager Companion
 
-GS Account Manager is a hosted web app, so it cannot directly launch a user's local Chrome with proxy flags or local browser profiles. GS Local Helper is the planned Windows companion app that will run on the user's PC and connect to the user's Discord-authenticated workspace.
+GS Account Manager is a hosted web app, so it cannot directly launch a user's local Chrome with proxy flags or local browser profiles. GS Account Manager Companion is the planned Windows companion app that will run on the user's PC and connect to the user's Discord-authenticated workspace.
 
 Current web-side support:
 
-- Local Helper page at `/local-helper`
+- Companion page at `/companion` with `/local-helper` kept as a compatibility redirect target
+- Downloads page at `/downloads`
 - Windows download placeholder at `/downloads/helper/windows`
-- user-scoped `helper_devices`, `helper_commands`, and `helper_pairing_codes` tables
+- user-scoped companion device/session/status/snapshot tables
 - short-lived pairing code generation
 - hashed pairing-code storage
-- helper status cards and website-only browser warnings
-- Local Helper settings for proxy/browser-open behavior
+- companion status cards and website-only browser warnings
+- companion settings for proxy/browser-open behavior
 - assisted-fill command creators that create user-scoped helper commands only
 - masked proxy-mode summaries on Dashboard and Workflow
+- Electron companion skeleton in `companion/`
+- token-authenticated companion API placeholders
 
-Default Local Helper settings:
+Default Companion settings:
 
 - require helper for proxied browser actions: true
 - allow website-only normal browser open: true
@@ -190,6 +223,7 @@ The helper will not bypass CAPTCHA, Cloudflare, robot checks, phone verification
 - Discord client secrets are used only server-side.
 - Discord users are created with `subscription_status=inactive`; the optional emergency admin fallback is created as active.
 - User-specific records are filtered by the logged-in user's internal `user_id`.
+- Admins can view high-level logs across users; regular users only see their own logs.
 - `.env` is ignored and must not be committed.
 
 ## Browser Assist Placeholder

@@ -24,6 +24,10 @@ function encryptionKey() {
 
 const adminUsername = process.env.ADMIN_USERNAME || '';
 const adminPassword = process.env.ADMIN_PASSWORD || '';
+const adminDiscordIds = String(process.env.ADMIN_DISCORD_IDS || '')
+  .split(',')
+  .map(item => item.trim())
+  .filter(Boolean);
 const authMode = (process.env.AUTH_MODE || 'discord').toLowerCase();
 const appBaseUrl = (process.env.APP_BASE_URL || '').replace(/\/+$/, '');
 const discordCallbackUrl = process.env.DISCORD_CALLBACK_URL || (appBaseUrl ? `${appBaseUrl}/auth/discord/callback` : '');
@@ -44,6 +48,8 @@ module.exports = {
   sessionSecret: required('SESSION_SECRET'),
   adminUsername,
   adminPassword,
+  adminDiscordIds,
+  adminDiscordIdSet: new Set(adminDiscordIds),
   adminFallbackEnabled: Boolean(adminUsername && adminPassword),
   adminPasswordHash: process.env.ADMIN_PASSWORD_HASH || '',
   nodeEnv: process.env.NODE_ENV || 'development',

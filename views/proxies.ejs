@@ -37,9 +37,37 @@
     </form>
   </div>
   <p class="muted">Max accounts per proxy: <%= settings.max_accounts_per_proxy || 5 %>. Proxy passwords stay hidden in tables.</p>
+  <p class="notice">Proxy testing and selected-proxy TXT export are coming soon. The web app does not route its own traffic through user proxies.</p>
   <table>
-    <thead><tr><th>Proxy</th><th>Type</th><th>Category</th><th>Country</th><th>Status</th><th>Assigned</th><th>Notes</th><th>Updated</th></tr></thead>
-    <tbody><% proxies.forEach(proxy => { %><tr><td><%= proxy.host %>:<%= proxy.port %></td><td><%= proxy.proxy_type %></td><td><%= proxy.category || '' %></td><td><%= proxy.country_code || '' %></td><td><span class="status <%= proxy.status %>"><%= proxy.status %></span></td><td><%= proxy.assigned_count %></td><td><%= proxy.notes || '' %></td><td><%= new Date(proxy.updated_at).toLocaleDateString() %></td></tr><% }) %></tbody>
+    <thead><tr><th>Host</th><th>Port</th><th>Type</th><th>Category</th><th>Country</th><th>Status</th><th>Assigned</th><th>Notes</th><th>Credentials</th><th>Actions</th></tr></thead>
+    <tbody>
+      <% proxies.forEach(proxy => { %>
+        <tr>
+          <td><input class="table-input" form="proxy-<%= proxy.id %>" name="host" value="<%= proxy.host %>" required></td>
+          <td><input class="table-input short" form="proxy-<%= proxy.id %>" name="port" type="number" min="1" max="65535" value="<%= proxy.port %>" required></td>
+          <td><select form="proxy-<%= proxy.id %>" name="proxy_type"><% proxyTypes.forEach(type => { %><option value="<%= type %>" <%= proxy.proxy_type === type ? 'selected' : '' %>><%= type %></option><% }) %></select></td>
+          <td><input class="table-input" form="proxy-<%= proxy.id %>" name="category" value="<%= proxy.category || '' %>"></td>
+          <td><input class="table-input short" form="proxy-<%= proxy.id %>" name="country_code" maxlength="2" value="<%= proxy.country_code || '' %>"></td>
+          <td><select form="proxy-<%= proxy.id %>" name="status"><% proxyStatuses.forEach(status => { %><option value="<%= status %>" <%= proxy.status === status ? 'selected' : '' %>><%= status %></option><% }) %></select></td>
+          <td><%= proxy.assigned_count %></td>
+          <td><input class="table-input" form="proxy-<%= proxy.id %>" name="notes" value="<%= proxy.notes || '' %>"></td>
+          <td>
+            <input class="table-input" form="proxy-<%= proxy.id %>" name="username" type="password" placeholder="new username">
+            <input class="table-input" form="proxy-<%= proxy.id %>" name="password" type="password" placeholder="new password">
+          </td>
+          <td class="actions">
+            <form id="proxy-<%= proxy.id %>" method="post" action="/proxies/<%= proxy.id %>">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small">Save</button>
+            </form>
+            <form method="post" action="/proxies/<%= proxy.id %>/delete" data-confirm="Delete this local proxy record?">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
   </table>
 </section>
 <%- include('partials/foot') %>

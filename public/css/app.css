@@ -429,6 +429,47 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
   gap: 10px;
   margin: 14px 0;
 }
+.identity-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 180px;
+}
+.locked-panel {
+  max-width: 520px;
+  margin: 10vh auto;
+  display: grid;
+  gap: 16px;
+}
+.table-input {
+  min-width: 120px;
+  width: 100%;
+}
+.table-input.short {
+  min-width: 72px;
+}
+.button.danger,
+.tag.danger {
+  border-color: rgba(255, 119, 119, .45);
+  color: #ffb3b3;
+  background: rgba(255, 119, 119, .08);
+}
+.delete-panel {
+  margin-top: 16px;
+}
+td form {
+  margin: 0;
+}
+.inline-form,
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.inline-form select {
+  min-width: 170px;
+}
 
 @media (max-width: 1100px) {
   .metric-grid, .steps, .step-grid, .proxy-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }

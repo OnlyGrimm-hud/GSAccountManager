@@ -8,6 +8,14 @@ This checkpoint documents the currently deployed, working state of GS Account Ma
 
 ```text
 GSAccountManager/
+  companion/
+    package.json
+    README.md
+    src/main.js
+    src/preload.js
+    src/renderer/index.html
+    src/renderer/renderer.js
+    src/renderer/style.css
   db/
     init.sql
   local-helper/
@@ -32,15 +40,19 @@ GSAccountManager/
     security.js
     server.js
   views/
+    admin/dashboard.ejs
+    admin/users.ejs
     accounts/form.ejs
     accounts/index.ejs
     partials/foot.ejs
     partials/head.ejs
     dashboard.ejs
+    downloads.ejs
     error.ejs
     helper-download.ejs
     imports-exports.ejs
     local-helper.ejs
+    locked.ejs
     login.ejs
     logs.ejs
     proxies.ejs
@@ -77,6 +89,7 @@ The app exposes `/healthz` and returns `200 OK`. If the Render dashboard still s
 - `DISCORD_CLIENT_SECRET`: Discord OAuth application client secret.
 - `DISCORD_CALLBACK_URL`: deployed Discord callback URL.
 - `APP_BASE_URL`: deployed base URL, for example `https://gsaccountmanager.com`.
+- `ADMIN_DISCORD_IDS`: comma-separated Discord IDs that should automatically receive admin access.
 - `AUTH_MODE=discord`
 - `NODE_ENV=production`
 - `COOKIE_SECURE=true`
@@ -101,7 +114,7 @@ PostgreSQL is required before launch. The app uses PostgreSQL for:
 
 `db/init.sql` is idempotent and runs on startup when `AUTO_MIGRATE=true`. A database reset is not expected for this checkpoint.
 
-If old records have no `user_id`, the first Discord user who logs in claims them only when no prior owner exists yet. The app writes a setup warning to activity logs when this happens.
+If old records have no `user_id`, they are assigned to the first admin user when one exists and no prior data owner exists yet. The app writes a setup warning to activity logs when this happens. If no admin exists yet, old unowned rows remain hidden from normal users until an admin is created.
 
 ## Current Login Flow
 
@@ -109,6 +122,12 @@ If old records have no `user_id`, the first Discord user who logs in claims them
 - Discord OAuth is the primary login path.
 - Emergency admin credentials are optional fallback-only environment variables.
 - New Discord users default to `subscription_status=inactive`; the emergency admin fallback is `active`.
+- Roles are `user`, `staff`, and `admin`.
+- Subscription statuses are `inactive`, `active`, `trial`, `expired`, and `banned`.
+- Discord IDs in `ADMIN_DISCORD_IDS` are automatically admin and active.
+- Inactive, expired, and banned users only see the locked access page.
+- Active and trial users can access the dashboard.
+- Admin users bypass subscription gating.
 - Login attempts are rate limited.
 - Successful login stores an authenticated session.
 - Sessions store the internal `user_id` and Discord identity display data.
@@ -120,23 +139,26 @@ If old records have no `user_id`, the first Discord user who logs in claims them
 
 - Dashboard: selected account workflow, empty state, progress cards, quick copy actions, safe open-page links.
 - Accounts: list, filters, add/edit account page, masked secrets with reveal/copy controls.
-- Imports / Exports: TXT import preview, duplicate/invalid row review, export preview, safe post-export actions.
+- Accounts Import / Export: TXT import preview, duplicate/invalid row review, selected-account export controls, and safe post-export actions.
 - Proxies: proxy storage, import, assignment counts, auto-assign request, private proxy credentials.
 - Settings: app settings, URL settings, Render checklist, production checklist, app version.
 - Logs: activity log list with filters.
 - Workflow: manual progress and status controls.
-- Local Helper: helper status, pairing-code generation, download placeholder, setup instructions, and safety boundaries.
+- Companion: companion status, pairing-code generation, download placeholder, setup instructions, API placeholders, and safety boundaries.
+- Downloads: Windows companion download placeholder and setup instructions.
+- Admin Users: admin-only Discord user list, role controls, subscription controls, and disable via banned status.
 - Health: `/healthz`.
 
 ## Known Unfinished Items
 
-- Role enforcement is future-ready but not currently used beyond storing `role`.
+- Admin role enforcement is active for `/admin/users`.
+- Subscription gating is active for inactive, expired, and banned Discord users.
 - Render MCP cannot update every dashboard setting; confirm the Render health check field is `/healthz` in the dashboard.
 - Logged-in UI flows still need manual browser testing with real admin credentials after each deploy.
 - No automated end-to-end browser test suite exists yet.
 - Emergency admin fallback is optional and creates its own isolated workspace.
 - Browser assist is a disabled placeholder for future user-triggered form filling only.
-- Windows Local Helper app and installer are planned but not built yet.
+- Windows Companion packaging is scaffolded but not built yet.
 - Assisted fill buttons remain disabled by default until the helper app exists.
 
 ## Manual-Workflow-Only Boundaries

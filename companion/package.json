@@ -1,0 +1,26 @@
+{
+  "name": "gs-account-manager-companion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GS Account Manager Companion for user-controlled local workflow assistance.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "package:win": "electron-builder --win"
+  },
+  "dependencies": {
+    "electron": "^31.7.0",
+    "playwright": "^1.49.1"
+  },
+  "devDependencies": {
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.gsaccountmanager.companion",
+    "productName": "GS Account Manager Companion",
+    "artifactName": "GSWorkFlowManager-${version}.${ext}",
+    "win": {
+      "target": "nsis"
+    }
+  }
+}
