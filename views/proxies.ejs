@@ -1,0 +1,33 @@
+<%- include('partials/head') %>
+<section class="content-grid">
+  <form method="post" action="/proxies" class="panel form-grid">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <h2>Add Proxy</h2>
+    <label>Type<select name="proxy_type"><% proxyTypes.forEach(t => { %><option value="<%= t %>"><%= t %></option><% }) %></select></label>
+    <label>Host<input name="host"></label>
+    <label>Port<input name="port" type="number" min="1" max="65535"></label>
+    <label>Username<input name="username" type="password"></label>
+    <label>Password<input name="password" type="password"></label>
+    <label>Category<input name="category"></label>
+    <label>Country Code<input name="country_code" maxlength="2"></label>
+    <label>Status<select name="status"><% proxyStatuses.forEach(s => { %><option value="<%= s %>"><%= s %></option><% }) %></select></label>
+    <label>Notes<textarea name="notes"></textarea></label>
+    <button class="button primary">Save proxy</button>
+  </form>
+  <form method="post" action="/proxies" class="panel form-grid">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <h2>Import Proxies</h2>
+    <p class="muted">Format: IP:PORT:USERNAME:PASSWORD</p>
+    <label>Default Type<select name="proxy_type"><% proxyTypes.forEach(t => { %><option value="<%= t %>"><%= t %></option><% }) %></select></label>
+    <textarea name="bulk" rows="10"></textarea>
+    <button class="button">Import proxies</button>
+  </form>
+</section>
+<section class="panel">
+  <h2>Saved Proxies</h2>
+  <table>
+    <thead><tr><th>Proxy</th><th>Type</th><th>Category</th><th>Country</th><th>Status</th><th>Assigned</th><th>Updated</th></tr></thead>
+    <tbody><% proxies.forEach(proxy => { %><tr><td><%= proxy.host %>:<%= proxy.port %></td><td><%= proxy.proxy_type %></td><td><%= proxy.category || '' %></td><td><%= proxy.country_code || '' %></td><td><span class="status <%= proxy.status %>"><%= proxy.status %></span></td><td><%= proxy.assigned_count %></td><td><%= new Date(proxy.updated_at).toLocaleDateString() %></td></tr><% }) %></tbody>
+  </table>
+</section>
+<%- include('partials/foot') %>
