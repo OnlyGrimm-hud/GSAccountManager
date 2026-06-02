@@ -1,0 +1,138 @@
+<%- include('partials/head') %>
+<section class="helper-hero">
+  <article class="panel helper-status-card">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">GS Companion</p>
+        <h2>Device Management</h2>
+      </div>
+      <span class="status <%= helper.connected ? 'ready' : 'needs_review' %>"><%= helper.statusLabel %></span>
+    </div>
+    <div class="helper-detail-grid">
+      <p class="row-line"><span>Primary device</span><strong><%= helper.device && helper.device.device_name ? helper.device.device_name : 'Not connected' %></strong></p>
+      <p class="row-line"><span>Last seen</span><strong><%= helper.lastHeartbeat ? new Date(helper.lastHeartbeat).toLocaleString() : 'Never' %></strong></p>
+      <p class="row-line"><span>Version</span><strong><%= helper.helperVersion %></strong></p>
+      <p class="row-line"><span>Token storage</span><strong><%= helper.tokenStatus %></strong></p>
+    </div>
+    <form method="post" action="/companion/pairing-code">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <button class="button primary">Pair New Device</button>
+    </form>
+    <% if (pairingCode) { %>
+      <div class="code-box">
+        <span>Pairing code</span>
+        <strong><%= pairingCode.code %></strong>
+        <small>Expires <%= new Date(pairingCode.expiresAt).toLocaleString() %></small>
+      </div>
+    <% } else { %>
+      <p class="muted">Pairing codes expire after 10 minutes and are stored only as hashes server-side.</p>
+    <% } %>
+  </article>
+
+  <article class="panel download-card">
+    <p class="eyebrow">Local App</p>
+    <h2>Windows Companion</h2>
+    <p class="muted">The companion connects only after you create a pairing code and enter it locally. It stores a device token locally and sends heartbeat/status placeholders.</p>
+    <div class="actions">
+      <a class="button" href="/downloads">Open Downloads</a>
+      <span class="tag"><%= download.available ? `v${download.version}` : 'Coming soon' %></span>
+    </div>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Active Devices</h2>
+    <span class="tag"><%= devices.length %> device(s)</span>
+  </div>
+  <table>
+    <thead><tr><th>Name</th><th>Status</th><th>Version</th><th>Last Seen</th><th>Screenshots</th><th>Actions</th></tr></thead>
+    <tbody>
+      <% devices.forEach(device => { %>
+        <tr>
+          <td><%= device.device_name || `Device ${device.id}` %></td>
+          <td><span class="status <%= device.status %>"><%= device.status %></span></td>
+          <td><%= device.companion_version || 'Unknown' %></td>
+          <td><%= device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : 'Never' %></td>
+          <td><%= device.allow_screenshots ? 'Opt-in enabled' : 'Disabled' %></td>
+          <td>
+            <% if (device.status !== 'revoked') { %>
+              <form method="post" action="/companion/devices/<%= device.id %>/revoke" data-confirm="Revoke this companion device?">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button class="button small danger">Revoke Device</button>
+              </form>
+            <% } else { %>
+              <span class="tag danger">Revoked</span>
+            <% } %>
+          </td>
+        </tr>
+      <% }) %>
+      <% if (!devices.length) { %><tr><td colspan="6"><p class="muted">No companion devices paired yet.</p></td></tr><% } %>
+    </tbody>
+  </table>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <p class="eyebrow">Live Status Placeholder</p>
+    <h2>Local Client Status</h2>
+    <% if (clientStatuses.length) { %>
+      <table>
+        <thead><tr><th>Device</th><th>Process</th><th>Window</th><th>Status</th><th>Last Seen</th></tr></thead>
+        <tbody>
+          <% clientStatuses.forEach(status => { %>
+            <tr>
+              <td><%= status.device_name || 'Device' %></td>
+              <td><%= status.process_name || 'Future detector' %></td>
+              <td><%= status.window_title || '' %></td>
+              <td><span class="status <%= status.running ? 'ready' : 'blocked' %>"><%= status.running ? 'client open' : 'client closed' %></span></td>
+              <td><%= new Date(status.last_seen_at).toLocaleString() %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    <% } else { %>
+      <p class="muted">No client status reported yet. Future reporting will be opt-in and user-controlled.</p>
+    <% } %>
+  </article>
+
+  <article class="panel">
+    <p class="eyebrow">Snapshot Placeholder</p>
+    <h2>Optional Screenshot Preview</h2>
+    <% if (snapshot) { %>
+      <p class="row-line"><span>Latest snapshot</span><strong><%= new Date(snapshot.created_at).toLocaleString() %></strong></p>
+      <p class="row-line"><span>Window</span><strong><%= snapshot.window_title || 'Not provided' %></strong></p>
+      <p class="row-line"><span>Size</span><strong><%= snapshot.image_size %> bytes</strong></p>
+    <% } else { %>
+      <p class="notice">No snapshot uploaded yet.</p>
+    <% } %>
+    <p class="muted">Screenshots remain opt-in and must not capture passwords, private browser tabs, or the full desktop.</p>
+  </article>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <p class="eyebrow">Controlled Browser</p>
+    <h2>Safe Manual Fill Placeholder</h2>
+    <p class="muted">Planned actions require the user to choose an account and click Fill current page. The companion can fill visible username, password, or email fields only after explicit user action.</p>
+    <div class="checklist-grid">
+      <p class="row-line"><span>CAPTCHA bypass</span><strong>Never</strong></p>
+      <p class="row-line"><span>Automatic account creation</span><strong>Not implemented</strong></p>
+      <p class="row-line"><span>Auto-submit sensitive forms</span><strong>Disabled</strong></p>
+      <p class="row-line"><span>2FA/security bypass</span><strong>Never</strong></p>
+    </div>
+  </article>
+
+  <article class="panel">
+    <p class="eyebrow">Future Architecture</p>
+    <h2>User-Triggered Browser Assist</h2>
+    <ul class="helper-list">
+      <li>Select account inside GS Account Manager.</li>
+      <li>Open controlled browser from the companion.</li>
+      <li>Click Fill current page to fill visible fields.</li>
+      <li>If CAPTCHA or security checks appear, stop and complete them manually.</li>
+      <li>User reviews the page and clicks submit themselves.</li>
+    </ul>
+  </article>
+</section>
+<%- include('partials/foot') %>

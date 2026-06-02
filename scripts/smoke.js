@@ -31,14 +31,20 @@ const rows = parseAccountImport([
   'user2:pass2:OTPSECRET',
   'user3:pass3:1234:JBSWY3DPEHPK3PXP',
   'user4:pass4:JBSWY3DPEHPK3PXP:review note',
+  'user5:pass5:otp:extra:note',
   'badrow'
 ].join('\n'));
 
-assert.strictEqual(rows.length, 5);
+assert.strictEqual(rows.length, 6);
 assert.strictEqual(rows[0].valid, true);
 assert.strictEqual(rows[2].bank_pin, '1234');
 assert.strictEqual(rows[3].notes, 'review note');
-assert.strictEqual(rows[4].valid, false);
+assert.strictEqual(rows[4].extra_fields.length, 2);
+assert.strictEqual(rows[5].valid, false);
+
+const jagexRows = parseAccountImport('email@example.com:pass:recovery@example.com:recoverypass', ':', { account_type: 'jagex' });
+assert.strictEqual(jagexRows[0].recovery_email, 'recovery@example.com');
+assert.strictEqual(jagexRows[0].recovery_email_password, 'recoverypass');
 
 const proxies = parseProxyImport([
   '127.0.0.1:8080',
@@ -108,6 +114,10 @@ async function main() {
     assert(serverSource.includes("app.get('/login'"));
     assert(serverSource.includes("app.get('/admin/users'"));
     assert(serverSource.includes("app.get('/downloads'"));
+    assert(serverSource.includes("app.get('/companion'"));
+    assert(serverSource.includes("app.post('/accounts/import'"));
+    assert(serverSource.includes("app.post('/accounts/export'"));
+    assert(serverSource.includes("app.post('/proxies/import'"));
     assert(serverSource.includes("app.post('/api/companion/pair/complete'"));
     assert(serverSource.includes("app.post('/api/companion/heartbeat'"));
     assert(serverSource.includes('requireActiveSubscription'));
@@ -123,7 +133,11 @@ async function main() {
   assert(routeExists('get', '/auth/discord'));
   assert(routeExists('get', '/auth/discord/callback'));
   assert(routeExists('get', '/downloads'));
+  assert(routeExists('get', '/companion'));
   assert(routeExists('get', '/admin/users'));
+  assert(routeExists('post', '/accounts/import'));
+  assert(routeExists('post', '/accounts/export'));
+  assert(routeExists('post', '/proxies/import'));
   assert(routeExists('post', '/api/companion/pair/complete'));
   assert(routeExists('post', '/api/companion/heartbeat'));
 

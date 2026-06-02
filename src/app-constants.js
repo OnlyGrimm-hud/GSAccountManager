@@ -13,7 +13,9 @@ const activeSubscriptionStatuses = ['active', 'trial'];
 const exportFormats = [
   'legacy_user_pass', 'legacy_user_pass_pin', 'legacy_user_pass_pin_otp',
   'legacy_user_pass_otp', 'jagex_email_pass', 'login_email_pass_proxy',
-  'jagex_email_pass_otp', 'full_account_export', 'safe_csv'
+  'jagex_email_pass_otp', 'full_account_export', 'safe_csv',
+  'username_password', 'username_password_otp', 'username_password_bank_pin_otp',
+  'email_password', 'email_password_recovery', 'full', 'custom'
 ];
 const workflowModes = ['manual'];
 const paymentMethods = ['LTC', 'BTC', 'ETH', 'manual_admin_activation'];

@@ -1,4 +1,9 @@
-function parseAccountImport(text, delimiter = ':') {
+function parseAccountImport(text, delimiter = ':', options = {}) {
+  if (typeof delimiter === 'object') {
+    options = delimiter;
+    delimiter = options.delimiter || ':';
+  }
+  const accountType = String(options.account_type || options.accountType || 'legacy').toLowerCase();
   return String(text || '').split(/\r?\n/).map((line, index) => {
     const raw = line.trim();
     const parts = raw ? raw.split(delimiter).map(part => part.trim()) : [];
@@ -9,29 +14,43 @@ function parseAccountImport(text, delimiter = ':') {
       password: parts[1] || '',
       bank_pin: '',
       otp_secret: '',
+      recovery_email: '',
+      recovery_email_password: '',
       notes: '',
+      extra_fields: [],
       valid: false,
       error: ''
     };
 
     if (!raw) return null;
-    if (parts.length < 2 || parts.length > 4) {
-      row.error = 'Expected 2 to 4 fields';
+    if (parts.length < 2) {
+      row.error = 'Expected at least username/email and password';
       return row;
     }
 
-    if (parts.length === 3) {
-      row.otp_secret = parts[2] || '';
-    }
-
-    if (parts.length === 4) {
-      const thirdLooksLikePin = /^\d{3,8}$/.test(parts[2] || '');
-      if (thirdLooksLikePin) {
-        row.bank_pin = parts[2] || '';
-        row.otp_secret = parts[3] || '';
-      } else {
-        row.otp_secret = parts[2] || '';
-        row.notes = parts[3] || '';
+    const extras = parts.slice(2);
+    if (accountType === 'jagex') {
+      row.recovery_email = extras[0] || '';
+      row.recovery_email_password = extras[1] || '';
+      row.otp_secret = extras[2] || '';
+      row.notes = extras.slice(3).filter(Boolean).join(' ');
+      row.extra_fields = extras.slice(3);
+    } else {
+      if (extras.length === 1) {
+        row.otp_secret = extras[0] || '';
+      }
+      if (extras.length >= 2) {
+        const thirdLooksLikePin = /^\d{3,8}$/.test(extras[0] || '');
+        if (thirdLooksLikePin) {
+          row.bank_pin = extras[0] || '';
+          row.otp_secret = extras[1] || '';
+          row.notes = extras.slice(2).filter(Boolean).join(' ');
+          row.extra_fields = extras.slice(2);
+        } else {
+          row.otp_secret = extras[0] || '';
+          row.notes = extras.slice(1).filter(Boolean).join(' ');
+          row.extra_fields = extras.slice(1);
+        }
       }
     }
 
@@ -41,16 +60,17 @@ function parseAccountImport(text, delimiter = ':') {
   }).filter(Boolean);
 }
 
-function parseProxyLine(line) {
+function parseProxyLine(line, delimiter = ':', defaults = {}) {
   const raw = String(line || '').trim();
   if (!raw) return null;
   const result = {
     raw,
-    proxy_type: 'HTTP',
+    proxy_type: defaults.proxy_type || defaults.proxyType || 'HTTP',
     host: '',
     port: '',
     username: '',
     password: '',
+    category: defaults.category || '',
     valid: false,
     error: ''
   };
@@ -64,7 +84,7 @@ function parseProxyLine(line) {
       result.username = decodeURIComponent(url.username || '');
       result.password = decodeURIComponent(url.password || '');
     } else {
-      const parts = raw.split(':');
+      const parts = raw.split(delimiter);
       if (parts.length === 2 || parts.length === 4) {
         [result.host, result.port, result.username = '', result.password = ''] = parts;
       } else {
@@ -80,8 +100,12 @@ function parseProxyLine(line) {
   return result;
 }
 
-function parseProxyImport(text) {
-  return String(text || '').split(/\r?\n/).map(parseProxyLine).filter(Boolean);
+function parseProxyImport(text, delimiter = ':', defaults = {}) {
+  if (typeof delimiter === 'object') {
+    defaults = delimiter;
+    delimiter = defaults.delimiter || ':';
+  }
+  return String(text || '').split(/\r?\n/).map(line => parseProxyLine(line, delimiter, defaults)).filter(Boolean);
 }
 
 module.exports = { parseAccountImport, parseProxyLine, parseProxyImport };

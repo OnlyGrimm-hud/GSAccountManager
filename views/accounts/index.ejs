@@ -1,46 +1,93 @@
 <%- include('../partials/head') %>
+<% const stat = stats || {}; %>
+<% const noticeImported = query && query.imported ? Number(query.imported || 0) : null; %>
+<section class="metric-grid account-metrics">
+  <% [
+    ['Total Accounts', stat.total || 0],
+    ['Legacy Accounts', stat.legacy || 0],
+    ['Jagex Accounts', stat.jagex || 0],
+    ['With Proxy', stat.with_proxy || 0],
+    ['Without Proxy', stat.without_proxy || 0],
+    ['Active', stat.active || 0],
+    ['In Progress', stat.in_progress || 0],
+    ['Completed / Archived', `${stat.completed || 0} / ${stat.archived || 0}`]
+  ].forEach(item => { %>
+    <article class="metric"><span><%= item[0] %></span><strong><%= item[1] %></strong></article>
+  <% }) %>
+</section>
+
 <section class="panel">
   <div class="panel-head">
-    <h2>Accounts</h2>
-    <a class="button primary" href="/accounts/new">Add account</a>
+    <div>
+      <p class="eyebrow">Storage</p>
+      <h2>Accounts</h2>
+    </div>
+    <div class="actions">
+      <button class="button" type="button" data-open-modal="account-import-modal">Import Accounts</button>
+      <a class="button" href="/accounts/new">Add Account Manually</a>
+      <button class="button primary" type="button" data-open-modal="account-export-modal">Export Selected</button>
+    </div>
   </div>
-  <div class="actions bulk-actions">
-    <form id="bulk-export" method="post" action="/exports/preview" class="inline-form">
-      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <select name="account_type"><% accountTypes.forEach(t => { %><option value="<%= t %>"><%= t %></option><% }) %></select>
-      <select name="format"><% exportFormats.forEach(format => { %><option value="<%= format %>"><%= format.replace(/_/g, ' ') %></option><% }) %></select>
-      <select name="export_action">
-        <option value="archive">Archive after export</option>
-        <option value="keep">Keep accounts</option>
-        <option value="mark_exported">Mark exported</option>
-        <option value="delete">Delete requested, review only</option>
-      </select>
-      <label class="check"><input type="checkbox" name="confirm_export_action" value="yes"> Apply after export</label>
-      <button class="button">Export selected</button>
-    </form>
-  </div>
-  <form class="filters" method="get">
-    <input name="q" placeholder="Search login, username, display" value="<%= filters.q || '' %>">
-    <select name="account_type"><option value="">All types</option><% accountTypes.forEach(t => { %><option value="<%= t %>" <%= filters.account_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select>
-    <select name="status"><option value="">All statuses</option><% accountStatuses.forEach(s => { %><option value="<%= s %>" <%= filters.status === s ? 'selected' : '' %>><%= s %></option><% }) %></select>
-    <input name="category" placeholder="Category" value="<%= filters.category || '' %>">
-    <input name="country_code" placeholder="Country" value="<%= filters.country_code || '' %>">
-    <select name="has_proxy"><option value="">Proxy</option><option value="yes" <%= filters.has_proxy === 'yes' ? 'selected' : '' %>>Has proxy</option><option value="no" <%= filters.has_proxy === 'no' ? 'selected' : '' %>>No proxy</option></select>
-    <select name="has_otp"><option value="">OTP</option><option value="yes" <%= filters.has_otp === 'yes' ? 'selected' : '' %>>Has OTP</option><option value="no" <%= filters.has_otp === 'no' ? 'selected' : '' %>>No OTP</option></select>
+  <% if (noticeImported !== null) { %>
+    <p class="notice">Imported <%= noticeImported %> account line(s). Skipped <%= Number(query.skipped || 0) %>.</p>
+  <% } %>
+
+  <form class="filters account-filters" method="get">
+    <input name="q" placeholder="Search" value="<%= filters.q || '' %>">
+    <select name="account_type"><option value="">Account Type</option><% accountTypes.forEach(t => { %><option value="<%= t %>" <%= filters.account_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select>
+    <select name="category"><option value="">Category</option><% categories.forEach(category => { %><option value="<%= category %>" <%= filters.category === category ? 'selected' : '' %>><%= category %></option><% }) %></select>
+    <select name="status"><option value="">Status</option><% accountStatuses.forEach(s => { %><option value="<%= s %>" <%= filters.status === s ? 'selected' : '' %>><%= s %></option><% }) %></select>
+    <select name="has_proxy"><option value="">Has Proxy</option><option value="yes" <%= filters.has_proxy === 'yes' ? 'selected' : '' %>>Yes</option><option value="no" <%= filters.has_proxy === 'no' ? 'selected' : '' %>>No</option></select>
+    <select name="has_otp"><option value="">Has OTP</option><option value="yes" <%= filters.has_otp === 'yes' ? 'selected' : '' %>>Yes</option><option value="no" <%= filters.has_otp === 'no' ? 'selected' : '' %>>No</option></select>
+    <select name="country_code"><option value="">Country</option><% countries.forEach(country => { %><option value="<%= country %>" <%= filters.country_code === country ? 'selected' : '' %>><%= country %></option><% }) %></select>
+    <select name="created_date">
+      <option value="">Created Date</option>
+      <option value="today" <%= filters.created_date === 'today' ? 'selected' : '' %>>Today</option>
+      <option value="7d" <%= filters.created_date === '7d' ? 'selected' : '' %>>Last 7 days</option>
+      <option value="30d" <%= filters.created_date === '30d' ? 'selected' : '' %>>Last 30 days</option>
+      <option value="older_30d" <%= filters.created_date === 'older_30d' ? 'selected' : '' %>>Older than 30 days</option>
+    </select>
     <button class="button">Filter</button>
   </form>
+
+  <form id="account-export-form" method="post" action="/accounts/export">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  </form>
   <table>
-    <thead><tr><th><input type="checkbox" data-select-all="[name='account_ids']"></th><th>Login</th><th>Type</th><th>Status</th><th>Credentials</th><th>Upgrade</th><th>Proxy</th><th>Notes</th><th>Updated</th><th>Actions</th></tr></thead>
+    <thead>
+      <tr>
+        <th><input type="checkbox" data-select-all="[name='account_ids']"></th>
+        <th>Type</th>
+        <th>Login / Email</th>
+        <th>Display Name</th>
+        <th>Proxy Status</th>
+        <th>Category</th>
+        <th>Status</th>
+        <th>Notes</th>
+        <th>Updated</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
     <tbody>
       <% accounts.forEach(account => { %>
         <tr>
-          <td><input form="bulk-export" type="checkbox" name="account_ids" value="<%= account.id %>"></td>
-          <td><strong><%= mask(account.legacy_login || account.username) %></strong><br><span class="muted"><%= account.display_name || '' %></span></td>
+          <td><input form="account-export-form" type="checkbox" name="account_ids" value="<%= account.id %>"></td>
           <td><span class="tag"><%= account.account_type %></span></td>
+          <td>
+            <strong><%= mask(account.legacy_login || account.username) %></strong>
+            <% if (account.account_type === 'jagex') { %><br><span class="muted">email login</span><% } %>
+          </td>
+          <td><%= account.display_name || '' %></td>
+          <td>
+            <% if (account.proxy_host) { %>
+              <span class="status <%= account.proxy_status || 'unknown' %>"><%= account.proxy_status || 'assigned' %></span>
+              <br><span class="muted"><%= account.proxy_type || 'HTTP' %></span>
+            <% } else { %>
+              <span class="tag">No proxy</span>
+            <% } %>
+          </td>
+          <td><%= account.category || '' %></td>
           <td><span class="status <%= account.status %>"><%= account.status %></span></td>
-          <td><span class="tag"><%= account.credential_status || 'partial' %></span></td>
-          <td><span class="tag"><%= account.upgrade_status || 'pending' %></span></td>
-          <td><%= account.proxy_host ? `${account.proxy_host}:${account.proxy_port}` : 'Unassigned' %><br><span class="muted"><%= account.proxy_status || '' %></span></td>
           <td><%= account.notes ? account.notes.slice(0, 80) : '' %></td>
           <td><%= new Date(account.updated_at).toLocaleDateString() %></td>
           <td class="actions">
@@ -48,7 +95,6 @@
             <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_login">Copy login</button>
             <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_password">Copy pass</button>
             <% if (account.otp_secret_encrypted) { %><button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP</button><% } %>
-            <a class="button small" href="/?account_id=<%= account.id %>">Dashboard</a>
             <form method="post" action="/accounts/<%= account.id %>/delete" data-confirm="Delete this local account record?">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button class="button small danger">Delete</button>
@@ -56,31 +102,81 @@
           </td>
         </tr>
       <% }) %>
+      <% if (!accounts.length) { %>
+        <tr><td colspan="10"><p class="muted">Import accounts to begin.</p></td></tr>
+      <% } %>
     </tbody>
   </table>
 </section>
-<section class="content-grid">
-  <form method="post" action="/imports/preview" enctype="multipart/form-data" class="panel form-grid">
-    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-    <h2>Import Accounts</h2>
-    <label>Preset<select name="preset">
-      <option value="username_password">username:password</option>
-      <option value="username_password_bank_pin">username:password:bank_pin</option>
-      <option value="username_password_bank_pin_otp">username:password:bank_pin:otp_secret</option>
-      <option value="username_password_otp">username:password:otp_secret</option>
-      <option value="jagex_email_password">jagex_email:jagex_password</option>
-    </select></label>
-    <label>Delimiter<input name="delimiter" value=":"></label>
-    <label>Account Type<select name="account_type"><% accountTypes.forEach(t => { %><option value="<%= t %>"><%= t %></option><% }) %></select></label>
-    <label>Default Status<select name="status"><% accountStatuses.forEach(s => { %><option value="<%= s %>"><%= s %></option><% }) %></select></label>
-    <label>Upload TXT<input type="file" name="accounts_file" accept=".txt,text/plain"></label>
-    <textarea name="accounts_text" rows="8" placeholder="username:password"></textarea>
-    <button class="button primary">Preview import</button>
-  </form>
-  <article class="panel">
-    <h2>Export Safety</h2>
-    <p class="notice">You are exporting sensitive account information. Keep this file private.</p>
-    <p class="muted">Select accounts in the table, choose a format, and export. The safer default is archive after export, not permanent delete.</p>
-  </article>
-</section>
+
+<div class="modal" id="account-import-modal" hidden>
+  <div class="modal-panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Import</p>
+        <h2>Import Accounts</h2>
+      </div>
+      <button class="icon-button" type="button" data-close-modal>Close</button>
+    </div>
+    <form id="account-import-form" method="post" action="/accounts/import" class="form-grid">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <input type="hidden" name="confirm_import" value="">
+      <div class="form-grid three">
+        <label>Account Type<select name="account_type" data-account-import-type><option value="legacy">Legacy</option><option value="jagex">Jagex</option></select></label>
+        <label>Account Category<input list="account-category-options" name="category" placeholder="main"></label>
+        <label>Proxy Category<input list="proxy-category-options" name="proxy_category" placeholder="optional"></label>
+        <label>Country Code<input list="country-options" name="country_code" maxlength="2" placeholder="US"></label>
+        <label>Delimiter<input name="delimiter" value=":" maxlength="4" data-account-import-delimiter></label>
+        <label>Notes<input name="notes" placeholder="batch note"></label>
+      </div>
+      <datalist id="account-category-options"><% categories.forEach(category => { %><option value="<%= category %>"></option><% }) %></datalist>
+      <datalist id="proxy-category-options"><% proxyCategories.forEach(category => { %><option value="<%= category %>"></option><% }) %></datalist>
+      <datalist id="country-options"><% countries.forEach(country => { %><option value="<%= country %>"></option><% }) %></datalist>
+      <div class="notice">
+        <strong>Format examples</strong>
+        <p class="muted">Legacy: username:password | Legacy with OTP: username:password:otp_key | Legacy with PIN and OTP: username:password:bank_pin:otp_key</p>
+        <p class="muted">Jagex: email:password | Jagex with recovery: email:password:recovery_email:recovery_password | Extra fields are kept as notes.</p>
+      </div>
+      <label>Pasted Accounts<textarea name="accounts_text" rows="10" placeholder="username:password" data-account-import-text></textarea></label>
+      <div class="actions">
+        <button class="button" type="button" data-preview-account-import>Preview parsed rows</button>
+        <button class="button primary" disabled data-confirm-account-import>Import confirmed rows</button>
+      </div>
+      <div class="preview-box" data-account-import-preview></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="account-export-modal" hidden>
+  <div class="modal-panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Export</p>
+        <h2>Export Selected</h2>
+      </div>
+      <button class="icon-button" type="button" data-close-modal>Close</button>
+    </div>
+    <div class="form-grid">
+      <p class="notice">TXT export contains sensitive account data. Keep the downloaded file private.</p>
+      <label>Export Format Preset<select form="account-export-form" name="export_format" data-export-format>
+        <option value="username_password">username:password</option>
+        <option value="username_password_otp">username:password:otp</option>
+        <option value="username_password_bank_pin_otp">username:password:bank_pin:otp</option>
+        <option value="email_password">email:password</option>
+        <option value="email_password_recovery">email:password:recovery_email:recovery_password</option>
+        <option value="full">full</option>
+        <option value="custom">custom</option>
+      </select></label>
+      <label>Delimiter<input form="account-export-form" name="delimiter" value="<%= settings.default_export_delimiter || ':' %>"></label>
+      <label>Custom fields / order<input form="account-export-form" name="custom_fields" placeholder="username,password,otp,proxy"></label>
+      <p class="muted">Allowed custom fields include username, password, email, jagex_password, bank_pin, otp, recovery_email, recovery_password, proxy, category, country, status, notes.</p>
+      <label class="check"><input form="account-export-form" type="checkbox" name="delete_after_export" value="yes" data-delete-after-export> Delete exported accounts after download</label>
+      <div class="notice danger delete-confirm-block" hidden>
+        <p>This will permanently delete the selected accounts from your account list after export. This cannot be recovered.</p>
+        <label class="check"><input form="account-export-form" type="checkbox" name="confirm_delete_after_export" value="yes"> I understand and confirm deletion after export generation.</label>
+      </div>
+      <button class="button primary" form="account-export-form">Download TXT</button>
+    </div>
+  </div>
+</div>
 <%- include('../partials/foot') %>

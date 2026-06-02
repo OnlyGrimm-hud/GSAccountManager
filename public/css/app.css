@@ -271,6 +271,12 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
 .proxy-metrics {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
+.account-metrics {
+  grid-template-columns: repeat(8, minmax(120px, 1fr));
+}
+.account-filters {
+  grid-template-columns: repeat(9, minmax(110px, 1fr));
+}
 .secret-control {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -361,6 +367,10 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
   background: var(--panel-2);
   color: var(--gold);
   font-weight: 800;
+}
+.admin-badge {
+  color: var(--gold);
+  border-color: rgba(214, 168, 79, .45);
 }
 .checklist-grid {
   display: grid;
@@ -470,12 +480,45 @@ td form {
 .inline-form select {
   min-width: 170px;
 }
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, .72);
+}
+.modal[hidden] {
+  display: none;
+}
+.modal-panel {
+  width: min(940px, 100%);
+  max-height: min(86vh, 900px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .5);
+}
+.preview-box {
+  display: grid;
+  gap: 10px;
+}
+tr.invalid td {
+  color: var(--danger);
+}
+.delete-confirm-block {
+  display: grid;
+  gap: 8px;
+}
 
 @media (max-width: 1100px) {
-  .metric-grid, .steps, .step-grid, .proxy-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric-grid, .steps, .step-grid, .proxy-metrics, .account-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .content-grid, .form-grid.two, .form-grid.three, .dashboard-hero { grid-template-columns: 1fr; }
   .helper-hero { grid-template-columns: 1fr; }
-  .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .filters, .account-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .copy-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -487,7 +530,7 @@ td form {
     border-bottom: 1px solid var(--line);
   }
   .shell { margin-left: 0; padding: 16px; }
-  .metric-grid, .steps, .step-grid, .filters, .filters.compact, .copy-grid, .proxy-metrics, .import-stats { grid-template-columns: 1fr; }
+  .metric-grid, .steps, .step-grid, .filters, .filters.compact, .copy-grid, .proxy-metrics, .account-metrics, .account-filters, .import-stats { grid-template-columns: 1fr; }
   .workflow-hero, .topbar, .panel-head { align-items: flex-start; flex-direction: column; }
   .user-menu { flex-wrap: wrap; }
   table { display: block; overflow-x: auto; }

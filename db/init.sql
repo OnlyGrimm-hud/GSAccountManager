@@ -477,6 +477,7 @@ FROM (VALUES
   ('max_accounts_per_proxy', '5'),
   ('preferred_export_format', 'legacy_user_pass'),
   ('export_format_default', 'legacy_user_pass'),
+  ('default_export_delimiter', ':'),
   ('workflow_mode', 'manual'),
   ('dense_table_mode', 'false'),
   ('screenshot_interval_seconds', '30'),

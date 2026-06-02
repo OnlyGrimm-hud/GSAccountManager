@@ -1,4 +1,6 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const session = require('express-session');
 const PgSession = require('connect-pg-simple')(session);
@@ -169,8 +171,8 @@ app.post('/api/companion/pair/complete', companionLimiter, async (req, res, next
       [pair.rows[0].user_id, deviceName, tokenHash, escapeText(req.body.companion_version || req.body.version)]
     );
     await db.query('UPDATE helper_pairing_codes SET used_at=NOW() WHERE id=$1', [pair.rows[0].id]);
-    await activity.log(pair.rows[0].user_id, 'companion_device_connected', 'companion_device', result.rows[0].id, `Companion device connected: ${deviceName}`);
-    await auditLog(null, pair.rows[0].user_id, 'companion_device_connected', 'companion_device', result.rows[0].id, 'Companion device connected');
+    await activity.log(pair.rows[0].user_id, 'companion_pair', 'companion_device', result.rows[0].id, `Companion device connected: ${deviceName}`);
+    await auditLog(null, pair.rows[0].user_id, 'companion_pair', 'companion_device', result.rows[0].id, 'Companion device connected');
     res.json({ device: result.rows[0], token });
   } catch (err) { next(err); }
 });
@@ -334,15 +336,22 @@ app.post('/api/companion/devices/:id/revoke', requireAuth, async (req, res, next
       [req.params.id, req.currentUserId]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Companion device not found.' });
-    await activity.log(req.currentUserId, 'companion_device_revoked', 'companion_device', result.rows[0].id, `Revoked companion device ${result.rows[0].device_name || result.rows[0].id}`);
+    await activity.log(req.currentUserId, 'companion_revoke', 'companion_device', result.rows[0].id, `Revoked companion device ${result.rows[0].device_name || result.rows[0].id}`);
+    await auditLog(req.currentUserId, req.currentUserId, 'companion_revoke', 'companion_device', result.rows[0].id, 'Revoked companion device');
     res.json({ ok: true, device: result.rows[0] });
   } catch (err) { next(err); }
 });
 
 app.get('/admin', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    const [userCounts, accountCounts, proxyCounts, companionCounts, auditRows] = await Promise.all([
+    const [userCounts, userTotals, accountCounts, proxyCounts, companionCounts, auditRows] = await Promise.all([
       db.query(`SELECT subscription_status, COUNT(*)::int count FROM users GROUP BY subscription_status`),
+      db.query(`SELECT
+        COUNT(*)::int total,
+        COUNT(*) FILTER (WHERE subscription_status='active')::int active,
+        COUNT(*) FILTER (WHERE subscription_status='inactive')::int inactive,
+        COUNT(*) FILTER (WHERE subscription_status='banned')::int banned
+       FROM users`),
       db.query(`SELECT COUNT(*)::int total FROM accounts`),
       db.query(`SELECT COUNT(*)::int total FROM proxies`),
       db.query(`SELECT status, COUNT(*)::int count FROM companion_devices GROUP BY status`),
@@ -357,6 +366,7 @@ app.get('/admin', requireAuth, requireAdmin, async (req, res, next) => {
     res.render('admin/dashboard', {
       title: 'Admin',
       userCounts: userCounts.rows,
+      userTotals: userTotals.rows[0],
       accountCount: accountCounts.rows[0].total,
       proxyCount: proxyCounts.rows[0].total,
       companionCounts: companionCounts.rows,
@@ -493,7 +503,8 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
       category: escapeText(req.query.category),
       country_code: escapeText(req.query.country_code),
       has_proxy: escapeText(req.query.has_proxy),
-      has_otp: escapeText(req.query.has_otp)
+      has_otp: escapeText(req.query.has_otp),
+      created_date: escapeText(req.query.created_date)
     };
     const clauses = ['a.user_id = $1'];
     const params = [userId];
@@ -510,13 +521,48 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
     if (filters.has_proxy === 'no') clauses.push('a.assigned_http_proxy_id IS NULL AND a.proxy_id IS NULL');
     if (filters.has_otp === 'yes') clauses.push('a.otp_secret_encrypted IS NOT NULL');
     if (filters.has_otp === 'no') clauses.push('a.otp_secret_encrypted IS NULL');
+    if (filters.created_date === 'today') clauses.push(`a.created_at >= CURRENT_DATE`);
+    if (filters.created_date === '7d') clauses.push(`a.created_at >= NOW() - INTERVAL '7 days'`);
+    if (filters.created_date === '30d') clauses.push(`a.created_at >= NOW() - INTERVAL '30 days'`);
+    if (filters.created_date === 'older_30d') clauses.push(`a.created_at < NOW() - INTERVAL '30 days'`);
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-    const rows = await db.query(
-      `SELECT a.*, p.host proxy_host, p.port proxy_port, p.status proxy_status, p.proxy_type
-       FROM accounts a LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id) AND p.user_id = a.user_id
-       ${where} ORDER BY a.updated_at DESC LIMIT 300`, params
-    );
-    res.render('accounts/index', { title: 'Accounts', accounts: rows.rows, filters, mask });
+    const [rows, stats, categories, proxyCategories, countries, settings] = await Promise.all([
+      db.query(
+        `SELECT a.*, p.host proxy_host, p.port proxy_port, p.status proxy_status, p.proxy_type
+         FROM accounts a LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id) AND p.user_id = a.user_id
+         ${where} ORDER BY a.updated_at DESC LIMIT 300`, params
+      ),
+      db.query(
+        `SELECT
+          COUNT(*)::int total,
+          COUNT(*) FILTER (WHERE account_type='legacy')::int legacy,
+          COUNT(*) FILTER (WHERE account_type='jagex')::int jagex,
+          COUNT(*) FILTER (WHERE COALESCE(assigned_http_proxy_id, proxy_id, assigned_socks5_proxy_id) IS NOT NULL)::int with_proxy,
+          COUNT(*) FILTER (WHERE COALESCE(assigned_http_proxy_id, proxy_id, assigned_socks5_proxy_id) IS NULL)::int without_proxy,
+          COUNT(*) FILTER (WHERE status='available')::int active,
+          COUNT(*) FILTER (WHERE status='in_progress')::int in_progress,
+          COUNT(*) FILTER (WHERE status='completed')::int completed,
+          COUNT(*) FILTER (WHERE status='archived' OR archived_at IS NOT NULL)::int archived
+         FROM accounts WHERE user_id=$1`,
+        [userId]
+      ),
+      db.query(`SELECT DISTINCT category FROM accounts WHERE user_id=$1 AND category IS NOT NULL AND category <> '' ORDER BY category`, [userId]),
+      db.query(`SELECT DISTINCT category FROM proxies WHERE user_id=$1 AND category IS NOT NULL AND category <> '' ORDER BY category`, [userId]),
+      db.query(`SELECT DISTINCT country_code FROM accounts WHERE user_id=$1 AND country_code IS NOT NULL AND country_code <> '' ORDER BY country_code`, [userId]),
+      getSettings(userId)
+    ]);
+    res.render('accounts/index', {
+      title: 'Accounts',
+      accounts: rows.rows,
+      stats: stats.rows[0],
+      categories: categories.rows.map(row => row.category),
+      proxyCategories: proxyCategories.rows.map(row => row.category),
+      countries: countries.rows.map(row => row.country_code),
+      filters,
+      settings,
+      query: req.query,
+      mask
+    });
   } catch (err) { next(err); }
 });
 
@@ -535,8 +581,81 @@ app.post('/accounts', requireAuth, async (req, res, next) => {
     await enforceProxyOwnership(userId, account);
     if (!account.username || !account.legacy_password) throw new Error('Login and password are required.');
     const result = await db.query(accountInsertSql(), accountParams(account, userId));
-    await activity.log(userId, 'account_created', 'account', result.rows[0].id, `Created account ${account.username}`, { account_type: account.account_type });
+    await activity.log(userId, 'account_created', 'account', result.rows[0].id, `Created account ${mask(account.username)}`, { account_type: account.account_type });
     res.redirect(`/accounts/${result.rows[0].id}`);
+  } catch (err) { next(err); }
+});
+
+app.post('/accounts/import', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    if (req.body.confirm_import !== 'yes') throw new Error('Preview the account import before confirming.');
+    const rows = parseAccountImport(req.body.accounts_text || '', req.body.delimiter || ':', { account_type: req.body.account_type });
+    await markDuplicates(userId, rows);
+    let imported = 0;
+    let skipped = 0;
+    for (const row of rows) {
+      if (!row.valid || row.duplicate) {
+        skipped += 1;
+        continue;
+      }
+      const account = accountFromImport(row, req.body);
+      const result = await db.query(accountInsertSql('ON CONFLICT (user_id, username) DO NOTHING'), accountParams(account, userId));
+      if (result.rowCount) imported += 1;
+      else skipped += 1;
+    }
+    await recordImportExportRun(userId, 'import_accounts', imported, req.body.account_type || null, {
+      skipped,
+      delimiter: req.body.delimiter || ':',
+      account_category: escapeText(req.body.category),
+      proxy_category: escapeText(req.body.proxy_category),
+      country_code: escapeText(req.body.country_code).toUpperCase()
+    });
+    await activity.log(userId, 'import', 'account', null, `Imported ${imported} account line(s)`, { skipped, account_type: req.body.account_type || 'legacy' });
+    await auditLog(userId, userId, 'import', 'account', null, `Imported ${imported} account line(s)`, { skipped, account_type: req.body.account_type || 'legacy' });
+    res.redirect(`/accounts?imported=${imported}&skipped=${skipped}`);
+  } catch (err) { next(err); }
+});
+
+app.post('/accounts/export', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const selectedIds = selectedAccountIds(req.body);
+    if (!selectedIds.length) throw new Error('Select at least one account to export.');
+    const format = oneOf(req.body.export_format || req.body.format, exportFormats, 'username_password');
+    const delimiter = normalizeDelimiter(req.body.delimiter || ':');
+    const exportResult = await buildSelectedAccountExport(userId, {
+      account_ids: selectedIds,
+      format,
+      delimiter,
+      custom_fields: req.body.custom_fields
+    });
+    if (!exportResult.rows.length) throw new Error('No selected accounts were available to export.');
+    const filename = `gs-accounts-${new Date().toISOString().slice(0, 10)}.txt`;
+    const deleteAfterExport = req.body.delete_after_export === 'yes';
+    const confirmDelete = req.body.confirm_delete_after_export === 'yes';
+    await recordImportExportRun(userId, 'export_accounts', exportResult.rows.length, format, {
+      selected_count: selectedIds.length,
+      delete_after_export: deleteAfterExport && confirmDelete
+    });
+    await activity.log(userId, 'export', 'account', null, `Exported ${exportResult.rows.length} selected account(s)`, { format, selected_count: selectedIds.length });
+    await auditLog(userId, userId, 'export', 'account', null, `Exported ${exportResult.rows.length} selected account(s)`, { format, selected_count: selectedIds.length });
+    if (deleteAfterExport) {
+      if (!confirmDelete) throw new Error('Delete after export requires the second confirmation.');
+      const deleted = await db.query(
+        `DELETE FROM accounts
+         WHERE user_id=$1 AND id = ANY($2)
+         RETURNING id`,
+        [userId, exportResult.accountIds]
+      );
+      await activity.log(userId, 'delete_after_export', 'account', null, `Deleted ${deleted.rowCount} exported account(s) after TXT generation`, { deleted_count: deleted.rowCount });
+      await auditLog(userId, userId, 'delete_after_export', 'account', null, `Deleted ${deleted.rowCount} exported account(s) after TXT generation`, { deleted_count: deleted.rowCount });
+    } else {
+      await db.query('UPDATE accounts SET exported_at=NOW(), updated_at=NOW() WHERE user_id=$1 AND id = ANY($2)', [userId, exportResult.accountIds]);
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(`${exportResult.rows.join('\n')}\n`);
   } catch (err) { next(err); }
 });
 
@@ -562,7 +681,7 @@ app.post('/accounts/:id', requireAuth, async (req, res, next) => {
     if (!account.username || !account.legacy_password) throw new Error('Login and password are required.');
     const archive = existing.account.status !== 'upgraded' && account.status === 'upgraded';
     await db.query(accountUpdateSql(), [...accountParams(account, userId), archive, req.params.id]);
-    await activity.log(userId, 'account_updated', 'account', req.params.id, `Updated account ${account.username}`, { status: account.status, upgrade_status: account.upgrade_status });
+    await activity.log(userId, 'account_updated', 'account', req.params.id, `Updated account ${mask(account.username)}`, { status: account.status, upgrade_status: account.upgrade_status });
     res.redirect(`/accounts/${req.params.id}`);
   } catch (err) { next(err); }
 });
@@ -577,7 +696,7 @@ app.post('/accounts/:id/delete', requireAuth, async (req, res, next) => {
       [req.params.id, userId]
     );
     if (!result.rows[0]) throw new Error('Account not found.');
-    await activity.log(userId, 'account_deleted', 'account', result.rows[0].id, `Deleted account ${result.rows[0].legacy_login || result.rows[0].username}`);
+    await activity.log(userId, 'account_deleted', 'account', result.rows[0].id, `Deleted account ${mask(result.rows[0].legacy_login || result.rows[0].username)}`);
     res.redirect('/accounts');
   } catch (err) { next(err); }
 });
@@ -597,7 +716,30 @@ app.get('/accounts/:id/copy/:field', requireAuth, async (req, res, next) => {
     } else if (field === 'birth_date') value = birthDate(account);
     else if (field in decrypted) value = decrypted[field] || '';
     else value = account[field] || '';
-    await activity.log(userId, 'field_copied', 'account', account.id, `Copied ${field}`, { field });
+    const action = sensitiveCopyField(field) ? 'copy_secret' : 'field_copied';
+    await activity.log(userId, action, 'account', account.id, `Copied ${field}`, { field });
+    if (action === 'copy_secret') await auditLog(userId, userId, action, 'account', account.id, `Copied ${field}`, { field });
+    res.json({ value });
+  } catch (err) { next(err); }
+});
+
+app.get('/accounts/:id/reveal/:field', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const { account, decrypted } = await loadAccount(userId, req.params.id);
+    const field = req.params.field;
+    if (!copyFields.includes(field)) return res.status(404).json({ error: 'Unsupported field.' });
+    let value = '';
+    if (field === 'username' || field === 'legacy_login') value = account.legacy_login || account.username;
+    else if (field === 'password' || field === 'legacy_password') value = decrypted.legacy_password || decrypted.password;
+    else if (field === 'otp_code') {
+      if (!decrypted.otp_secret) return res.status(404).json({ error: 'No OTP secret saved.' });
+      value = currentTotp(decrypted.otp_secret).code;
+    } else if (field === 'birth_date') value = birthDate(account);
+    else if (field in decrypted) value = decrypted[field] || '';
+    else value = account[field] || '';
+    await activity.log(userId, 'reveal_secret', 'account', account.id, `Revealed ${field}`, { field });
+    await auditLog(userId, userId, 'reveal_secret', 'account', account.id, `Revealed ${field}`, { field });
     res.json({ value });
   } catch (err) { next(err); }
 });
@@ -641,7 +783,7 @@ app.post('/workflow/:id/status', requireAuth, async (req, res, next) => {
 app.get('/proxies', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
-    const [rows, counts, settings] = await Promise.all([
+    const [rows, counts, settings, categories] = await Promise.all([
       db.query(`SELECT p.*, COUNT(a.id)::int assigned_count FROM proxies p LEFT JOIN accounts a ON COALESCE(a.assigned_http_proxy_id, a.proxy_id)=p.id AND a.user_id=p.user_id WHERE p.user_id=$1 GROUP BY p.id ORDER BY p.updated_at DESC`, [userId]),
       db.query(`SELECT
         COUNT(*)::int total,
@@ -651,9 +793,10 @@ app.get('/proxies', requireAuth, async (req, res, next) => {
         COUNT(*) FILTER (WHERE status='blocked')::int blocked,
         COUNT(*) FILTER (WHERE status='review')::int review
        FROM proxies p WHERE p.user_id=$1`, [userId]),
-      getSettings(userId)
+      getSettings(userId),
+      db.query(`SELECT DISTINCT category FROM proxies WHERE user_id=$1 AND category IS NOT NULL AND category <> '' ORDER BY category`, [userId])
     ]);
-    res.render('proxies', { title: 'Proxies', proxies: rows.rows, counts: counts.rows[0], settings, mask });
+    res.render('proxies', { title: 'Proxies', proxies: rows.rows, counts: counts.rows[0], settings, categories: categories.rows.map(row => row.category), query: req.query, mask });
   } catch (err) { next(err); }
 });
 
@@ -661,18 +804,48 @@ app.post('/proxies', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
     if (req.body.bulk) {
-      const lines = parseProxyImport(req.body.bulk);
+      const lines = parseProxyImport(req.body.bulk, req.body.delimiter || ':', { proxy_type: req.body.proxy_type || 'HTTP', category: req.body.category });
       let imported = 0;
       for (const line of lines.filter(row => row.valid)) {
         const result = await insertProxy(userId, { ...req.body, ...line, proxy_type: req.body.proxy_type || line.proxy_type });
         if (result.rowCount !== 0) imported += 1;
       }
-      await activity.log(userId, 'proxies_imported', 'proxy', null, `Imported ${imported} proxy line(s)`);
+      await activity.log(userId, 'import', 'proxy', null, `Imported ${imported} proxy line(s)`);
+      await auditLog(userId, userId, 'import', 'proxy', null, `Imported ${imported} proxy line(s)`);
     } else {
       const result = await insertProxy(userId, req.body);
       await activity.log(userId, 'proxy_created', 'proxy', result.rows[0].id, `Created proxy ${req.body.host}:${req.body.port}`);
     }
     res.redirect('/proxies');
+  } catch (err) { next(err); }
+});
+
+app.post('/proxies/import', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    if (req.body.confirm_import !== 'yes') throw new Error('Preview the proxy import before confirming.');
+    const lines = parseProxyImport(req.body.proxies_text || req.body.bulk || '', req.body.delimiter || ':', {
+      proxy_type: req.body.proxy_type || 'HTTP',
+      category: escapeText(req.body.category)
+    });
+    let imported = 0;
+    let invalid = 0;
+    for (const line of lines) {
+      if (!line.valid) {
+        invalid += 1;
+        continue;
+      }
+      const result = await insertProxy(userId, { ...req.body, ...line, proxy_type: req.body.proxy_type || line.proxy_type });
+      if (result.rowCount !== 0) imported += 1;
+    }
+    await recordImportExportRun(userId, 'import_proxies', imported, req.body.proxy_type || 'HTTP', {
+      invalid,
+      delimiter: req.body.delimiter || ':',
+      category: escapeText(req.body.category)
+    });
+    await activity.log(userId, 'import', 'proxy', null, `Imported ${imported} proxy line(s)`, { invalid, proxy_type: req.body.proxy_type || 'HTTP' });
+    await auditLog(userId, userId, 'import', 'proxy', null, `Imported ${imported} proxy line(s)`, { invalid, proxy_type: req.body.proxy_type || 'HTTP' });
+    res.redirect(`/proxies?imported=${imported}&invalid=${invalid}`);
   } catch (err) { next(err); }
 });
 
@@ -835,7 +1008,95 @@ app.get('/local-helper', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-app.get('/companion', requireAuth, (req, res) => res.redirect('/local-helper'));
+app.get('/companion', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const [helper, settings, devices, statuses, snapshot] = await Promise.all([
+      helperStatus(userId),
+      getSettings(userId),
+      db.query(
+        `SELECT id, device_name, companion_version, status, allow_screenshots, last_seen_at, revoked_at, created_at, updated_at
+         FROM companion_devices
+         WHERE user_id=$1
+         ORDER BY
+           CASE WHEN status='connected' THEN 0 WHEN status='disconnected' THEN 1 ELSE 2 END,
+           last_seen_at DESC NULLS LAST,
+           updated_at DESC
+         LIMIT 50`,
+        [userId]
+      ),
+      db.query(
+        `SELECT s.*, d.device_name
+         FROM companion_client_status s
+         LEFT JOIN companion_devices d ON d.id=s.companion_device_id AND d.user_id=s.user_id
+         WHERE s.user_id=$1
+         ORDER BY s.last_seen_at DESC
+         LIMIT 20`,
+        [userId]
+      ),
+      db.query(
+        `SELECT id, window_title, image_size, created_at
+         FROM live_snapshots
+         WHERE user_id=$1
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [userId]
+      )
+    ]);
+    const pairingCode = req.session.helperPairingCode || null;
+    req.session.helperPairingCode = null;
+    res.render('companion', {
+      title: 'Companion',
+      helper,
+      settings,
+      devices: devices.rows,
+      clientStatuses: statuses.rows,
+      snapshot: snapshot.rows[0] || null,
+      pairingCode,
+      download: helperDownloadMetadata()
+    });
+  } catch (err) { next(err); }
+});
+
+app.post('/companion/pairing-code', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const code = generatePairingCode();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    await db.query(
+      `UPDATE helper_pairing_codes
+       SET expires_at=NOW()
+       WHERE user_id=$1 AND used_at IS NULL AND expires_at > NOW()`,
+      [userId]
+    );
+    await db.query(
+      `INSERT INTO helper_pairing_codes (user_id, code_hash, expires_at)
+       VALUES ($1, $2, $3)`,
+      [userId, hashPairingCode(code), expiresAt]
+    );
+    req.session.helperPairingCode = { code, expiresAt: expiresAt.toISOString() };
+    await activity.log(userId, 'companion_pair', 'companion', null, 'Generated a short-lived Companion pairing code');
+    await auditLog(userId, userId, 'companion_pair', 'companion', null, 'Generated a short-lived Companion pairing code');
+    res.redirect('/companion');
+  } catch (err) { next(err); }
+});
+
+app.post('/companion/devices/:id/revoke', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const result = await db.query(
+      `UPDATE companion_devices
+       SET status='revoked', revoked_at=NOW(), updated_at=NOW()
+       WHERE id=$1 AND user_id=$2
+       RETURNING id, device_name`,
+      [req.params.id, userId]
+    );
+    if (!result.rows[0]) throw new Error('Companion device not found.');
+    await activity.log(userId, 'companion_revoke', 'companion_device', result.rows[0].id, `Revoked companion device ${result.rows[0].device_name || result.rows[0].id}`);
+    await auditLog(userId, userId, 'companion_revoke', 'companion_device', result.rows[0].id, 'Revoked companion device');
+    res.redirect('/companion');
+  } catch (err) { next(err); }
+});
 
 app.post('/local-helper/pairing-code', requireAuth, async (req, res, next) => {
   try {
@@ -854,15 +1115,21 @@ app.post('/local-helper/pairing-code', requireAuth, async (req, res, next) => {
       [userId, hashPairingCode(code), expiresAt]
     );
     req.session.helperPairingCode = { code, expiresAt: expiresAt.toISOString() };
-    await activity.log(userId, 'companion_pairing_code_created', 'companion', null, 'Generated a short-lived Companion pairing code');
-    res.redirect('/local-helper');
+    await activity.log(userId, 'companion_pair', 'companion', null, 'Generated a short-lived Companion pairing code');
+    await auditLog(userId, userId, 'companion_pair', 'companion', null, 'Generated a short-lived Companion pairing code');
+    res.redirect('/companion');
   } catch (err) { next(err); }
 });
 
 app.get('/downloads/helper/windows', requireAuth, (req, res) => {
-  res.status(404).render('helper-download', {
+  const download = helperDownloadMetadata();
+  if (download.available) {
+    const windowsPath = path.join(__dirname, '..', 'companion', 'dist', 'GS Account Manager Companion Setup.exe');
+    return res.download(windowsPath, 'GS Account Manager Companion Setup.exe');
+  }
+  return res.status(404).render('helper-download', {
     title: 'GS Account Manager Companion Download',
-    download: helperDownloadMetadata()
+    download
   });
 });
 
@@ -891,7 +1158,7 @@ app.post('/settings', requireAuth, async (req, res, next) => {
       'app_name', 'default_account_type', 'default_proxy_type', 'default_email_provider',
       'email_signup_url', 'email_signin_url', 'account_settings_url', 'upgrade_url',
       'password_length', 'max_accounts_per_proxy', 'preferred_export_format', 'export_format_default',
-      'export_behavior_default', 'mask_sensitive_values', 'otp_refresh_interval',
+      'default_export_delimiter', 'export_behavior_default', 'mask_sensitive_values', 'otp_refresh_interval',
       'require_helper_for_proxy_actions', 'allow_website_only_browser_open',
       'warn_before_opening_without_helper', 'require_confirmation_before_direct_open',
       'show_proxy_mode_before_open', 'enable_assisted_fill_buttons', 'theme_name', 'workflow_mode'
@@ -969,6 +1236,7 @@ const defaultSettings = {
   max_accounts_per_proxy: '5',
   preferred_export_format: 'legacy_user_pass',
   export_format_default: 'legacy_user_pass',
+  default_export_delimiter: ':',
   workflow_mode: 'manual',
   dense_table_mode: 'false',
   screenshot_interval_seconds: '30',
@@ -1016,10 +1284,22 @@ function attachCurrentUser(req, res, next) {
 
 async function requireUserRecord(req, res, next) {
   try {
-    const result = await db.query('SELECT * FROM users WHERE id=$1', [req.session.userId]);
-    const user = result.rows[0];
+    let result = await db.query('SELECT * FROM users WHERE id=$1', [req.session.userId]);
+    let user = result.rows[0];
     if (!user) {
       return req.session.destroy(() => res.redirect('/login'));
+    }
+    if (config.adminDiscordIdSet.has(String(user.discord_id)) && (user.role !== 'admin' || user.subscription_status !== 'active')) {
+      result = await db.query(
+        `UPDATE users
+         SET role='admin', subscription_status='active', disabled_at=NULL, disabled_by_user_id=NULL, updated_at=NOW()
+         WHERE id=$1
+         RETURNING *`,
+        [user.id]
+      );
+      user = result.rows[0];
+      await activity.log(user.id, 'admin_discord_id_verified', 'user', user.id, 'ADMIN_DISCORD_IDS granted admin access');
+      await auditLog(user.id, user.id, 'admin_discord_id_verified', 'user', user.id, 'ADMIN_DISCORD_IDS granted admin access');
     }
     req.currentUserId = Number(user.id);
     req.currentUserRecord = user;
@@ -1053,11 +1333,13 @@ function requireAdmin(req, res, next) {
 }
 
 function helperDownloadMetadata() {
+  const windowsPath = path.join(__dirname, '..', 'companion', 'dist', 'GS Account Manager Companion Setup.exe');
+  const available = fs.existsSync(windowsPath);
   return {
-    available: false,
-    version: 'Not released',
-    releaseDate: 'Coming soon',
-    fileSize: '',
+    available,
+    version: available ? config.appVersion : 'Coming soon',
+    releaseDate: available ? 'Packaged locally' : 'Coming soon',
+    fileSize: available ? `${Math.ceil(fs.statSync(windowsPath).size / 1024 / 1024)} MB` : '',
     windowsPath: '/downloads/helper/windows'
   };
 }
@@ -1086,6 +1368,14 @@ function maskEndpoint(host) {
   const visible = value.replace(/[^a-z0-9.-]/gi, '');
   if (visible.length <= 4) return '*'.repeat(visible.length);
   return `${visible.slice(0, 2)}${'*'.repeat(Math.max(3, visible.length - 4))}${visible.slice(-2)}`;
+}
+
+function sensitiveCopyField(field) {
+  return [
+    'password', 'legacy_password', 'otp_code', 'otp_secret', 'bank_pin',
+    'recovery_email', 'recovery_email_password', 'target_email',
+    'target_email_password', 'email_password', 'jagex_email', 'jagex_password'
+  ].includes(field);
 }
 
 async function helperStatus(userId) {
@@ -1251,31 +1541,38 @@ async function auditLog(actorUserId, userId, action, entityType, entityId, messa
 
 function accountFromBody(body, existing = {}) {
   const keep = value => value === undefined ? '' : escapeText(value);
+  const secret = (key, ...aliases) => {
+    const keys = [key, ...aliases];
+    for (const item of keys) {
+      if (Object.prototype.hasOwnProperty.call(body, item) && escapeText(body[item])) return escapeText(body[item]);
+    }
+    return existing[key] || '';
+  };
   const legacyLogin = keep(body.legacy_login || body.username);
   const jagexEmail = keep(body.jagex_email || body.target_email);
   const targetEmail = keep(body.target_email) || jagexEmail;
   const username = legacyLogin || jagexEmail;
-  const legacyPassword = keep(body.legacy_password || body.password) || existing.legacy_password || existing.password || keep(body.jagex_password) || existing.jagex_password || '';
-  const emailPassword = keep(body.email_password || body.target_email_password);
+  const legacyPassword = secret('legacy_password', 'password') || existing.password || secret('jagex_password') || '';
+  const emailPassword = secret('email_password', 'target_email_password');
   return {
     username,
     legacy_login: legacyLogin || username,
     legacy_password: legacyPassword,
     password: legacyPassword,
     account_type: oneOf(body.account_type, accountTypes, 'unknown'),
-    bank_pin: keep(body.bank_pin),
-    otp_secret: keep(body.otp_secret),
+    bank_pin: secret('bank_pin'),
+    otp_secret: secret('otp_secret'),
     display_name: keep(body.display_name),
     category: keep(body.category),
     country_code: keep(body.country_code).toUpperCase(),
     notes: keep(body.notes),
-    recovery_email: keep(body.recovery_email),
-    recovery_email_password: keep(body.recovery_email_password),
-    target_email: targetEmail,
+    recovery_email: secret('recovery_email'),
+    recovery_email_password: secret('recovery_email_password'),
+    target_email: targetEmail || existing.target_email || '',
     target_email_password: emailPassword,
     email_password: emailPassword,
-    jagex_email: jagexEmail,
-    jagex_password: keep(body.jagex_password),
+    jagex_email: jagexEmail || existing.jagex_email || '',
+    jagex_password: secret('jagex_password'),
     jagex_name: keep(body.jagex_name),
     first_name: keep(body.first_name),
     last_name: keep(body.last_name),
@@ -1381,25 +1678,27 @@ async function insertProxy(userId, body) {
 }
 
 function accountFromImport(row, body) {
+  const accountType = oneOf(body.account_type, accountTypes, 'legacy');
+  const notes = [escapeText(body.notes), row.notes].filter(Boolean).join(' ');
   return {
     username: row.username,
-    legacy_login: row.username,
+    legacy_login: accountType === 'jagex' ? '' : row.username,
     password: row.password,
-    legacy_password: row.password,
-    account_type: oneOf(body.account_type, accountTypes, 'unknown'),
+    legacy_password: accountType === 'jagex' ? '' : row.password,
+    account_type: accountType,
     bank_pin: row.bank_pin,
     otp_secret: row.otp_secret,
     display_name: '',
     category: escapeText(body.category),
     country_code: escapeText(body.country_code).toUpperCase(),
-    notes: row.notes || '',
-    recovery_email: '',
-    recovery_email_password: '',
-    target_email: '',
-    target_email_password: '',
+    notes,
+    recovery_email: row.recovery_email || '',
+    recovery_email_password: row.recovery_email_password || '',
+    target_email: accountType === 'jagex' ? row.username : '',
+    target_email_password: accountType === 'jagex' ? row.password : '',
     email_password: '',
-    jagex_email: body.account_type === 'jagex' ? row.username : '',
-    jagex_password: body.account_type === 'jagex' ? row.password : '',
+    jagex_email: accountType === 'jagex' ? row.username : '',
+    jagex_password: accountType === 'jagex' ? row.password : '',
     jagex_name: '',
     first_name: '',
     last_name: '',
@@ -1492,6 +1791,118 @@ async function applyExportAction(userId, options) {
   if (action === 'delete') {
     await activity.log(userId, 'delete_after_export_requested', 'account', null, 'Delete-after-export was requested but no records were deleted automatically');
   }
+}
+
+async function buildSelectedAccountExport(userId, options) {
+  const selectedIds = selectedAccountIds(options);
+  const result = await db.query(
+    `SELECT a.*, p.host proxy_host, p.port proxy_port, p.proxy_type, p.username_encrypted proxy_username_encrypted, p.password_encrypted proxy_password_encrypted
+     FROM accounts a
+     LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id) AND p.user_id = a.user_id
+     WHERE a.user_id=$1 AND a.id = ANY($2)
+     ORDER BY array_position($2::bigint[], a.id)`,
+    [userId, selectedIds]
+  );
+  const format = oneOf(options.format, exportFormats, 'username_password');
+  const delimiter = normalizeDelimiter(options.delimiter || ':');
+  const rows = result.rows.map(account => {
+    const decrypted = decryptedExportFields(account);
+    const fields = exportFieldList(format, options.custom_fields);
+    return fields.map(field => exportFieldValue(field, account, decrypted)).join(delimiter);
+  });
+  return { rows, accountIds: result.rows.map(row => Number(row.id)) };
+}
+
+function decryptedExportFields(account) {
+  return {
+    password: decrypt(account.password_encrypted),
+    legacy_password: decrypt(account.legacy_password_encrypted) || decrypt(account.password_encrypted),
+    bank_pin: decrypt(account.bank_pin_encrypted),
+    otp: decrypt(account.otp_secret_encrypted),
+    otp_secret: decrypt(account.otp_secret_encrypted),
+    recovery_email: decrypt(account.recovery_email_encrypted),
+    recovery_password: decrypt(account.recovery_email_password_encrypted),
+    recovery_email_password: decrypt(account.recovery_email_password_encrypted),
+    target_email: decrypt(account.target_email_encrypted),
+    target_email_password: decrypt(account.target_email_password_encrypted),
+    email_password: decrypt(account.email_password_encrypted) || decrypt(account.target_email_password_encrypted),
+    email: decrypt(account.jagex_email_encrypted) || decrypt(account.target_email_encrypted) || account.legacy_login || account.username,
+    jagex_email: decrypt(account.jagex_email_encrypted),
+    jagex_password: decrypt(account.jagex_password_encrypted),
+    proxy_username: decrypt(account.proxy_username_encrypted),
+    proxy_password: decrypt(account.proxy_password_encrypted)
+  };
+}
+
+function exportFieldList(format, customFields) {
+  const presets = {
+    username_password: ['username', 'password'],
+    legacy_user_pass: ['username', 'password'],
+    username_password_otp: ['username', 'password', 'otp'],
+    legacy_user_pass_otp: ['username', 'password', 'otp'],
+    username_password_bank_pin_otp: ['username', 'password', 'bank_pin', 'otp'],
+    legacy_user_pass_pin_otp: ['username', 'password', 'bank_pin', 'otp'],
+    legacy_user_pass_pin: ['username', 'password', 'bank_pin'],
+    email_password: ['email', 'password'],
+    jagex_email_pass: ['email', 'password'],
+    email_password_recovery: ['email', 'password', 'recovery_email', 'recovery_password'],
+    jagex_email_pass_otp: ['email', 'password', 'otp'],
+    login_email_pass_proxy: ['username', 'email', 'password', 'proxy'],
+    full: ['id', 'type', 'username', 'password', 'email', 'jagex_password', 'bank_pin', 'otp', 'recovery_email', 'recovery_password', 'proxy', 'category', 'country', 'status', 'notes'],
+    full_account_export: ['id', 'type', 'username', 'password', 'email', 'jagex_password', 'bank_pin', 'otp', 'recovery_email', 'recovery_password', 'proxy', 'category', 'country', 'status', 'notes'],
+    safe_csv: ['id', 'type', 'username', 'display_name', 'status', 'category', 'country', 'proxy', 'updated_at']
+  };
+  if (format === 'custom') {
+    const fields = String(customFields || '')
+      .split(/[\s,]+/)
+      .map(field => field.trim().toLowerCase())
+      .filter(Boolean);
+    return fields.length ? fields : presets.username_password;
+  }
+  return presets[format] || presets.username_password;
+}
+
+function exportFieldValue(field, account, decrypted) {
+  const normalized = String(field || '').toLowerCase();
+  const proxy = account.proxy_host ? `${account.proxy_host}:${account.proxy_port}` : '';
+  const values = {
+    id: account.id,
+    type: account.account_type,
+    account_type: account.account_type,
+    username: account.legacy_login || account.username || '',
+    login: account.legacy_login || account.username || '',
+    password: account.account_type === 'jagex'
+      ? decrypted.jagex_password || decrypted.password || decrypted.legacy_password
+      : decrypted.legacy_password || decrypted.password,
+    legacy_password: decrypted.legacy_password || decrypted.password,
+    email: decrypted.jagex_email || decrypted.target_email || decrypted.email || account.username || '',
+    jagex_email: decrypted.jagex_email || decrypted.target_email || '',
+    jagex_password: decrypted.jagex_password || '',
+    bank_pin: decrypted.bank_pin || '',
+    otp: decrypted.otp_secret || '',
+    otp_secret: decrypted.otp_secret || '',
+    recovery_email: decrypted.recovery_email || '',
+    recovery_password: decrypted.recovery_email_password || '',
+    recovery_email_password: decrypted.recovery_email_password || '',
+    proxy,
+    proxy_username: decrypted.proxy_username || '',
+    proxy_password: decrypted.proxy_password || '',
+    display_name: account.display_name || '',
+    category: account.category || '',
+    country: account.country_code || '',
+    country_code: account.country_code || '',
+    status: account.status || '',
+    notes: account.notes || '',
+    updated_at: account.updated_at ? new Date(account.updated_at).toISOString() : ''
+  };
+  return values[normalized] == null ? '' : String(values[normalized]);
+}
+
+function normalizeDelimiter(value) {
+  const raw = String(value || ':');
+  if (raw === '\\t' || raw.toLowerCase() === 'tab') return '\t';
+  if (raw === 'space') return ' ';
+  return raw.slice(0, 4) || ':';
 }
 
 async function enforceProxyOwnership(userId, account) {

@@ -1,31 +1,36 @@
 <%- include('partials/head') %>
 <section class="helper-hero">
   <article class="panel download-card">
-    <p class="eyebrow">Windows Companion</p>
+    <p class="eyebrow">Windows Companion App</p>
     <h2><%= companionName %></h2>
     <div class="helper-detail-grid">
-      <p class="row-line"><span>Status</span><strong>Coming soon</strong></p>
-      <p class="row-line"><span>Latest version</span><strong><%= download.version %></strong></p>
-      <p class="row-line"><span>Release date</span><strong><%= download.releaseDate %></strong></p>
-      <p class="row-line"><span>Future artifact</span><strong>GSWorkFlowManager.exe</strong></p>
+      <p class="row-line"><span>Status</span><strong><%= download.available ? 'Available' : 'Coming soon' %></strong></p>
+      <p class="row-line"><span>Version</span><strong><%= download.version %></strong></p>
+      <p class="row-line"><span>Release</span><strong><%= download.releaseDate %></strong></p>
+      <p class="row-line"><span>File size</span><strong><%= download.fileSize || 'Not packaged yet' %></strong></p>
     </div>
     <div class="actions">
-      <a class="button primary" href="<%= download.windowsPath %>">Download for Windows</a>
-      <span class="tag">Placeholder</span>
+      <% if (download.available) { %>
+        <a class="button primary" href="<%= download.windowsPath %>">Download for Windows</a>
+      <% } else { %>
+        <button class="button primary" type="button" disabled>Coming soon</button>
+      <% } %>
+      <a class="button" href="/companion">Open Companion</a>
     </div>
-    <p class="notice">Only download companion builds from GS Account Manager. The companion never bypasses CAPTCHA, MFA, security checks, or website anti-abuse systems.</p>
+    <p class="notice">Security note: the companion only connects to your own GS Account Manager account after pairing. Pairing codes expire quickly, and device tokens are stored server-side only as hashes.</p>
   </article>
 
   <article class="panel">
-    <p class="eyebrow">Pairing</p>
-    <h2>Setup Instructions</h2>
+    <p class="eyebrow">Install Instructions</p>
+    <h2>Before First Use</h2>
     <ol class="helper-list">
-      <li>Log in with Discord on the website.</li>
-      <li>Open Companion and generate a pairing code.</li>
-      <li>Enter the code in the Windows companion app.</li>
-      <li>Use controlled browser actions only after a clear user click.</li>
+      <li>Log in to GS Account Manager with Discord.</li>
+      <li>Open Companion and create a pairing code.</li>
+      <li>Install the Windows companion when the package is released.</li>
+      <li>Enter the pairing code in the local app.</li>
+      <li>Confirm the website shows the device as connected.</li>
     </ol>
-    <a class="button" href="/companion">Open Companion Page</a>
+    <p class="muted">The companion foundation currently supports pairing and heartbeat placeholders. Controlled browser fill remains planned and user-triggered only.</p>
   </article>
 </section>
 <%- include('partials/foot') %>

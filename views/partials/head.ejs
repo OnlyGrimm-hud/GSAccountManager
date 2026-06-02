@@ -36,6 +36,7 @@
           <span class="avatar avatar-fallback"><%= (user.globalName || user.username || 'U').slice(0, 1).toUpperCase() %></span>
         <% } %>
         <span><%= user.globalName || user.username %></span>
+        <% if (isAdmin) { %><span class="tag admin-badge">Admin</span><% } %>
         <form method="post" action="/logout">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
           <button class="button small">Logout</button>

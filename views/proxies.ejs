@@ -4,6 +4,25 @@
     <article class="metric"><span><%= item[1] %></span><strong><%= counts[item[0]] || 0 %></strong></article>
   <% }) %>
 </section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Network Storage</p>
+      <h2>Proxies</h2>
+    </div>
+    <div class="actions">
+      <button class="button" type="button" data-open-modal="proxy-import-modal">Import Proxies</button>
+      <form method="post" action="/proxies/auto-assign">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button class="button">Auto assign HTTP proxies</button>
+      </form>
+    </div>
+  </div>
+  <% if (query && query.imported) { %><p class="notice">Imported <%= Number(query.imported || 0) %> proxy line(s). Invalid <%= Number(query.invalid || 0) %>.</p><% } %>
+  <p class="muted">Default proxy type is HTTP. Proxy credentials stay encrypted and hidden in tables.</p>
+</section>
+
 <section class="content-grid">
   <form method="post" action="/proxies" class="panel form-grid">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -13,31 +32,26 @@
     <label>Port<input name="port" type="number" min="1" max="65535"></label>
     <label>Username<input name="username" type="password"></label>
     <label>Password<input name="password" type="password"></label>
-    <label>Category<input name="category"></label>
+    <label>Category<input list="proxy-category-options-page" name="category"></label>
     <label>Country Code<input name="country_code" maxlength="2"></label>
     <label>Status<select name="status"><% proxyStatuses.forEach(s => { %><option value="<%= s %>"><%= s %></option><% }) %></select></label>
     <label>Notes<textarea name="notes"></textarea></label>
     <button class="button primary">Save proxy</button>
   </form>
-  <form method="post" action="/proxies" class="panel form-grid">
-    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <article class="panel">
     <h2>Import Proxies</h2>
-    <p class="muted">Formats: host:port, host:port:user:pass, http://user:pass@host:port</p>
-    <label>Default Type<select name="proxy_type"><option value="HTTP">HTTP</option><option value="SOCKS5">SOCKS5</option></select></label>
-    <textarea name="bulk" rows="10"></textarea>
-    <button class="button">Import proxies</button>
-  </form>
+    <p class="muted">Use the import modal for preview and confirmation before saving. Supported formats are host:port and host:port:username:password.</p>
+    <button class="button primary" type="button" data-open-modal="proxy-import-modal">Open Import Proxies</button>
+  </article>
 </section>
+
+<datalist id="proxy-category-options-page"><% categories.forEach(category => { %><option value="<%= category %>"></option><% }) %></datalist>
+
 <section class="panel">
   <div class="panel-head">
     <h2>Saved Proxies</h2>
-    <form method="post" action="/proxies/auto-assign">
-      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <button class="button">Auto assign HTTP proxies</button>
-    </form>
+    <span class="tag">Max <%= settings.max_accounts_per_proxy || 5 %> accounts per proxy</span>
   </div>
-  <p class="muted">Max accounts per proxy: <%= settings.max_accounts_per_proxy || 5 %>. Proxy passwords stay hidden in tables.</p>
-  <p class="notice">Proxy testing and selected-proxy TXT export are coming soon. The web app does not route its own traffic through user proxies.</p>
   <table>
     <thead><tr><th>Host</th><th>Port</th><th>Type</th><th>Category</th><th>Country</th><th>Status</th><th>Assigned</th><th>Notes</th><th>Credentials</th><th>Actions</th></tr></thead>
     <tbody>
@@ -67,7 +81,39 @@
           </td>
         </tr>
       <% }) %>
+      <% if (!proxies.length) { %><tr><td colspan="10"><p class="muted">Import proxies or add one manually.</p></td></tr><% } %>
     </tbody>
   </table>
 </section>
+
+<div class="modal" id="proxy-import-modal" hidden>
+  <div class="modal-panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Import</p>
+        <h2>Import Proxies</h2>
+      </div>
+      <button class="icon-button" type="button" data-close-modal>Close</button>
+    </div>
+    <form id="proxy-import-form" method="post" action="/proxies/import" class="form-grid">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <input type="hidden" name="confirm_import" value="">
+      <div class="form-grid three">
+        <label>Proxy Type<select name="proxy_type"><option value="HTTP" selected>HTTP</option><option value="SOCKS5">SOCKS5</option></select></label>
+        <label>Proxy Category<input list="proxy-category-options-page" name="category"></label>
+        <label>Delimiter<input name="delimiter" value=":" maxlength="4" data-proxy-import-delimiter></label>
+      </div>
+      <div class="notice">
+        <strong>Format examples</strong>
+        <p class="muted">host:port | host:port:username:password</p>
+      </div>
+      <label>Pasted Proxies<textarea name="proxies_text" rows="10" placeholder="host:port" data-proxy-import-text></textarea></label>
+      <div class="actions">
+        <button class="button" type="button" data-preview-proxy-import>Preview parsed rows</button>
+        <button class="button primary" disabled data-confirm-proxy-import>Import confirmed rows</button>
+      </div>
+      <div class="preview-box" data-proxy-import-preview></div>
+    </form>
+  </div>
+</div>
 <%- include('partials/foot') %>

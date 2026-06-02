@@ -31,6 +31,19 @@ body {
   align-items: center;
   gap: 16px;
 }
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tabs button {
+  background: #1d1231;
+  color: var(--text);
+}
+.tabs button.active {
+  background: var(--gold);
+  color: #170d22;
+}
 .logo {
   display: grid;
   place-items: center;
@@ -54,9 +67,33 @@ input, button, pre {
   background: #120b1f;
   color: var(--text);
 }
+input[type="checkbox"] {
+  width: auto;
+}
 button {
   background: var(--gold);
   color: #170d22;
   font-weight: 800;
   cursor: pointer;
+}
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.status-grid p {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+.status-grid strong {
+  color: var(--text);
+}
+
+@media (max-width: 760px) {
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
 }

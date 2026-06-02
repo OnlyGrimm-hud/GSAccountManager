@@ -17,12 +17,56 @@
       </div>
     </section>
 
-    <section class="panel">
+    <nav class="tabs" aria-label="Companion tabs">
+      <button class="active" data-tab-button="pair">Pair Device</button>
+      <button data-tab-button="status">Status</button>
+      <button data-tab-button="clients">Detected Clients</button>
+      <button data-tab-button="browser">Controlled Browser</button>
+      <button data-tab-button="settings">Settings</button>
+      <button data-tab-button="logs">Logs</button>
+    </nav>
+
+    <section class="panel" data-tab-panel="pair">
       <h2>Pair Device</h2>
       <label>Website URL <input id="baseUrl" value="https://gsaccountmanager.com"></label>
       <label>Pairing Code <input id="pairingCode" placeholder="GS-XXXXXXXX"></label>
       <button id="pairButton">Pair Companion</button>
-      <pre id="output">Not paired.</pre>
+      <pre id="pairOutput">Not paired.</pre>
+    </section>
+
+    <section class="panel" data-tab-panel="status" hidden>
+      <h2>Status</h2>
+      <div class="status-grid">
+        <p><span>Website</span><strong id="statusBaseUrl">Not configured</strong></p>
+        <p><span>Device token</span><strong id="statusToken">Not paired</strong></p>
+        <p><span>Heartbeat</span><strong id="statusHeartbeat">Not sent</strong></p>
+      </div>
+      <button id="heartbeatButton">Send Heartbeat Placeholder</button>
+    </section>
+
+    <section class="panel" data-tab-panel="clients" hidden>
+      <h2>Detected Clients</h2>
+      <p>Local client detection is scaffolded only. Future detection will require user permission and will report allowed client open/closed status only.</p>
+      <pre>No client status reported yet.</pre>
+    </section>
+
+    <section class="panel" data-tab-panel="browser" hidden>
+      <h2>Controlled Browser</h2>
+      <p>Planned manual helper actions require the user to choose an account and click Fill current page. This build does not perform automatic website login, account creation, CAPTCHA solving, or auto-submit.</p>
+      <button disabled>Fill Current Page Placeholder</button>
+      <pre>Complete CAPTCHA manually, then continue.</pre>
+    </section>
+
+    <section class="panel" data-tab-panel="settings" hidden>
+      <h2>Settings</h2>
+      <label>Device Name <input id="deviceName" value="Windows Companion"></label>
+      <label><input id="allowScreenshots" type="checkbox"> Allow opt-in screenshot previews later</label>
+      <button id="saveSettingsButton">Save Settings Placeholder</button>
+    </section>
+
+    <section class="panel" data-tab-panel="logs" hidden>
+      <h2>Logs</h2>
+      <pre id="logsOutput">Companion started.</pre>
     </section>
 
     <section class="panel">
