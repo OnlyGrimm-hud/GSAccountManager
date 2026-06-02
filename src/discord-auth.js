@@ -146,8 +146,7 @@ async function claimUnownedDataForAdmin(user) {
         (SELECT COUNT(*)::int FROM accounts WHERE user_id IS NULL) unowned_accounts,
         (SELECT COUNT(*)::int FROM proxies WHERE user_id IS NULL) unowned_proxies,
         (SELECT COUNT(*)::int FROM settings WHERE user_id IS NULL) unowned_settings,
-        (SELECT COUNT(*)::int FROM activity_logs WHERE user_id IS NULL) unowned_logs`,
-      [user.id]
+        (SELECT COUNT(*)::int FROM activity_logs WHERE user_id IS NULL) unowned_logs`
     );
     const counts = ownership.rows[0];
     const hasOwner = counts.owned_accounts + counts.owned_proxies + counts.owned_settings + counts.owned_logs > 0;

@@ -11,6 +11,9 @@ const { parseAccountImport, parseProxyImport } = require('../src/parsers');
 const { currentTotp } = require('../src/otp');
 const { generatePassword } = require('../src/generators');
 
+const discordAuthSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'discord-auth.js'), 'utf8');
+assert(!discordAuthSource.includes('unowned_logs`,\n      [user.id]'));
+
 let requireAuth;
 let db;
 let app;
