@@ -22,7 +22,7 @@ services:
           name: gs-account-manager-db
           property: connectionString
       - key: ENCRYPTION_KEY
-        generateValue: true
+        sync: false
       - key: SESSION_SECRET
         generateValue: true
       - key: ADMIN_USERNAME
