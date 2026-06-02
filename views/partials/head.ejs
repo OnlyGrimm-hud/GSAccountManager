@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %> | <%= appName %></title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<% if (user) { %>
+  <aside class="sidebar">
+    <a class="brand" href="/"><span>GS</span><strong><%= appName %></strong></a>
+    <nav>
+      <a class="<%= path === '/' ? 'active' : '' %>" href="/">Dashboard</a>
+      <a class="<%= path.startsWith('/accounts') ? 'active' : '' %>" href="/accounts">Accounts</a>
+      <a class="<%= path.startsWith('/workflow') ? 'active' : '' %>" href="/workflow">Upgrade Workflow</a>
+      <a class="<%= path.startsWith('/proxies') ? 'active' : '' %>" href="/proxies">Proxies</a>
+      <a class="<%= path.startsWith('/imports-exports') ? 'active' : '' %>" href="/imports-exports">Imports / Exports</a>
+      <a class="<%= path.startsWith('/settings') ? 'active' : '' %>" href="/settings">Settings</a>
+      <a class="<%= path.startsWith('/logs') ? 'active' : '' %>" href="/logs">Logs</a>
+    </nav>
+    <form method="post" action="/logout" class="logout">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <button>Sign out</button>
+    </form>
+  </aside>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Manual workflow dashboard</p>
+        <h1><%= title %></h1>
+      </div>
+      <span class="pill">Local admin</span>
+    </header>
+<% } else { %>
+  <main class="auth-shell">
+<% } %>
