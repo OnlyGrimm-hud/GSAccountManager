@@ -1,0 +1,50 @@
+<%- include('../partials/head') %>
+<form method="post" action="<%= account.id ? `/accounts/${account.id}` : '/accounts' %>" class="edit-grid">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Account Identity</h2>
+      <a class="button small" href="/accounts">Back</a>
+    </div>
+    <div class="form-grid two">
+      <label>Username<input name="username" value="<%= account.username || '' %>" required></label>
+      <label>Password<input name="password" type="password" value="<%= decrypted.password || '' %>" required></label>
+      <label>Bank PIN<input name="bank_pin" type="password" value="<%= decrypted.bank_pin || '' %>"></label>
+      <label>OTP Key<input name="otp_secret" type="password" value="<%= decrypted.otp_secret || '' %>"></label>
+      <label>Display Name<input name="display_name" value="<%= account.display_name || '' %>"></label>
+      <label>Account Type<select name="account_type"><% accountTypes.forEach(t => { %><option value="<%= t %>" <%= account.account_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select></label>
+      <label>Category<input name="category" value="<%= account.category || '' %>"></label>
+      <label>Country Code<input name="country_code" maxlength="2" value="<%= account.country_code || '' %>"></label>
+      <label>Status<select name="status"><% accountStatuses.forEach(s => { %><option value="<%= s %>" <%= account.status === s ? 'selected' : '' %>><%= s %></option><% }) %></select></label>
+      <label>Assigned Proxy<select name="proxy_id"><option value="">No proxy</option><% proxies.forEach(proxy => { %><option value="<%= proxy.id %>" <%= account.proxy_id == proxy.id ? 'selected' : '' %>><%= proxy.host %>:<%= proxy.port %></option><% }) %></select></label>
+    </div>
+    <label>Notes<textarea name="notes"><%= account.notes || '' %></textarea></label>
+  </section>
+  <section class="panel">
+    <h2>Recovery and Jagex Target</h2>
+    <div class="form-grid two">
+      <label>Recovery Email<input name="recovery_email" type="password" value="<%= decrypted.recovery_email || '' %>"></label>
+      <label>Recovery Email Password<input name="recovery_email_password" type="password" value="<%= decrypted.recovery_email_password || '' %>"></label>
+      <label>Target/Jagex Email<input name="target_email" type="password" value="<%= decrypted.target_email || '' %>"></label>
+      <label>Target/Jagex Password<input name="jagex_password" type="password" value="<%= decrypted.jagex_password || '' %>"></label>
+      <label>Target Email Password<input name="target_email_password" type="password" value="<%= decrypted.target_email_password || '' %>"></label>
+    </div>
+    <% if (account.legacy_archived_at) { %><p class="notice">Legacy info archived locally on <%= new Date(account.legacy_archived_at).toLocaleString() %>.</p><% } %>
+  </section>
+  <% if (account.id) { %>
+    <section class="panel">
+      <h2>Manual Copy</h2>
+      <div class="actions">
+        <button type="button" class="button copy-api" data-url="/accounts/<%= account.id %>/copy/username">Copy username</button>
+        <button type="button" class="button copy-api" data-url="/accounts/<%= account.id %>/copy/password">Copy password</button>
+        <% if (otp && !otp.error) { %><button type="button" class="button copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP code</button><span class="pill" data-countdown="<%= otp.secondsRemaining %>"><%= otp.secondsRemaining %>s</span><% } %>
+        <% if (otp && otp.error) { %><span class="notice danger"><%= otp.error %></span><% } %>
+      </div>
+    </section>
+  <% } %>
+  <div class="sticky-actions">
+    <button class="button primary">Save</button>
+    <a class="button" href="/accounts">Back</a>
+  </div>
+</form>
+<%- include('../partials/foot') %>
