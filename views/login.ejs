@@ -1,0 +1,13 @@
+<%- include('partials/head') %>
+<section class="login-panel">
+  <div class="login-brand"><span>GS</span><strong>GS Account Manager</strong></div>
+  <h1>Admin Login</h1>
+  <% if (error) { %><p class="notice danger"><%= error %></p><% } %>
+  <form method="post" action="/login" class="form-grid">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label>Username<input name="username" autocomplete="username" required></label>
+    <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+    <button class="button primary">Sign in</button>
+  </form>
+</section>
+<%- include('partials/foot') %>
