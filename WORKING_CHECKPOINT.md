@@ -10,6 +10,9 @@ This checkpoint documents the currently deployed, working state of GS Account Ma
 GSAccountManager/
   db/
     init.sql
+  local-helper/
+    HELPER_PLAN.md
+    README.md
   public/
     css/app.css
     js/app.js
@@ -18,9 +21,11 @@ GSAccountManager/
   src/
     activity.js
     app-constants.js
+    browser-assist.js
     config.js
     crypto-fields.js
     db.js
+    discord-auth.js
     generators.js
     otp.js
     parsers.js
@@ -33,7 +38,9 @@ GSAccountManager/
     partials/head.ejs
     dashboard.ejs
     error.ejs
+    helper-download.ejs
     imports-exports.ejs
+    local-helper.ejs
     login.ejs
     logs.ejs
     proxies.ejs
@@ -57,7 +64,7 @@ GSAccountManager/
 - Root Directory: blank / repository root
 - Build Command: `npm install`
 - Start Command: `npm start`
-- Health Check Path: `/healthz`
+- Health Check Path: dashboard currently reports blank; target value is `/healthz`
 
 The app exposes `/healthz` and returns `200 OK`. If the Render dashboard still shows a blank health check path, set it manually to `/healthz`.
 
@@ -66,19 +73,21 @@ The app exposes `/healthz` and returns `200 OK`. If the Render dashboard still s
 - `DATABASE_URL`: Render PostgreSQL internal connection string.
 - `ENCRYPTION_KEY`: must decode to exactly 32 bytes. Use base64 from 32 random bytes or a 64-character hex string.
 - `SESSION_SECRET`: long random session secret.
-- `ADMIN_USERNAME`: admin username.
-- `ADMIN_PASSWORD`: admin password.
+- `DISCORD_CLIENT_ID`: Discord OAuth application client ID.
+- `DISCORD_CLIENT_SECRET`: Discord OAuth application client secret.
+- `DISCORD_CALLBACK_URL`: deployed Discord callback URL.
+- `APP_BASE_URL`: deployed base URL, for example `https://gsaccountmanager.com`.
+- `AUTH_MODE=discord`
 - `NODE_ENV=production`
 - `COOKIE_SECURE=true`
 - `AUTO_MIGRATE=true`
 
 Optional:
 
+- `ADMIN_USERNAME`: emergency fallback username.
+- `ADMIN_PASSWORD`: emergency fallback password.
 - `ADMIN_PASSWORD_HASH`: optional `scrypt:salt:hexhash` admin password hash.
 - `APP_NAME=GS Account Manager`
-- `DISCORD_CLIENT_ID`
-- `DISCORD_CLIENT_SECRET`
-- `DISCORD_REDIRECT_URI`
 
 ## Database Requirement
 
@@ -92,12 +101,17 @@ PostgreSQL is required before launch. The app uses PostgreSQL for:
 
 `db/init.sql` is idempotent and runs on startup when `AUTO_MIGRATE=true`. A database reset is not expected for this checkpoint.
 
+If old records have no `user_id`, the first Discord user who logs in claims them only when no prior owner exists yet. The app writes a setup warning to activity logs when this happens.
+
 ## Current Login Flow
 
 - `/login` is public.
-- Admin credentials are read from environment variables.
+- Discord OAuth is the primary login path.
+- Emergency admin credentials are optional fallback-only environment variables.
+- New Discord users default to `subscription_status=inactive`; the emergency admin fallback is `active`.
 - Login attempts are rate limited.
 - Successful login stores an authenticated session.
+- Sessions store the internal `user_id` and Discord identity display data.
 - Forms use CSRF protection.
 - Protected pages redirect to `/login` when no authenticated session exists.
 - `/logout` destroys the session and redirects to `/login`.
@@ -110,16 +124,20 @@ PostgreSQL is required before launch. The app uses PostgreSQL for:
 - Proxies: proxy storage, import, assignment counts, auto-assign request, private proxy credentials.
 - Settings: app settings, URL settings, Render checklist, production checklist, app version.
 - Logs: activity log list with filters.
-- Upgrade Workflow: manual progress and status controls.
+- Workflow: manual progress and status controls.
+- Local Helper: helper status, pairing-code generation, download placeholder, setup instructions, and safety boundaries.
 - Health: `/healthz`.
 
 ## Known Unfinished Items
 
-- Discord OAuth is only a placeholder and is not active.
+- Role enforcement is future-ready but not currently used beyond storing `role`.
 - Render MCP cannot update every dashboard setting; confirm the Render health check field is `/healthz` in the dashboard.
 - Logged-in UI flows still need manual browser testing with real admin credentials after each deploy.
 - No automated end-to-end browser test suite exists yet.
-- `ADMIN_PASSWORD_HASH` is optional; the current required path still supports env-based `ADMIN_PASSWORD`.
+- Emergency admin fallback is optional and creates its own isolated workspace.
+- Browser assist is a disabled placeholder for future user-triggered form filling only.
+- Windows Local Helper app and installer are planned but not built yet.
+- Assisted fill buttons remain disabled by default until the helper app exists.
 
 ## Manual-Workflow-Only Boundaries
 
@@ -142,4 +160,3 @@ Not allowed:
 - no CAPTCHA bypass
 - no security or verification bypass
 - no unattended background account actions
-

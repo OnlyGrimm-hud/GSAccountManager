@@ -13,16 +13,13 @@
     <nav>
       <a class="<%= path === '/' ? 'active' : '' %>" href="/">Dashboard</a>
       <a class="<%= path.startsWith('/accounts') ? 'active' : '' %>" href="/accounts">Accounts</a>
-      <a class="<%= path.startsWith('/workflow') ? 'active' : '' %>" href="/workflow">Upgrade Workflow</a>
+      <a class="<%= path.startsWith('/workflow') ? 'active' : '' %>" href="/workflow">Workflow</a>
       <a class="<%= path.startsWith('/proxies') ? 'active' : '' %>" href="/proxies">Proxies</a>
+      <a class="<%= path.startsWith('/local-helper') || path.startsWith('/downloads/helper') ? 'active' : '' %>" href="/local-helper">Local Helper</a>
       <a class="<%= path.startsWith('/imports-exports') ? 'active' : '' %>" href="/imports-exports">Imports / Exports</a>
       <a class="<%= path.startsWith('/settings') ? 'active' : '' %>" href="/settings">Settings</a>
       <a class="<%= path.startsWith('/logs') ? 'active' : '' %>" href="/logs">Logs</a>
     </nav>
-    <form method="post" action="/logout" class="logout">
-      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <button>Sign out</button>
-    </form>
   </aside>
   <main class="shell">
     <header class="topbar">
@@ -30,7 +27,18 @@
         <p class="eyebrow">Manual workflow dashboard</p>
         <h1><%= title %></h1>
       </div>
-      <span class="pill">Local admin</span>
+      <div class="user-menu">
+        <% if (user.avatar) { %>
+          <img class="avatar" src="<%= user.avatar %>" alt="">
+        <% } else { %>
+          <span class="avatar avatar-fallback"><%= (user.globalName || user.username || 'U').slice(0, 1).toUpperCase() %></span>
+        <% } %>
+        <span><%= user.globalName || user.username %></span>
+        <form method="post" action="/logout">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <button class="button small">Logout</button>
+        </form>
+      </div>
     </header>
 <% } else { %>
   <main class="auth-shell">

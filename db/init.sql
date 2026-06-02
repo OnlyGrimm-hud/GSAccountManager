@@ -1,5 +1,40 @@
+CREATE TABLE IF NOT EXISTS users (
+  id BIGSERIAL PRIMARY KEY,
+  discord_id TEXT UNIQUE NOT NULL,
+  username TEXT,
+  global_name TEXT,
+  avatar TEXT,
+  email TEXT,
+  discord_username TEXT NOT NULL,
+  discord_global_name TEXT,
+  discord_avatar TEXT,
+  discord_email TEXT,
+  role TEXT NOT NULL DEFAULT 'user',
+  subscription_status TEXT NOT NULL DEFAULT 'inactive',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_login_at TIMESTAMPTZ
+);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status TEXT NOT NULL DEFAULT 'inactive';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS global_name TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS discord_global_name TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS discord_avatar TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS discord_email TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+
+UPDATE users SET username = discord_username WHERE username IS NULL;
+UPDATE users SET global_name = discord_global_name WHERE global_name IS NULL;
+UPDATE users SET avatar = discord_avatar WHERE avatar IS NULL;
+UPDATE users SET email = discord_email WHERE email IS NULL;
+
 CREATE TABLE IF NOT EXISTS proxies (
   id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT,
   proxy_type TEXT NOT NULL DEFAULT 'HTTP',
   host TEXT NOT NULL,
   port INTEGER NOT NULL CHECK (port > 0 AND port < 65536),
@@ -15,6 +50,7 @@ CREATE TABLE IF NOT EXISTS proxies (
 
 CREATE TABLE IF NOT EXISTS accounts (
   id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT,
   username TEXT NOT NULL UNIQUE,
   password_encrypted TEXT NOT NULL,
   account_type TEXT NOT NULL DEFAULT 'legacy',
@@ -36,6 +72,8 @@ CREATE TABLE IF NOT EXISTS accounts (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE proxies ADD COLUMN IF NOT EXISTS user_id BIGINT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS user_id BIGINT;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS legacy_login TEXT;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS legacy_password_encrypted TEXT;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS email_password_encrypted TEXT;
@@ -61,6 +99,42 @@ UPDATE accounts SET credential_status = 'ready' WHERE credential_status = 'parti
 UPDATE accounts SET upgrade_status = 'complete' WHERE upgrade_status = 'pending' AND status = 'upgraded';
 UPDATE accounts SET archived_at = legacy_archived_at WHERE archived_at IS NULL AND legacy_archived_at IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS helper_devices (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  device_name TEXT,
+  device_token_hash TEXT NOT NULL,
+  helper_version TEXT,
+  status TEXT NOT NULL DEFAULT 'disconnected',
+  last_seen_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS helper_commands (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  helper_device_id BIGINT,
+  command_type TEXT NOT NULL,
+  account_id BIGINT,
+  proxy_id BIGINT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  result_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS helper_pairing_codes (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  code_hash TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'accounts_account_type_check') THEN
@@ -84,6 +158,12 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'proxies_status_check') THEN
     ALTER TABLE proxies DROP CONSTRAINT proxies_status_check;
   END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'helper_devices_status_check') THEN
+    ALTER TABLE helper_devices DROP CONSTRAINT helper_devices_status_check;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'helper_commands_status_check') THEN
+    ALTER TABLE helper_commands DROP CONSTRAINT helper_commands_status_check;
+  END IF;
 END $$;
 
 ALTER TABLE accounts
@@ -100,6 +180,10 @@ ALTER TABLE proxies
   ADD CONSTRAINT proxies_proxy_type_check CHECK (proxy_type IN ('HTTP', 'SOCKS5'));
 ALTER TABLE proxies
   ADD CONSTRAINT proxies_status_check CHECK (status IN ('untested', 'online', 'works', 'blocked', 'review'));
+ALTER TABLE helper_devices
+  ADD CONSTRAINT helper_devices_status_check CHECK (status IN ('connected', 'disconnected', 'revoked'));
+ALTER TABLE helper_commands
+  ADD CONSTRAINT helper_commands_status_check CHECK (status IN ('pending', 'accepted', 'running', 'completed', 'failed', 'cancelled'));
 
 DO $$
 BEGIN
@@ -122,6 +206,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS activity_logs (
   id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT,
   actor TEXT NOT NULL DEFAULT 'local-admin',
   action TEXT NOT NULL,
   entity_type TEXT,
@@ -131,13 +216,52 @@ CREATE TABLE IF NOT EXISTS activity_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS user_id BIGINT;
+
 CREATE TABLE IF NOT EXISTS settings (
+  user_id BIGINT,
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO settings (key, value) VALUES
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS user_id BIGINT;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check') THEN
+    ALTER TABLE users DROP CONSTRAINT users_role_check;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_subscription_status_check') THEN
+    ALTER TABLE users DROP CONSTRAINT users_subscription_status_check;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'accounts_username_key') THEN
+    ALTER TABLE accounts DROP CONSTRAINT accounts_username_key;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'settings_pkey') THEN
+    ALTER TABLE settings DROP CONSTRAINT settings_pkey;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check') THEN
+    ALTER TABLE users
+      ADD CONSTRAINT users_role_check CHECK (role IN ('owner', 'admin', 'user'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_subscription_status_check') THEN
+    ALTER TABLE users
+      ADD CONSTRAINT users_subscription_status_check CHECK (subscription_status IN ('inactive', 'active', 'trialing', 'past_due', 'cancelled'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'accounts_user_username_unique') THEN
+    ALTER TABLE accounts
+      ADD CONSTRAINT accounts_user_username_unique UNIQUE (user_id, username);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'settings_user_key_unique') THEN
+    ALTER TABLE settings
+      ADD CONSTRAINT settings_user_key_unique UNIQUE (user_id, key);
+  END IF;
+END $$;
+
+INSERT INTO settings (key, value)
+SELECT defaults.key, defaults.value
+FROM (VALUES
   ('app_name', 'GS Account Manager'),
   ('default_account_type', 'legacy'),
   ('default_proxy_type', 'HTTP'),
@@ -152,10 +276,22 @@ INSERT INTO settings (key, value) VALUES
   ('export_behavior_default', 'keep'),
   ('mask_sensitive_values', 'true'),
   ('otp_refresh_interval', '30'),
+  ('require_helper_for_proxy_actions', 'true'),
+  ('allow_website_only_browser_open', 'true'),
+  ('warn_before_opening_without_helper', 'true'),
+  ('require_confirmation_before_direct_open', 'true'),
+  ('show_proxy_mode_before_open', 'true'),
+  ('enable_assisted_fill_buttons', 'false'),
   ('theme_name', 'Premium Dark'),
   ('app_version', '0.1.0')
-ON CONFLICT (key) DO NOTHING;
+) AS defaults(key, value)
+WHERE NOT EXISTS (
+  SELECT 1 FROM settings s
+  WHERE s.user_id IS NULL AND s.key = defaults.key
+);
 
+CREATE INDEX IF NOT EXISTS idx_users_discord_id ON users(discord_id);
+CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(status);
 CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(account_type);
 CREATE INDEX IF NOT EXISTS idx_accounts_category ON accounts(category);
@@ -164,5 +300,69 @@ CREATE INDEX IF NOT EXISTS idx_accounts_http_proxy ON accounts(assigned_http_pro
 CREATE INDEX IF NOT EXISTS idx_accounts_upgrade_status ON accounts(upgrade_status);
 CREATE INDEX IF NOT EXISTS idx_accounts_exported_at ON accounts(exported_at);
 CREATE INDEX IF NOT EXISTS idx_accounts_archived_at ON accounts(archived_at);
+CREATE INDEX IF NOT EXISTS idx_proxies_user ON proxies(user_id);
 CREATE INDEX IF NOT EXISTS idx_proxies_status ON proxies(status);
+CREATE INDEX IF NOT EXISTS idx_settings_user ON settings(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON activity_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON activity_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_helper_devices_user ON helper_devices(user_id);
+CREATE INDEX IF NOT EXISTS idx_helper_devices_status ON helper_devices(status);
+CREATE INDEX IF NOT EXISTS idx_helper_commands_user ON helper_commands(user_id);
+CREATE INDEX IF NOT EXISTS idx_helper_commands_device ON helper_commands(helper_device_id);
+CREATE INDEX IF NOT EXISTS idx_helper_commands_status ON helper_commands(status);
+CREATE INDEX IF NOT EXISTS idx_helper_pairing_codes_user ON helper_pairing_codes(user_id);
+CREATE INDEX IF NOT EXISTS idx_helper_pairing_codes_expires ON helper_pairing_codes(expires_at);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'accounts_user_id_fkey') THEN
+    ALTER TABLE accounts
+      ADD CONSTRAINT accounts_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'proxies_user_id_fkey') THEN
+    ALTER TABLE proxies
+      ADD CONSTRAINT proxies_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'settings_user_id_fkey') THEN
+    ALTER TABLE settings
+      ADD CONSTRAINT settings_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'activity_logs_user_id_fkey') THEN
+    ALTER TABLE activity_logs
+      ADD CONSTRAINT activity_logs_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'helper_devices_user_id_fkey') THEN
+    ALTER TABLE helper_devices
+      ADD CONSTRAINT helper_devices_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'helper_commands_user_id_fkey') THEN
+    ALTER TABLE helper_commands
+      ADD CONSTRAINT helper_commands_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'helper_commands_device_id_fkey') THEN
+    ALTER TABLE helper_commands
+      ADD CONSTRAINT helper_commands_device_id_fkey
+      FOREIGN KEY (helper_device_id) REFERENCES helper_devices(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'helper_commands_account_id_fkey') THEN
+    ALTER TABLE helper_commands
+      ADD CONSTRAINT helper_commands_account_id_fkey
+      FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'helper_commands_proxy_id_fkey') THEN
+    ALTER TABLE helper_commands
+      ADD CONSTRAINT helper_commands_proxy_id_fkey
+      FOREIGN KEY (proxy_id) REFERENCES proxies(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'helper_pairing_codes_user_id_fkey') THEN
+    ALTER TABLE helper_pairing_codes
+      ADD CONSTRAINT helper_pairing_codes_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+END $$;

@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const PgSession = require('connect-pg-simple')(session);
@@ -10,6 +11,7 @@ const { encrypt, decrypt, mask } = require('./crypto-fields');
 const { currentTotp } = require('./otp');
 const { csrf, requireAuth, escapeText, oneOf, verifyAdminPassword } = require('./security');
 const activity = require('./activity');
+const discordAuth = require('./discord-auth');
 const { generatePassword } = require('./generators');
 const { parseAccountImport, parseProxyImport } = require('./parsers');
 const {
@@ -45,7 +47,7 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
       styleSrc: ["'self'"],
-      imgSrc: ["'self'", 'data:'],
+      imgSrc: ["'self'", 'data:', 'https://cdn.discordapp.com'],
       connectSrc: ["'self'"],
       formAction: ["'self'"],
       frameAncestors: ["'none'"]
@@ -69,19 +71,7 @@ app.use(session({
     maxAge: 1000 * 60 * 60 * 8
   }
 }));
-app.use((req, res, next) => {
-  res.locals.appName = config.appName;
-  res.locals.appVersion = config.appVersion;
-  res.locals.path = req.path;
-  res.locals.user = req.session.authenticated ? config.adminUsername : null;
-  res.locals.accountStatuses = accountStatuses;
-  res.locals.accountTypes = accountTypes;
-  res.locals.credentialStatuses = credentialStatuses;
-  res.locals.workflowStatuses = workflowStatuses;
-  res.locals.proxyTypes = proxyTypes;
-  res.locals.proxyStatuses = proxyStatuses;
-  next();
-});
+app.use(attachCurrentUser);
 app.use(csrf);
 
 const loginLimiter = rateLimit({
@@ -93,40 +83,74 @@ const loginLimiter = rateLimit({
   message: 'Too many login attempts. Try again soon.'
 });
 
-app.get('/login', (req, res) => res.render('login', { title: 'Login', error: null }));
-app.post('/login', loginLimiter, async (req, res, next) => {
+app.get('/login', (req, res) => {
+  if (req.currentUserId) return res.redirect('/');
+  return res.render('login', { title: 'Login', error: null });
+});
+
+app.get('/auth/discord', (req, res, next) => {
   try {
-    const ok = req.body.username === config.adminUsername && verifyAdminPassword(req.body.password, config);
-    await activity.log(ok ? 'admin_login_success' : 'admin_login_failed', 'admin', null, ok ? 'Admin login succeeded' : 'Admin login failed');
-    if (!ok) return res.status(401).render('login', { title: 'Login', error: 'Invalid admin username or password.' });
-    req.session.authenticated = true;
-    req.session.csrfToken = null;
+    res.redirect(discordAuth.authorizationUrl(req));
+  } catch (err) {
+    res.status(503).render('login', { title: 'Login', error: err.message });
+  }
+});
+
+app.get('/auth/discord/callback', async (req, res, next) => {
+  try {
+    if (!req.query.code || !req.query.state || req.query.state !== req.session.discordOAuthState) {
+      throw new Error('Discord login state was missing or expired.');
+    }
+    const redirectUri = req.session.discordRedirectUri;
+    req.session.discordOAuthState = null;
+    req.session.discordRedirectUri = null;
+    const token = await discordAuth.exchangeCode(req.query.code, redirectUri);
+    const profile = await discordAuth.fetchDiscordProfile(token.access_token);
+    const user = await discordAuth.upsertDiscordUser(profile);
+    setUserSession(req, user);
+    await activity.log(user.id, 'discord_login_success', 'user', user.id, `Discord login succeeded for ${user.username || user.discord_username}`);
     res.redirect('/');
   } catch (err) { next(err); }
 });
+
+app.post('/login', loginLimiter, async (req, res, next) => {
+  try {
+    const ok = config.adminFallbackEnabled && req.body.username === config.adminUsername && verifyAdminPassword(req.body.password, config);
+    await activity.log(null, ok ? 'admin_login_success' : 'admin_login_failed', 'admin', null, ok ? 'Emergency admin login succeeded' : 'Emergency admin login failed');
+    if (!ok) return res.status(401).render('login', { title: 'Login', error: 'Invalid admin username or password.' });
+    const user = await discordAuth.upsertEmergencyAdminUser(config.adminUsername);
+    setUserSession(req, user);
+    res.redirect('/');
+  } catch (err) { next(err); }
+});
+
+app.use(requireAuth, requireUserRecord);
+
 app.post('/logout', requireAuth, (req, res) => req.session.destroy(() => res.redirect('/login')));
 
 app.get('/', requireAuth, async (req, res, next) => {
   try {
-    const settings = await getSettings();
+    const userId = req.currentUserId;
+    const settings = await getSettings(userId);
     const selectedId = req.query.account_id;
-    const [counts, recent, proxyCounts, selectable] = await Promise.all([
-      db.query(`SELECT status, COUNT(*)::int count FROM accounts GROUP BY status`),
-      db.query(`SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT 8`),
-      db.query(`SELECT status, COUNT(*)::int count FROM proxies GROUP BY status`),
-      db.query(`SELECT id, username, legacy_login, display_name, status, upgrade_status FROM accounts WHERE archived_at IS NULL ORDER BY updated_at DESC LIMIT 100`)
+    const [counts, recent, proxyCounts, selectable, helper] = await Promise.all([
+      db.query(`SELECT status, COUNT(*)::int count FROM accounts WHERE user_id=$1 GROUP BY status`, [userId]),
+      db.query(`SELECT * FROM activity_logs WHERE user_id=$1 ORDER BY created_at DESC LIMIT 8`, [userId]),
+      db.query(`SELECT status, COUNT(*)::int count FROM proxies WHERE user_id=$1 GROUP BY status`, [userId]),
+      db.query(`SELECT id, username, legacy_login, display_name, status, upgrade_status FROM accounts WHERE user_id=$1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 100`, [userId]),
+      helperStatus(userId)
     ]);
     let selected = null;
     let decrypted = {};
-    if (selectedId) ({ account: selected, decrypted } = await loadAccount(selectedId));
+    if (selectedId) ({ account: selected, decrypted } = await loadAccount(userId, selectedId));
     else {
       const current = await db.query(
         `SELECT id FROM accounts
-         WHERE archived_at IS NULL AND status <> 'archived'
+         WHERE user_id=$1 AND archived_at IS NULL AND status <> 'archived'
          ORDER BY CASE status WHEN 'in_progress' THEN 0 WHEN 'needs_review' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END, updated_at DESC
-         LIMIT 1`
+         LIMIT 1`, [userId]
       );
-      if (current.rows[0]) ({ account: selected, decrypted } = await loadAccount(current.rows[0].id));
+      if (current.rows[0]) ({ account: selected, decrypted } = await loadAccount(userId, current.rows[0].id));
     }
     const nextStep = workflowStep(selected);
     res.render('dashboard', {
@@ -138,6 +162,8 @@ app.get('/', requireAuth, async (req, res, next) => {
       selected,
       decrypted,
       settings,
+      helper,
+      proxyMode: proxyMode(selected, helper, settings),
       nextStep,
       mask
     });
@@ -146,6 +172,7 @@ app.get('/', requireAuth, async (req, res, next) => {
 
 app.get('/accounts', requireAuth, async (req, res, next) => {
   try {
+    const userId = req.currentUserId;
     const filters = {
       q: escapeText(req.query.q),
       account_type: escapeText(req.query.account_type),
@@ -155,8 +182,8 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
       has_proxy: escapeText(req.query.has_proxy),
       has_otp: escapeText(req.query.has_otp)
     };
-    const clauses = [];
-    const params = [];
+    const clauses = ['a.user_id = $1'];
+    const params = [userId];
     function add(sql, value) { params.push(value); clauses.push(sql.replace('?', `$${params.length}`)); }
     if (filters.q) {
       params.push(`%${filters.q}%`, `%${filters.q}%`, `%${filters.q}%`);
@@ -173,7 +200,7 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = await db.query(
       `SELECT a.*, p.host proxy_host, p.port proxy_port, p.status proxy_status, p.proxy_type
-       FROM accounts a LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id)
+       FROM accounts a LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id) AND p.user_id = a.user_id
        ${where} ORDER BY a.updated_at DESC LIMIT 300`, params
     );
     res.render('accounts/index', { title: 'Accounts', accounts: rows.rows, filters, mask });
@@ -182,48 +209,55 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
 
 app.get('/accounts/new', requireAuth, async (req, res, next) => {
   try {
-    const proxies = await db.query('SELECT id, proxy_type, host, port, status FROM proxies ORDER BY host');
-    res.render('accounts/form', { title: 'New Account', account: { account_type: 'legacy', status: 'pending', credential_status: 'partial', upgrade_status: 'pending', email_creation_status: 'pending' }, decrypted: {}, proxies: proxies.rows, errors: [], generatedPassword: generatePassword(await passwordLength()) });
+    const userId = req.currentUserId;
+    const proxies = await db.query('SELECT id, proxy_type, host, port, status FROM proxies WHERE user_id=$1 ORDER BY host', [userId]);
+    res.render('accounts/form', { title: 'New Account', account: { account_type: 'legacy', status: 'pending', credential_status: 'partial', upgrade_status: 'pending', email_creation_status: 'pending' }, decrypted: {}, proxies: proxies.rows, errors: [], generatedPassword: generatePassword(await passwordLength(userId)) });
   } catch (err) { next(err); }
 });
 
 app.post('/accounts', requireAuth, async (req, res, next) => {
   try {
+    const userId = req.currentUserId;
     const account = accountFromBody(req.body);
+    await enforceProxyOwnership(userId, account);
     if (!account.username || !account.legacy_password) throw new Error('Login and password are required.');
-    const result = await db.query(accountInsertSql(), accountParams(account));
-    await activity.log('account_created', 'account', result.rows[0].id, `Created account ${account.username}`, { account_type: account.account_type });
+    const result = await db.query(accountInsertSql(), accountParams(account, userId));
+    await activity.log(userId, 'account_created', 'account', result.rows[0].id, `Created account ${account.username}`, { account_type: account.account_type });
     res.redirect(`/accounts/${result.rows[0].id}`);
   } catch (err) { next(err); }
 });
 
 app.get('/accounts/:id', requireAuth, async (req, res, next) => {
   try {
-    const { account, decrypted } = await loadAccount(req.params.id);
-    const proxies = await db.query('SELECT id, proxy_type, host, port, status FROM proxies ORDER BY host');
+    const userId = req.currentUserId;
+    const { account, decrypted } = await loadAccount(userId, req.params.id);
+    const proxies = await db.query('SELECT id, proxy_type, host, port, status FROM proxies WHERE user_id=$1 ORDER BY host', [userId]);
     let otp = null;
     if (decrypted.otp_secret) {
       try { otp = currentTotp(decrypted.otp_secret); } catch (error) { otp = { error: 'Invalid OTP secret' }; }
     }
-    res.render('accounts/form', { title: 'Edit Account', account, decrypted, proxies: proxies.rows, otp, errors: [], generatedPassword: generatePassword(await passwordLength()) });
+    res.render('accounts/form', { title: 'Edit Account', account, decrypted, proxies: proxies.rows, otp, errors: [], generatedPassword: generatePassword(await passwordLength(userId)) });
   } catch (err) { next(err); }
 });
 
 app.post('/accounts/:id', requireAuth, async (req, res, next) => {
   try {
-    const existing = await loadAccount(req.params.id);
+    const userId = req.currentUserId;
+    const existing = await loadAccount(userId, req.params.id);
     const account = accountFromBody(req.body, existing.decrypted);
+    await enforceProxyOwnership(userId, account);
     if (!account.username || !account.legacy_password) throw new Error('Login and password are required.');
     const archive = existing.account.status !== 'upgraded' && account.status === 'upgraded';
-    await db.query(accountUpdateSql(), [...accountParams(account), archive, req.params.id]);
-    await activity.log('account_updated', 'account', req.params.id, `Updated account ${account.username}`, { status: account.status, upgrade_status: account.upgrade_status });
+    await db.query(accountUpdateSql(), [...accountParams(account, userId), archive, req.params.id]);
+    await activity.log(userId, 'account_updated', 'account', req.params.id, `Updated account ${account.username}`, { status: account.status, upgrade_status: account.upgrade_status });
     res.redirect(`/accounts/${req.params.id}`);
   } catch (err) { next(err); }
 });
 
 app.get('/accounts/:id/copy/:field', requireAuth, async (req, res, next) => {
   try {
-    const { account, decrypted } = await loadAccount(req.params.id);
+    const userId = req.currentUserId;
+    const { account, decrypted } = await loadAccount(userId, req.params.id);
     const field = req.params.field;
     if (!copyFields.includes(field)) return res.status(404).json({ error: 'Unsupported field.' });
     let value = '';
@@ -235,55 +269,61 @@ app.get('/accounts/:id/copy/:field', requireAuth, async (req, res, next) => {
     } else if (field === 'birth_date') value = birthDate(account);
     else if (field in decrypted) value = decrypted[field] || '';
     else value = account[field] || '';
-    await activity.log('field_copied', 'account', account.id, `Copied ${field}`, { field });
+    await activity.log(userId, 'field_copied', 'account', account.id, `Copied ${field}`, { field });
     res.json({ value });
   } catch (err) { next(err); }
 });
 
 app.get('/generate/password', requireAuth, async (req, res) => {
-  const length = Number(req.query.length || await passwordLength());
+  const length = Number(req.query.length || await passwordLength(req.currentUserId));
   res.json({ value: generatePassword(length) });
 });
 
 app.get('/workflow', requireAuth, async (req, res, next) => {
   try {
-    const settings = await getSettings();
-    const accounts = await db.query(`SELECT id, username, legacy_login, display_name, status, account_type, upgrade_status FROM accounts WHERE archived_at IS NULL ORDER BY updated_at DESC LIMIT 100`);
+    const userId = req.currentUserId;
+    const settings = await getSettings(userId);
+    const [accounts, helper] = await Promise.all([
+      db.query(`SELECT id, username, legacy_login, display_name, status, account_type, upgrade_status FROM accounts WHERE user_id=$1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 100`, [userId]),
+      helperStatus(userId)
+    ]);
     let selected = null;
     let decrypted = {};
-    if (req.query.account_id) ({ account: selected, decrypted } = await loadAccount(req.query.account_id));
-    else if (accounts.rows[0]) ({ account: selected, decrypted } = await loadAccount(accounts.rows[0].id));
-    res.render('workflow', { title: 'Upgrade Workflow', accounts: accounts.rows, selected, decrypted, settings, mask, nextStep: workflowStep(selected) });
+    if (req.query.account_id) ({ account: selected, decrypted } = await loadAccount(userId, req.query.account_id));
+    else if (accounts.rows[0]) ({ account: selected, decrypted } = await loadAccount(userId, accounts.rows[0].id));
+    res.render('workflow', { title: 'Workflow', accounts: accounts.rows, selected, decrypted, settings, helper, proxyMode: proxyMode(selected, helper, settings), mask, nextStep: workflowStep(selected) });
   } catch (err) { next(err); }
 });
 
 app.post('/workflow/:id/status', requireAuth, async (req, res, next) => {
   try {
+    const userId = req.currentUserId;
     const status = oneOf(req.body.status, accountStatuses, 'needs_review');
     const upgradeStatus = status === 'upgraded' ? 'complete' : status === 'in_progress' ? 'in_progress' : status === 'skipped' ? 'skipped' : status === 'blocked' ? 'blocked' : 'needs_review';
     await db.query(
       `UPDATE accounts SET status=$1, upgrade_status=$2, exported_at=CASE WHEN $1='exported' THEN NOW() ELSE exported_at END,
-       archived_at=CASE WHEN $1='archived' THEN NOW() ELSE archived_at END, updated_at=NOW() WHERE id=$3`,
-      [status, oneOf(upgradeStatus, workflowStatuses, 'needs_review'), req.params.id]
+       archived_at=CASE WHEN $1='archived' THEN NOW() ELSE archived_at END, updated_at=NOW() WHERE id=$3 AND user_id=$4`,
+      [status, oneOf(upgradeStatus, workflowStatuses, 'needs_review'), req.params.id, userId]
     );
-    await activity.log('workflow_status_changed', 'account', req.params.id, `Workflow status changed to ${status}`, { status });
+    await activity.log(userId, 'workflow_status_changed', 'account', req.params.id, `Workflow status changed to ${status}`, { status });
     res.redirect(`/workflow?account_id=${req.params.id}`);
   } catch (err) { next(err); }
 });
 
 app.get('/proxies', requireAuth, async (req, res, next) => {
   try {
+    const userId = req.currentUserId;
     const [rows, counts, settings] = await Promise.all([
-      db.query(`SELECT p.*, COUNT(a.id)::int assigned_count FROM proxies p LEFT JOIN accounts a ON COALESCE(a.assigned_http_proxy_id, a.proxy_id)=p.id GROUP BY p.id ORDER BY p.updated_at DESC`),
+      db.query(`SELECT p.*, COUNT(a.id)::int assigned_count FROM proxies p LEFT JOIN accounts a ON COALESCE(a.assigned_http_proxy_id, a.proxy_id)=p.id AND a.user_id=p.user_id WHERE p.user_id=$1 GROUP BY p.id ORDER BY p.updated_at DESC`, [userId]),
       db.query(`SELECT
         COUNT(*)::int total,
-        COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM accounts a WHERE COALESCE(a.assigned_http_proxy_id, a.proxy_id)=p.id))::int assigned,
-        COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM accounts a WHERE COALESCE(a.assigned_http_proxy_id, a.proxy_id)=p.id))::int unassigned,
+        COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM accounts a WHERE a.user_id=p.user_id AND COALESCE(a.assigned_http_proxy_id, a.proxy_id)=p.id))::int assigned,
+        COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM accounts a WHERE a.user_id=p.user_id AND COALESCE(a.assigned_http_proxy_id, a.proxy_id)=p.id))::int unassigned,
         COUNT(*) FILTER (WHERE status IN ('online','works'))::int online,
         COUNT(*) FILTER (WHERE status='blocked')::int blocked,
         COUNT(*) FILTER (WHERE status='review')::int review
-       FROM proxies p`),
-      getSettings()
+       FROM proxies p WHERE p.user_id=$1`, [userId]),
+      getSettings(userId)
     ]);
     res.render('proxies', { title: 'Proxies', proxies: rows.rows, counts: counts.rows[0], settings, mask });
   } catch (err) { next(err); }
@@ -291,17 +331,18 @@ app.get('/proxies', requireAuth, async (req, res, next) => {
 
 app.post('/proxies', requireAuth, async (req, res, next) => {
   try {
+    const userId = req.currentUserId;
     if (req.body.bulk) {
       const lines = parseProxyImport(req.body.bulk);
       let imported = 0;
       for (const line of lines.filter(row => row.valid)) {
-        const result = await insertProxy({ ...req.body, ...line, proxy_type: req.body.proxy_type || line.proxy_type });
+        const result = await insertProxy(userId, { ...req.body, ...line, proxy_type: req.body.proxy_type || line.proxy_type });
         if (result.rowCount !== 0) imported += 1;
       }
-      await activity.log('proxies_imported', 'proxy', null, `Imported ${imported} proxy line(s)`);
+      await activity.log(userId, 'proxies_imported', 'proxy', null, `Imported ${imported} proxy line(s)`);
     } else {
-      const result = await insertProxy(req.body);
-      await activity.log('proxy_created', 'proxy', result.rows[0].id, `Created proxy ${req.body.host}:${req.body.port}`);
+      const result = await insertProxy(userId, req.body);
+      await activity.log(userId, 'proxy_created', 'proxy', result.rows[0].id, `Created proxy ${req.body.host}:${req.body.port}`);
     }
     res.redirect('/proxies');
   } catch (err) { next(err); }
@@ -309,28 +350,29 @@ app.post('/proxies', requireAuth, async (req, res, next) => {
 
 app.post('/proxies/auto-assign', requireAuth, async (req, res, next) => {
   try {
-    const settings = await getSettings();
+    const userId = req.currentUserId;
+    const settings = await getSettings(userId);
     const max = Number(settings.max_accounts_per_proxy || 5);
     const proxies = await db.query(
       `SELECT p.id, COUNT(a.id)::int assigned_count
-       FROM proxies p LEFT JOIN accounts a ON COALESCE(a.assigned_http_proxy_id, a.proxy_id)=p.id
-       WHERE p.proxy_type='HTTP' AND p.status <> 'blocked'
-       GROUP BY p.id ORDER BY assigned_count ASC, p.updated_at DESC`
+       FROM proxies p LEFT JOIN accounts a ON COALESCE(a.assigned_http_proxy_id, a.proxy_id)=p.id AND a.user_id=p.user_id
+       WHERE p.user_id=$1 AND p.proxy_type='HTTP' AND p.status <> 'blocked'
+       GROUP BY p.id ORDER BY assigned_count ASC, p.updated_at DESC`, [userId]
     );
     const accounts = await db.query(
       `SELECT id FROM accounts
-       WHERE assigned_http_proxy_id IS NULL AND proxy_id IS NULL AND archived_at IS NULL
-       ORDER BY updated_at ASC LIMIT 500`
+       WHERE user_id=$1 AND assigned_http_proxy_id IS NULL AND proxy_id IS NULL AND archived_at IS NULL
+       ORDER BY updated_at ASC LIMIT 500`, [userId]
     );
     let assigned = 0;
     for (const account of accounts.rows) {
       const proxy = proxies.rows.find(item => item.assigned_count < max);
       if (!proxy) break;
-      await db.query('UPDATE accounts SET assigned_http_proxy_id=$1, proxy_id=$1, updated_at=NOW() WHERE id=$2', [proxy.id, account.id]);
+      await db.query('UPDATE accounts SET assigned_http_proxy_id=$1, proxy_id=$1, updated_at=NOW() WHERE id=$2 AND user_id=$3', [proxy.id, account.id, userId]);
       proxy.assigned_count += 1;
       assigned += 1;
     }
-    await activity.log('proxies_auto_assigned', 'proxy', null, `Assigned proxies to ${assigned} account(s)`, { assigned, max_accounts_per_proxy: max });
+    await activity.log(userId, 'proxies_auto_assigned', 'proxy', null, `Assigned proxies to ${assigned} account(s)`, { assigned, max_accounts_per_proxy: max });
     res.redirect('/proxies');
   } catch (err) { next(err); }
 });
@@ -341,9 +383,10 @@ app.get('/imports-exports', requireAuth, (req, res) => {
 
 app.post('/imports/preview', requireAuth, upload.single('accounts_file'), async (req, res, next) => {
   try {
+    const userId = req.currentUserId;
     const text = inputText(req);
     const preview = parseAccountImport(text, req.body.delimiter || ':');
-    await markDuplicates(preview);
+    await markDuplicates(userId, preview);
     const stats = previewStats(preview);
     res.render('imports-exports', { title: 'Imports / Exports', preview, exportRows: null, options: { ...req.body, accounts_text: text }, stats });
   } catch (err) { next(err); }
@@ -351,32 +394,82 @@ app.post('/imports/preview', requireAuth, upload.single('accounts_file'), async 
 
 app.post('/imports/commit', requireAuth, async (req, res, next) => {
   try {
+    const userId = req.currentUserId;
     const rows = parseAccountImport(req.body.accounts_text || '', req.body.delimiter || ':');
-    await markDuplicates(rows);
+    await markDuplicates(userId, rows);
     let imported = 0;
     for (const row of rows.filter(item => item.valid && (req.body.duplicate_mode === 'update' || !item.duplicate))) {
       const account = accountFromImport(row, req.body);
-      if (req.body.duplicate_mode === 'update') await db.query(accountUpsertSql(), accountParams(account));
-      else await db.query(accountInsertSql('ON CONFLICT (username) DO NOTHING'), accountParams(account));
+      if (req.body.duplicate_mode === 'update') await db.query(accountUpsertSql(), accountParams(account, userId));
+      else await db.query(accountInsertSql('ON CONFLICT (user_id, username) DO NOTHING'), accountParams(account, userId));
       imported += 1;
     }
-    await activity.log('accounts_imported', 'account', null, `Imported ${imported} account line(s)`, { duplicate_mode: req.body.duplicate_mode || 'skip' });
+    await activity.log(userId, 'accounts_imported', 'account', null, `Imported ${imported} account line(s)`, { duplicate_mode: req.body.duplicate_mode || 'skip' });
     res.redirect('/accounts');
   } catch (err) { next(err); }
 });
 
 app.post('/exports/preview', requireAuth, async (req, res, next) => {
   try {
-    const rows = await exportRows(req.body);
-    if (req.body.confirm_export_action === 'yes') await applyExportAction(req.body);
-    await activity.log('accounts_export_previewed', 'account', null, `Prepared ${rows.length} account(s) for export`, { format: req.body.format, export_action: req.body.export_action || 'keep' });
+    const userId = req.currentUserId;
+    const rows = await exportRows(userId, req.body);
+    if (req.body.confirm_export_action === 'yes') await applyExportAction(userId, req.body);
+    await activity.log(userId, 'accounts_export_previewed', 'account', null, `Prepared ${rows.length} account(s) for export`, { format: req.body.format, export_action: req.body.export_action || 'keep' });
     res.render('imports-exports', { title: 'Imports / Exports', preview: null, exportRows: rows, options: req.body, stats: null });
   } catch (err) { next(err); }
 });
 
+app.get('/local-helper', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const [helper, settings] = await Promise.all([
+      helperStatus(userId),
+      getSettings(userId)
+    ]);
+    const pairingCode = req.session.helperPairingCode || null;
+    req.session.helperPairingCode = null;
+    res.render('local-helper', {
+      title: 'Local Helper',
+      helper,
+      settings,
+      pairingCode,
+      download: helperDownloadMetadata()
+    });
+  } catch (err) { next(err); }
+});
+
+app.post('/local-helper/pairing-code', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const code = generatePairingCode();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    await db.query(
+      `UPDATE helper_pairing_codes
+       SET expires_at=NOW()
+       WHERE user_id=$1 AND used_at IS NULL AND expires_at > NOW()`,
+      [userId]
+    );
+    await db.query(
+      `INSERT INTO helper_pairing_codes (user_id, code_hash, expires_at)
+       VALUES ($1, $2, $3)`,
+      [userId, hashPairingCode(code), expiresAt]
+    );
+    req.session.helperPairingCode = { code, expiresAt: expiresAt.toISOString() };
+    await activity.log(userId, 'helper_pairing_code_created', 'helper', null, 'Generated a short-lived Local Helper pairing code');
+    res.redirect('/local-helper');
+  } catch (err) { next(err); }
+});
+
+app.get('/downloads/helper/windows', requireAuth, (req, res) => {
+  res.status(404).render('helper-download', {
+    title: 'GS Local Helper Download',
+    download: helperDownloadMetadata()
+  });
+});
+
 app.get('/settings', requireAuth, async (req, res, next) => {
   try {
-    const settings = await getSettings();
+    const settings = await getSettings(req.currentUserId);
     settings.app_version = config.appVersion;
     res.render('settings', { title: 'Settings', settings, config });
   } catch (err) { next(err); }
@@ -384,28 +477,33 @@ app.get('/settings', requireAuth, async (req, res, next) => {
 
 app.post('/settings', requireAuth, async (req, res, next) => {
   try {
+    const userId = req.currentUserId;
     const allowed = [
       'app_name', 'default_account_type', 'default_proxy_type', 'default_email_provider',
       'email_signup_url', 'email_signin_url', 'account_settings_url', 'upgrade_url',
       'password_length', 'max_accounts_per_proxy', 'export_format_default',
-      'export_behavior_default', 'mask_sensitive_values', 'otp_refresh_interval', 'theme_name'
+      'export_behavior_default', 'mask_sensitive_values', 'otp_refresh_interval',
+      'require_helper_for_proxy_actions', 'allow_website_only_browser_open',
+      'warn_before_opening_without_helper', 'require_confirmation_before_direct_open',
+      'show_proxy_mode_before_open', 'enable_assisted_fill_buttons', 'theme_name'
     ];
     for (const key of allowed) {
       if (Object.prototype.hasOwnProperty.call(req.body, key)) {
-        await upsertSetting(key, escapeText(req.body[key]));
+        await upsertSetting(userId, key, escapeText(req.body[key]));
       }
     }
-    await upsertSetting('app_version', config.appVersion);
-    await activity.log('settings_updated', 'settings', null, 'Updated application settings');
+    await upsertSetting(userId, 'app_version', config.appVersion);
+    await activity.log(userId, 'settings_updated', 'settings', null, 'Updated application settings');
     res.redirect('/settings');
   } catch (err) { next(err); }
 });
 
 app.get('/logs', requireAuth, async (req, res, next) => {
   try {
+    const userId = req.currentUserId;
     const filters = { q: escapeText(req.query.q), action: escapeText(req.query.action) };
-    const clauses = [];
-    const params = [];
+    const clauses = ['user_id = $1'];
+    const params = [userId];
     if (filters.q) {
       params.push(`%${filters.q}%`);
       clauses.push(`(action ILIKE $${params.length} OR message ILIKE $${params.length})`);
@@ -417,7 +515,7 @@ app.get('/logs', requireAuth, async (req, res, next) => {
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const [rows, actions] = await Promise.all([
       db.query(`SELECT * FROM activity_logs ${where} ORDER BY created_at DESC LIMIT 300`, params),
-      db.query(`SELECT DISTINCT action FROM activity_logs ORDER BY action`)
+      db.query(`SELECT DISTINCT action FROM activity_logs WHERE user_id=$1 ORDER BY action`, [userId])
     ]);
     res.render('logs', { title: 'Logs', logs: rows.rows, actions: actions.rows.map(row => row.action), filters });
   } catch (err) { next(err); }
@@ -428,26 +526,192 @@ app.use((err, req, res, next) => {
   res.status(500).render('error', { title: 'Error', message: err.message });
 });
 
+const defaultSettings = {
+  app_name: 'GS Account Manager',
+  default_account_type: 'legacy',
+  default_proxy_type: 'HTTP',
+  default_email_provider: 'Outlook',
+  email_signup_url: 'https://signup.live.com/',
+  email_signin_url: 'https://outlook.live.com/',
+  account_settings_url: 'https://account.jagex.com/',
+  upgrade_url: 'https://account.jagex.com/',
+  password_length: '9',
+  max_accounts_per_proxy: '5',
+  export_format_default: 'legacy_user_pass',
+  export_behavior_default: 'keep',
+  mask_sensitive_values: 'true',
+  otp_refresh_interval: '30',
+  require_helper_for_proxy_actions: 'true',
+  allow_website_only_browser_open: 'true',
+  warn_before_opening_without_helper: 'true',
+  require_confirmation_before_direct_open: 'true',
+  show_proxy_mode_before_open: 'true',
+  enable_assisted_fill_buttons: 'false',
+  theme_name: 'Premium Dark',
+  app_version: config.appVersion
+};
+
+function attachCurrentUser(req, res, next) {
+  req.currentUserId = req.session.userId ? Number(req.session.userId) : null;
+  req.currentUser = req.session.user || null;
+  res.locals.appName = config.appName;
+  res.locals.appVersion = config.appVersion;
+  res.locals.path = req.path;
+  res.locals.user = req.currentUser;
+  res.locals.authMode = config.authMode;
+  res.locals.discordConfigured = config.discord.configured;
+  res.locals.adminFallbackEnabled = config.adminFallbackEnabled;
+  res.locals.accountStatuses = accountStatuses;
+  res.locals.accountTypes = accountTypes;
+  res.locals.credentialStatuses = credentialStatuses;
+  res.locals.workflowStatuses = workflowStatuses;
+  res.locals.proxyTypes = proxyTypes;
+  res.locals.proxyStatuses = proxyStatuses;
+  next();
+}
+
+async function requireUserRecord(req, res, next) {
+  try {
+    const result = await db.query('SELECT * FROM users WHERE id=$1', [req.session.userId]);
+    const user = result.rows[0];
+    if (!user) {
+      return req.session.destroy(() => res.redirect('/login'));
+    }
+    req.currentUserId = Number(user.id);
+    req.currentUserRecord = user;
+    req.currentUser = discordAuth.sessionUser(user);
+    req.session.user = req.currentUser;
+    req.session.discordId = user.discord_id;
+    res.locals.user = req.currentUser;
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+function helperDownloadMetadata() {
+  return {
+    available: false,
+    version: 'Not released',
+    releaseDate: 'Coming soon',
+    fileSize: '',
+    windowsPath: '/downloads/helper/windows'
+  };
+}
+
+function proxyMode(account, helper, settings) {
+  const hasProxy = Boolean(account && account.proxy_host);
+  return {
+    browserMode: helper && helper.connected ? 'Local Helper mode' : 'Website-only mode',
+    modeDescription: helper && helper.connected
+      ? 'Local Helper mode: opens Chrome through selected proxy when available.'
+      : 'Website-only mode: opens in your current browser. No proxy control.',
+    helperConnected: helper && helper.connected ? 'yes' : 'no',
+    proxyType: hasProxy ? account.proxy_type || 'HTTP' : 'Direct',
+    proxyEndpoint: hasProxy ? `${maskEndpoint(account.proxy_host)}:${account.proxy_port}` : 'No proxy assigned',
+    directFallback: settings && settings.allow_website_only_browser_open !== 'false' ? 'enabled' : 'disabled'
+  };
+}
+
+function maskEndpoint(host) {
+  const value = String(host || '');
+  if (!value) return '';
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) {
+    const parts = value.split('.');
+    return `***.***.***.${parts[3]}`;
+  }
+  const visible = value.replace(/[^a-z0-9.-]/gi, '');
+  if (visible.length <= 4) return '*'.repeat(visible.length);
+  return `${visible.slice(0, 2)}${'*'.repeat(Math.max(3, visible.length - 4))}${visible.slice(-2)}`;
+}
+
+async function helperStatus(userId) {
+  const [devices, activePairing, commands] = await Promise.all([
+    db.query(
+      `SELECT id, device_name, helper_version, status, last_seen_at, created_at, updated_at
+       FROM helper_devices
+       WHERE user_id=$1 AND status <> 'revoked'
+       ORDER BY
+         CASE WHEN status='connected' THEN 0 ELSE 1 END,
+         last_seen_at DESC NULLS LAST,
+         updated_at DESC
+       LIMIT 1`,
+      [userId]
+    ),
+    db.query(
+      `SELECT expires_at
+       FROM helper_pairing_codes
+       WHERE user_id=$1 AND used_at IS NULL AND expires_at > NOW()
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId]
+    ),
+    db.query(
+      `SELECT status, COUNT(*)::int count
+       FROM helper_commands
+       WHERE user_id=$1
+       GROUP BY status`,
+      [userId]
+    )
+  ]);
+  const device = devices.rows[0] || null;
+  const connected = Boolean(device && device.status === 'connected');
+  return {
+    connected,
+    statusLabel: connected ? 'Connected' : 'Not Connected',
+    device,
+    helperVersion: device && device.helper_version ? device.helper_version : 'Not available',
+    lastHeartbeat: device && device.last_seen_at ? device.last_seen_at : null,
+    tokenStatus: activePairing.rows[0] ? 'Pairing code active' : device ? 'Device token stored as hash' : 'No active pairing code',
+    activePairingExpiresAt: activePairing.rows[0] ? activePairing.rows[0].expires_at : null,
+    commandCounts: Object.fromEntries(commands.rows.map(row => [row.status, row.count]))
+  };
+}
+
+function generatePairingCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let value = 'GS-';
+  for (let index = 0; index < 8; index += 1) {
+    value += alphabet[crypto.randomInt(0, alphabet.length)];
+  }
+  return value;
+}
+
+function hashPairingCode(code) {
+  return crypto
+    .createHash('sha256')
+    .update(`${config.sessionSecret}:${String(code || '').trim().toUpperCase()}`)
+    .digest('hex');
+}
+
+function setUserSession(req, user) {
+  req.session.authenticated = true;
+  req.session.userId = user.id;
+  req.session.discordId = user.discord_id;
+  req.session.user = discordAuth.sessionUser(user);
+  req.session.csrfToken = null;
+}
+
 function inputText(req) {
   const uploaded = req.file ? req.file.buffer.toString('utf8') : '';
   return uploaded || req.body.accounts_text || '';
 }
 
-async function passwordLength() {
-  const settings = await getSettings();
+async function passwordLength(userId) {
+  const settings = await getSettings(userId);
   return Number(settings.password_length || 9);
 }
 
-async function getSettings() {
-  const rows = await db.query('SELECT key, value FROM settings ORDER BY key');
-  return Object.fromEntries(rows.rows.map(row => [row.key, row.value]));
+async function getSettings(userId) {
+  const rows = await db.query('SELECT key, value FROM settings WHERE user_id=$1 ORDER BY key', [userId]);
+  return { ...defaultSettings, ...Object.fromEntries(rows.rows.map(row => [row.key, row.value])) };
 }
 
-async function upsertSetting(key, value) {
+async function upsertSetting(userId, key, value) {
   await db.query(
-    `INSERT INTO settings (key, value, updated_at) VALUES ($1,$2,NOW())
-     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
-    [key, value || '']
+    `INSERT INTO settings (user_id, key, value, updated_at) VALUES ($1,$2,$3,NOW())
+     ON CONFLICT (user_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+    [userId, key, value || '']
   );
 }
 
@@ -493,9 +757,9 @@ function accountFromBody(body, existing = {}) {
   };
 }
 
-function accountParams(account) {
+function accountParams(account, userId) {
   return [
-    account.username, encrypt(account.password), account.legacy_login, encrypt(account.legacy_password), account.account_type,
+    userId, account.username, encrypt(account.password), account.legacy_login, encrypt(account.legacy_password), account.account_type,
     encrypt(account.bank_pin), encrypt(account.otp_secret), account.display_name || null, account.category || null, account.country_code || null, account.notes || null,
     encrypt(account.recovery_email), encrypt(account.recovery_email_password), encrypt(account.target_email), encrypt(account.target_email_password), encrypt(account.email_password),
     encrypt(account.jagex_email), encrypt(account.jagex_password), account.jagex_name || null, account.first_name || null, account.last_name || null,
@@ -506,7 +770,7 @@ function accountParams(account) {
 
 function accountColumns() {
   return [
-    'username', 'password_encrypted', 'legacy_login', 'legacy_password_encrypted', 'account_type',
+    'user_id', 'username', 'password_encrypted', 'legacy_login', 'legacy_password_encrypted', 'account_type',
     'bank_pin_encrypted', 'otp_secret_encrypted', 'display_name', 'category', 'country_code', 'notes',
     'recovery_email_encrypted', 'recovery_email_password_encrypted', 'target_email_encrypted', 'target_email_password_encrypted', 'email_password_encrypted',
     'jagex_email_encrypted', 'jagex_password_encrypted', 'jagex_name', 'first_name', 'last_name',
@@ -524,26 +788,29 @@ function accountInsertSql(conflict = '') {
 function accountUpdateSql() {
   const columns = accountColumns();
   const assignments = columns.map((column, index) => `${column}=$${index + 1}`);
+  const statusParam = columns.indexOf('status') + 1;
+  const archiveParam = columns.length + 1;
+  const idParam = columns.length + 2;
   return `UPDATE accounts SET ${assignments.join(', ')},
-    legacy_archived_at=CASE WHEN $${columns.length + 1} THEN NOW() ELSE legacy_archived_at END,
-    archived_at=CASE WHEN $28='archived' THEN NOW() ELSE archived_at END,
-    exported_at=CASE WHEN $28='exported' THEN NOW() ELSE exported_at END,
+    legacy_archived_at=CASE WHEN $${archiveParam} THEN NOW() ELSE legacy_archived_at END,
+    archived_at=CASE WHEN $${statusParam}='archived' THEN NOW() ELSE archived_at END,
+    exported_at=CASE WHEN $${statusParam}='exported' THEN NOW() ELSE exported_at END,
     updated_at=NOW()
-    WHERE id=$${columns.length + 2}`;
+    WHERE id=$${idParam} AND user_id=$1`;
 }
 
 function accountUpsertSql() {
   const columns = accountColumns();
-  const update = columns.filter(column => column !== 'username').map(column => `${column}=EXCLUDED.${column}`).join(', ');
+  const update = columns.filter(column => !['user_id', 'username'].includes(column)).map(column => `${column}=EXCLUDED.${column}`).join(', ');
   return `INSERT INTO accounts (${columns.join(', ')}) VALUES (${columns.map((_, index) => `$${index + 1}`).join(', ')})
-    ON CONFLICT (username) DO UPDATE SET ${update}, updated_at=NOW() RETURNING id`;
+    ON CONFLICT (user_id, username) DO UPDATE SET ${update}, updated_at=NOW() RETURNING id`;
 }
 
-async function loadAccount(id) {
+async function loadAccount(userId, id) {
   const result = await db.query(
-    `SELECT a.*, p.host proxy_host, p.port proxy_port, p.status proxy_status
-     FROM accounts a LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id)
-     WHERE a.id=$1`, [id]
+    `SELECT a.*, p.host proxy_host, p.port proxy_port, p.status proxy_status, p.proxy_type proxy_type
+     FROM accounts a LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id) AND p.user_id = a.user_id
+     WHERE a.id=$1 AND a.user_id=$2`, [id, userId]
   );
   if (!result.rows[0]) throw new Error('Account not found.');
   const account = result.rows[0];
@@ -563,15 +830,15 @@ async function loadAccount(id) {
   return { account, decrypted };
 }
 
-async function insertProxy(body) {
+async function insertProxy(userId, body) {
   const host = escapeText(body.host);
   const port = Number(body.port);
   if (!host || !port) throw new Error('Proxy host and port are required.');
   return db.query(
-    `INSERT INTO proxies (proxy_type, host, port, username_encrypted, password_encrypted, category, country_code, status, notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+    `INSERT INTO proxies (user_id, proxy_type, host, port, username_encrypted, password_encrypted, category, country_code, status, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
     [
-      oneOf(body.proxy_type, proxyTypes, 'HTTP'), host, port, encrypt(body.username), encrypt(body.password),
+      userId, oneOf(body.proxy_type, proxyTypes, 'HTTP'), host, port, encrypt(body.username), encrypt(body.password),
       escapeText(body.category) || null, escapeText(body.country_code).toUpperCase() || null,
       oneOf(body.status, proxyStatuses, 'untested'), escapeText(body.notes) || null
     ]
@@ -614,10 +881,10 @@ function accountFromImport(row, body) {
   };
 }
 
-async function markDuplicates(rows) {
+async function markDuplicates(userId, rows) {
   const names = [...new Set(rows.filter(row => row.username).map(row => row.username))];
   if (!names.length) return;
-  const existing = await db.query('SELECT username, legacy_login FROM accounts WHERE username = ANY($1) OR legacy_login = ANY($1)', [names]);
+  const existing = await db.query('SELECT username, legacy_login FROM accounts WHERE user_id=$1 AND (username = ANY($2) OR legacy_login = ANY($2))', [userId, names]);
   const found = new Set(existing.rows.flatMap(row => [row.username, row.legacy_login]).filter(Boolean));
   rows.forEach(row => { row.duplicate = found.has(row.username); });
 }
@@ -630,13 +897,13 @@ function previewStats(rows) {
   };
 }
 
-async function exportRows(options) {
+async function exportRows(userId, options) {
   const type = oneOf(options.account_type, accountTypes, 'legacy');
   const result = await db.query(
     `SELECT a.*, p.host proxy_host, p.port proxy_port
-     FROM accounts a LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id)
-     WHERE a.account_type=$1 AND a.archived_at IS NULL
-     ORDER BY a.username`, [type]
+     FROM accounts a LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id) AND p.user_id = a.user_id
+     WHERE a.user_id=$1 AND a.account_type=$2 AND a.archived_at IS NULL
+     ORDER BY a.username`, [userId, type]
   );
   return result.rows.map(account => {
     const d = {
@@ -665,20 +932,30 @@ async function exportRows(options) {
   });
 }
 
-async function applyExportAction(options) {
+async function applyExportAction(userId, options) {
   const type = oneOf(options.account_type, accountTypes, 'legacy');
   const action = options.export_action || 'keep';
   if (action === 'mark_exported') {
-    await db.query(`UPDATE accounts SET status='exported', exported_at=NOW(), updated_at=NOW() WHERE account_type=$1 AND archived_at IS NULL`, [type]);
-    await activity.log('accounts_marked_exported', 'account', null, `Marked ${type} accounts exported`);
+    await db.query(`UPDATE accounts SET status='exported', exported_at=NOW(), updated_at=NOW() WHERE user_id=$1 AND account_type=$2 AND archived_at IS NULL`, [userId, type]);
+    await activity.log(userId, 'accounts_marked_exported', 'account', null, `Marked ${type} accounts exported`);
   }
   if (action === 'archive') {
-    await db.query(`UPDATE accounts SET status='archived', archived_at=NOW(), updated_at=NOW() WHERE account_type=$1 AND archived_at IS NULL`, [type]);
-    await activity.log('accounts_archived_after_export', 'account', null, `Archived ${type} accounts after export`);
+    await db.query(`UPDATE accounts SET status='archived', archived_at=NOW(), updated_at=NOW() WHERE user_id=$1 AND account_type=$2 AND archived_at IS NULL`, [userId, type]);
+    await activity.log(userId, 'accounts_archived_after_export', 'account', null, `Archived ${type} accounts after export`);
   }
   if (action === 'delete') {
-    await activity.log('delete_after_export_requested', 'account', null, 'Delete-after-export was requested but no records were deleted automatically');
+    await activity.log(userId, 'delete_after_export_requested', 'account', null, 'Delete-after-export was requested but no records were deleted automatically');
   }
+}
+
+async function enforceProxyOwnership(userId, account) {
+  const ids = [account.proxy_id, account.assigned_http_proxy_id, account.assigned_socks5_proxy_id].filter(Boolean);
+  if (!ids.length) return;
+  const result = await db.query('SELECT id FROM proxies WHERE user_id=$1 AND id = ANY($2)', [userId, ids]);
+  const owned = new Set(result.rows.map(row => Number(row.id)));
+  if (account.proxy_id && !owned.has(Number(account.proxy_id))) throw new Error('Selected proxy does not belong to this user.');
+  if (account.assigned_http_proxy_id && !owned.has(Number(account.assigned_http_proxy_id))) throw new Error('Selected HTTP proxy does not belong to this user.');
+  if (account.assigned_socks5_proxy_id && !owned.has(Number(account.assigned_socks5_proxy_id))) throw new Error('Selected SOCKS5 proxy does not belong to this user.');
 }
 
 function csvLine(values) {
@@ -708,7 +985,7 @@ function numberOrNull(value) {
 
 async function start() {
   await db.migrate();
-  app.listen(config.port, () => console.log(`${config.appName} listening on ${config.port}`));
+  app.listen(config.port, () => console.log(`${config.appName} v${config.appVersion} listening on ${config.port}`));
 }
 
 if (require.main === module) {

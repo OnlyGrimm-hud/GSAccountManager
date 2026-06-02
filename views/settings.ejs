@@ -34,6 +34,49 @@
     </form>
   </section>
 </section>
+<section class="panel form-grid">
+  <h2>Local Helper</h2>
+  <form method="post" action="/settings" class="form-grid three">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label>Require helper for proxied browser actions
+      <select name="require_helper_for_proxy_actions">
+        <option value="true" <%= settings.require_helper_for_proxy_actions !== 'false' ? 'selected' : '' %>>true</option>
+        <option value="false" <%= settings.require_helper_for_proxy_actions === 'false' ? 'selected' : '' %>>false</option>
+      </select>
+    </label>
+    <label>Allow website-only normal browser open
+      <select name="allow_website_only_browser_open">
+        <option value="true" <%= settings.allow_website_only_browser_open !== 'false' ? 'selected' : '' %>>true</option>
+        <option value="false" <%= settings.allow_website_only_browser_open === 'false' ? 'selected' : '' %>>false</option>
+      </select>
+    </label>
+    <label>Warn before opening without helper/proxy
+      <select name="warn_before_opening_without_helper">
+        <option value="true" <%= settings.warn_before_opening_without_helper !== 'false' ? 'selected' : '' %>>true</option>
+        <option value="false" <%= settings.warn_before_opening_without_helper === 'false' ? 'selected' : '' %>>false</option>
+      </select>
+    </label>
+    <label>Require confirmation before direct/no-proxy open
+      <select name="require_confirmation_before_direct_open">
+        <option value="true" <%= settings.require_confirmation_before_direct_open !== 'false' ? 'selected' : '' %>>true</option>
+        <option value="false" <%= settings.require_confirmation_before_direct_open === 'false' ? 'selected' : '' %>>false</option>
+      </select>
+    </label>
+    <label>Show proxy mode before opening page
+      <select name="show_proxy_mode_before_open">
+        <option value="true" <%= settings.show_proxy_mode_before_open !== 'false' ? 'selected' : '' %>>true</option>
+        <option value="false" <%= settings.show_proxy_mode_before_open === 'false' ? 'selected' : '' %>>false</option>
+      </select>
+    </label>
+    <label>Enable assisted fill buttons
+      <select name="enable_assisted_fill_buttons">
+        <option value="false" <%= settings.enable_assisted_fill_buttons !== 'true' ? 'selected' : '' %>>false</option>
+        <option value="true" <%= settings.enable_assisted_fill_buttons === 'true' ? 'selected' : '' %>>true</option>
+      </select>
+    </label>
+    <button class="button primary">Save helper settings</button>
+  </form>
+</section>
 <section class="panel">
   <h2>Render Checklist</h2>
   <p class="row-line"><span>Root Directory</span><strong>blank / repository root</strong></p>
@@ -43,7 +86,10 @@
   <p class="row-line"><span>DATABASE_URL</span><strong>required</strong></p>
   <p class="row-line"><span>ENCRYPTION_KEY</span><strong>32 decoded bytes</strong></p>
   <p class="row-line"><span>SESSION_SECRET</span><strong>required</strong></p>
-  <p class="row-line"><span>Admin login</span><strong>env based</strong></p>
+  <p class="row-line"><span>AUTH_MODE</span><strong>discord</strong></p>
+  <p class="row-line"><span>APP_BASE_URL</span><strong>required</strong></p>
+  <p class="row-line"><span>Discord OAuth</span><strong>required</strong></p>
+  <p class="row-line"><span>Admin fallback</span><strong>hidden in Discord mode</strong></p>
   <p class="row-line"><span>App Version</span><strong>v<%= appVersion %></strong></p>
 </section>
 <section class="panel">
@@ -51,7 +97,7 @@
   <div class="checklist-grid">
     <p class="row-line"><span>PostgreSQL connected</span><strong class="status ready">ready</strong></p>
     <p class="row-line"><span>Encryption key loaded</span><strong class="status ready">ready</strong></p>
-    <p class="row-line"><span>Admin auth enabled</span><strong class="status ready">ready</strong></p>
+    <p class="row-line"><span>Discord auth enabled</span><strong class="status ready">ready</strong></p>
     <p class="row-line"><span>Secure cookies enabled in production</span><strong class="status ready">ready</strong></p>
     <p class="row-line"><span>Health check available</span><strong class="status ready">ready</strong></p>
     <p class="row-line"><span>Import/export available</span><strong class="status ready">ready</strong></p>

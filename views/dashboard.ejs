@@ -79,7 +79,26 @@
   </article>
 
   <article class="panel">
-    <h2>Open Pages</h2>
+    <div class="panel-head">
+      <div>
+        <h2><%= helper.connected ? 'Open with Local Helper' : 'Open in this browser' %></h2>
+        <p class="muted"><%= helper.connected ? 'Uses assigned proxy if selected.' : 'No proxy control from website.' %></p>
+      </div>
+      <a class="button small" href="/local-helper">Local Helper</a>
+    </div>
+    <% if (!helper.connected && settings.warn_before_opening_without_helper === 'true') { %>
+      <p class="notice">To use Chrome with proxies, install and connect GS Local Helper. Website-only opens use your normal browser session.</p>
+    <% } %>
+    <% if (selected && settings.show_proxy_mode_before_open !== 'false') { %>
+      <div class="proxy-mode-grid">
+        <p class="row-line"><span>Browser mode</span><strong><%= proxyMode.browserMode %></strong></p>
+        <p class="row-line"><span>Helper connected</span><strong><%= proxyMode.helperConnected %></strong></p>
+        <p class="row-line"><span>Selected proxy type</span><strong><%= proxyMode.proxyType %></strong></p>
+        <p class="row-line"><span>Selected proxy</span><strong><%= proxyMode.proxyEndpoint %></strong></p>
+        <p class="row-line"><span>Direct fallback</span><strong><%= proxyMode.directFallback %></strong></p>
+      </div>
+      <p class="muted"><%= proxyMode.modeDescription %></p>
+    <% } %>
     <div class="copy-grid">
       <a class="button" target="_blank" rel="noopener" href="<%= settings.email_signup_url || 'https://signup.live.com/' %>">Open email signup page</a>
       <a class="button" target="_blank" rel="noopener" href="<%= settings.email_signin_url || 'https://outlook.live.com/' %>">Open email sign-in page</a>
@@ -87,6 +106,17 @@
       <a class="button" target="_blank" rel="noopener" href="<%= settings.upgrade_url || 'https://account.jagex.com/' %>">Open upgrade page</a>
     </div>
     <p class="muted">Buttons only open pages. The app never types, submits, creates accounts, or bypasses checks.</p>
+    <% if (selected) { %>
+      <div class="assist-panel">
+        <p class="eyebrow">Assisted Actions</p>
+        <div class="actions">
+          <button class="button small" type="button" disabled>Helper Required</button>
+          <button class="button small" type="button" disabled>Fill Visible Fields</button>
+          <span class="tag">Requires your click</span>
+          <span class="tag">You stay in control</span>
+        </div>
+      </div>
+    <% } %>
   </article>
 </section>
 

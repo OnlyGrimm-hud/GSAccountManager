@@ -18,6 +18,10 @@ services:
         value: "true"
       - key: APP_NAME
         value: GS Account Manager
+      - key: AUTH_MODE
+        value: discord
+      - key: APP_BASE_URL
+        value: https://gsaccountmanager.com
       - key: DATABASE_URL
         fromDatabase:
           name: gs-account-manager-db
@@ -34,8 +38,8 @@ services:
         sync: false
       - key: DISCORD_CLIENT_SECRET
         sync: false
-      - key: DISCORD_REDIRECT_URI
-        sync: false
+      - key: DISCORD_CALLBACK_URL
+        value: https://gsaccountmanager.com/auth/discord/callback
 
 databases:
   - name: gs-account-manager-db

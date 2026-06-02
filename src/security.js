@@ -9,7 +9,7 @@ function csrf(req, res, next) {
 }
 
 function requireAuth(req, res, next) {
-  if (req.session && req.session.authenticated) return next();
+  if (req.session && req.session.authenticated && req.session.userId) return next();
   return res.redirect('/login');
 }
 

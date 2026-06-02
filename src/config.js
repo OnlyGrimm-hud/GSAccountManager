@@ -22,24 +22,35 @@ function encryptionKey() {
   return key;
 }
 
+const adminUsername = process.env.ADMIN_USERNAME || '';
+const adminPassword = process.env.ADMIN_PASSWORD || '';
+const authMode = (process.env.AUTH_MODE || 'discord').toLowerCase();
+const appBaseUrl = (process.env.APP_BASE_URL || '').replace(/\/+$/, '');
+const discordCallbackUrl = process.env.DISCORD_CALLBACK_URL || (appBaseUrl ? `${appBaseUrl}/auth/discord/callback` : '');
+const discord = {
+  clientId: process.env.DISCORD_CLIENT_ID || '',
+  clientSecret: process.env.DISCORD_CLIENT_SECRET || '',
+  callbackUrl: discordCallbackUrl
+};
+discord.configured = Boolean(discord.clientId && discord.clientSecret && discord.callbackUrl);
+
 module.exports = {
   appName: process.env.APP_NAME || 'GS Account Manager',
+  appBaseUrl,
+  authMode,
   port: Number(process.env.PORT || 3000),
   databaseUrl: required('DATABASE_URL'),
   encryptionKey: encryptionKey(),
   sessionSecret: required('SESSION_SECRET'),
-  adminUsername: required('ADMIN_USERNAME'),
-  adminPassword: required('ADMIN_PASSWORD'),
+  adminUsername,
+  adminPassword,
+  adminFallbackEnabled: Boolean(adminUsername && adminPassword),
   adminPasswordHash: process.env.ADMIN_PASSWORD_HASH || '',
   nodeEnv: process.env.NODE_ENV || 'development',
   cookieSecure: process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production',
   autoMigrate: process.env.AUTO_MIGRATE !== 'false',
   appVersion: pkg.version,
   rootDirectory: process.env.RENDER_ROOT_DIRECTORY || path.basename(path.join(__dirname, '..')),
-  discord: {
-    clientId: process.env.DISCORD_CLIENT_ID || '',
-    clientSecret: process.env.DISCORD_CLIENT_SECRET || '',
-    redirectUri: process.env.DISCORD_REDIRECT_URI || ''
-  },
+  discord,
   randomId: () => crypto.randomBytes(16).toString('hex')
 };
