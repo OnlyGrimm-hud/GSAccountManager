@@ -1,0 +1,41 @@
+<%- include('../partials/head') %>
+<section class="panel">
+  <div class="panel-head">
+    <h2>Accounts</h2>
+    <a class="button primary" href="/accounts/new">Add account</a>
+  </div>
+  <form class="filters" method="get">
+    <input name="q" placeholder="Search username or display" value="<%= filters.q || '' %>">
+    <select name="account_type"><option value="">All types</option><% accountTypes.forEach(t => { %><option value="<%= t %>" <%= filters.account_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select>
+    <select name="status"><option value="">All statuses</option><% accountStatuses.forEach(s => { %><option value="<%= s %>" <%= filters.status === s ? 'selected' : '' %>><%= s %></option><% }) %></select>
+    <input name="category" placeholder="Category" value="<%= filters.category || '' %>">
+    <input name="country_code" placeholder="Country" value="<%= filters.country_code || '' %>">
+    <select name="has_proxy"><option value="">Proxy</option><option value="yes" <%= filters.has_proxy === 'yes' ? 'selected' : '' %>>Has proxy</option><option value="no" <%= filters.has_proxy === 'no' ? 'selected' : '' %>>No proxy</option></select>
+    <select name="has_otp"><option value="">OTP</option><option value="yes" <%= filters.has_otp === 'yes' ? 'selected' : '' %>>Has OTP</option><option value="no" <%= filters.has_otp === 'no' ? 'selected' : '' %>>No OTP</option></select>
+    <button class="button">Filter</button>
+  </form>
+  <table>
+    <thead><tr><th>Username</th><th>Type</th><th>Display</th><th>Category</th><th>Status</th><th>Proxy</th><th>Updated</th><th>Actions</th></tr></thead>
+    <tbody>
+      <% accounts.forEach(account => { %>
+        <tr>
+          <td><%= mask(account.username) %></td>
+          <td><span class="tag"><%= account.account_type %></span></td>
+          <td><%= account.display_name || '' %></td>
+          <td><%= account.category || '' %></td>
+          <td><span class="status <%= account.status %>"><%= account.status %></span></td>
+          <td><%= account.proxy_host ? `${account.proxy_host}:${account.proxy_port}` : '' %></td>
+          <td><%= new Date(account.updated_at).toLocaleDateString() %></td>
+          <td class="actions">
+            <a class="button small" href="/accounts/<%= account.id %>">View/Edit</a>
+            <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/username">Copy username</button>
+            <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/password">Copy password</button>
+            <% if (account.otp_secret_encrypted) { %><button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP</button><% } %>
+            <a class="button small" href="/workflow?account_id=<%= account.id %>">Workflow</a>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+<%- include('../partials/foot') %>
