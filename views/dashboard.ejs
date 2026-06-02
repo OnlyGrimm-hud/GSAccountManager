@@ -1,0 +1,41 @@
+<%- include('partials/head') %>
+<section class="metric-grid">
+  <% const countMap = Object.fromEntries(counts.map(c => [c.status, c.count])); %>
+  <% accountStatuses.forEach(status => { %>
+    <article class="metric">
+      <span><%= status.replace('_', ' ') %></span>
+      <strong><%= countMap[status] || 0 %></strong>
+    </article>
+  <% }) %>
+</section>
+<section class="content-grid">
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Account Flow</h2>
+      <a class="button small" href="/accounts/new">New account</a>
+    </div>
+    <div class="status-lane">
+      <span>Pending</span><span>In progress</span><span>Needs review</span><span>Upgraded</span>
+    </div>
+  </article>
+  <article class="panel">
+    <h2>Proxy Health</h2>
+    <% if (!proxyCounts.length) { %><p class="muted">No proxies saved yet.</p><% } %>
+    <% proxyCounts.forEach(item => { %><p class="row-line"><span><%= item.status %></span><strong><%= item.count %></strong></p><% }) %>
+  </article>
+</section>
+<section class="panel">
+  <div class="panel-head">
+    <h2>Recent Safe Activity</h2>
+    <a class="button small" href="/logs">View logs</a>
+  </div>
+  <table>
+    <thead><tr><th>Time</th><th>Action</th><th>Message</th></tr></thead>
+    <tbody>
+      <% recent.forEach(log => { %>
+        <tr><td><%= new Date(log.created_at).toLocaleString() %></td><td><%= log.action %></td><td><%= log.message || '' %></td></tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+<%- include('partials/foot') %>
