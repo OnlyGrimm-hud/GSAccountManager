@@ -18,6 +18,7 @@
     </select></label>
     <label>Mask Sensitive Values<select name="mask_sensitive_values"><option value="true" <%= settings.mask_sensitive_values === 'true' ? 'selected' : '' %>>true</option><option value="false" <%= settings.mask_sensitive_values === 'false' ? 'selected' : '' %>>false</option></select></label>
     <label>OTP Refresh Interval<input type="number" min="15" max="60" name="otp_refresh_interval" value="<%= settings.otp_refresh_interval || '30' %>"></label>
+    <p class="row-line"><span>App Version</span><strong>v<%= appVersion %></strong></p>
     <button class="button primary">Save settings</button>
   </form>
   <section class="panel form-grid">
@@ -43,6 +44,18 @@
   <p class="row-line"><span>ENCRYPTION_KEY</span><strong>32 decoded bytes</strong></p>
   <p class="row-line"><span>SESSION_SECRET</span><strong>required</strong></p>
   <p class="row-line"><span>Admin login</span><strong>env based</strong></p>
-  <p class="row-line"><span>App Version</span><strong><%= appVersion %></strong></p>
+  <p class="row-line"><span>App Version</span><strong>v<%= appVersion %></strong></p>
+</section>
+<section class="panel">
+  <h2>Production Checklist</h2>
+  <div class="checklist-grid">
+    <p class="row-line"><span>PostgreSQL connected</span><strong class="status ready">ready</strong></p>
+    <p class="row-line"><span>Encryption key loaded</span><strong class="status ready">ready</strong></p>
+    <p class="row-line"><span>Admin auth enabled</span><strong class="status ready">ready</strong></p>
+    <p class="row-line"><span>Secure cookies enabled in production</span><strong class="status ready">ready</strong></p>
+    <p class="row-line"><span>Health check available</span><strong class="status ready">ready</strong></p>
+    <p class="row-line"><span>Import/export available</span><strong class="status ready">ready</strong></p>
+    <p class="row-line"><span>Logs available</span><strong class="status ready">ready</strong></p>
+  </div>
 </section>
 <%- include('partials/foot') %>

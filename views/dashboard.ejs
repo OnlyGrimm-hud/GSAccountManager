@@ -25,9 +25,13 @@
     </div>
   <% } else { %>
     <div class="current-account">
-      <h2>No current account</h2>
-      <p class="muted">Import or add an account to start the manual workflow.</p>
-      <a class="button primary" href="/imports-exports">Import accounts</a>
+      <h2>Import accounts to begin.</h2>
+      <p class="muted">Start with a TXT import, add one account manually, or confirm deployment settings before storing data.</p>
+      <div class="actions">
+        <a class="button primary" href="/imports-exports">Import Accounts</a>
+        <a class="button" href="/accounts/new">Add Account Manually</a>
+        <a class="button" href="/settings">Open Settings</a>
+      </div>
     </div>
   <% } %>
 </section>
