@@ -1,0 +1,102 @@
+<%- include('../partials/head') %>
+<% const countMap = Object.fromEntries(counts.map(row => [row.status, row.count])); %>
+<section class="metric-grid">
+  <% ['queued','running','paused','waiting_for_user','completed','failed'].forEach(status => { %>
+    <article class="metric"><span><%= status.replace(/_/g, ' ') %></span><strong><%= countMap[status] || 0 %></strong></article>
+  <% }) %>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Workflow Builder</p>
+        <h2>Create Workflow</h2>
+      </div>
+    </div>
+    <form method="post" action="/workflows" class="form-grid">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <label>Name<input name="name" placeholder="Login form fill"></label>
+      <label>Template<select name="template">
+        <option value="login_fill">Login form fill</option>
+        <option value="account_creation_fill">Account creation form fill</option>
+        <option value="generic_form_fill">Generic multi-field form fill</option>
+        <option value="custom">Custom</option>
+      </select></label>
+      <label>Description<textarea name="description" rows="3"></textarea></label>
+      <button class="button primary">Create workflow</button>
+    </form>
+  </article>
+
+  <article class="panel">
+    <p class="eyebrow">Safe Automation Boundary</p>
+    <h2>Visible Companion Runs Only</h2>
+    <p class="muted">Workflow jobs are queued for the local companion. The browser must be visible, and CAPTCHA, 2FA, email verification, phone verification, and security checks must pause for manual completion.</p>
+    <div class="checklist-grid">
+      <p class="row-line"><span>Paired devices</span><strong><%= devices.length %></strong></p>
+      <p class="row-line"><span>Available accounts</span><strong><%= accounts.length %></strong></p>
+      <p class="row-line"><span>Available proxies</span><strong><%= proxies.length %></strong></p>
+    </div>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Workflows</h2>
+  </div>
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Steps</th><th>Updated</th><th>Run</th><th>Actions</th></tr></thead>
+    <tbody>
+      <% workflows.forEach(workflow => { %>
+        <tr>
+          <td><strong><%= workflow.name %></strong><br><span class="muted"><%= workflow.description || '' %></span></td>
+          <td><span class="tag"><%= workflow.type %></span></td>
+          <td><span class="status <%= workflow.status %>"><%= workflow.status %></span></td>
+          <td><%= workflow.step_count %></td>
+          <td><%= new Date(workflow.updated_at).toLocaleDateString() %></td>
+          <td>
+            <form method="post" action="/workflows/<%= workflow.id %>/run" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <select name="account_id">
+                <option value="">No account</option>
+                <% accounts.forEach(account => { %><option value="<%= account.id %>" <%= String(account.id) === String(query && query.account_id || '') ? 'selected' : '' %>><%= mask(account.display_name || account.legacy_login || account.username) %></option><% }) %>
+              </select>
+              <select name="proxy_id">
+                <option value="">Account/default proxy</option>
+                <% proxies.forEach(proxy => { %><option value="<%= proxy.id %>"><%= proxy.name || `${proxy.host}:${proxy.port}` %></option><% }) %>
+              </select>
+              <select name="companion_device_id">
+                <option value="">Any paired device</option>
+                <% devices.forEach(device => { %><option value="<%= device.id %>"><%= device.device_name || `Device ${device.id}` %> - <%= device.status %></option><% }) %>
+              </select>
+              <button class="button small primary">Queue Run</button>
+            </form>
+          </td>
+          <td><a class="button small" href="/workflows/<%= workflow.id %>/edit">Edit</a></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Run History</h2>
+  </div>
+  <table>
+    <thead><tr><th>Created</th><th>Workflow</th><th>Account</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody>
+      <% runs.forEach(run => { %>
+        <tr>
+          <td><%= new Date(run.created_at).toLocaleString() %></td>
+          <td><%= run.workflow_name || 'Deleted workflow' %></td>
+          <td><%= run.account_display_name || mask(run.account_legacy_login || run.account_username || '') %></td>
+          <td><span class="status <%= run.status %>"><%= run.status %></span></td>
+          <td><a class="button small" href="/workflows/runs/<%= run.id %>">Live Status</a></td>
+        </tr>
+      <% }) %>
+      <% if (!runs.length) { %><tr><td colspan="5"><p class="muted">No workflow runs yet.</p></td></tr><% } %>
+    </tbody>
+  </table>
+</section>
+<%- include('../partials/foot') %>

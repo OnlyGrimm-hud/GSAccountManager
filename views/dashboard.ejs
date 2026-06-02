@@ -1,4 +1,14 @@
 <%- include('partials/head') %>
+<section class="metric-grid dashboard-metrics">
+  <article class="metric"><span>Total Accounts</span><strong><%= dashboardStats.total_accounts || 0 %></strong></article>
+  <article class="metric"><span>Total Proxies</span><strong><%= dashboardStats.total_proxies || 0 %></strong></article>
+  <article class="metric"><span>Active Workflows</span><strong><%= dashboardStats.active_workflows || 0 %></strong></article>
+  <article class="metric"><span>Companion</span><strong><%= helper.connected ? 'Connected' : 'Offline' %></strong></article>
+  <article class="metric"><span>Last Export</span><strong><%= latestExport ? new Date(latestExport.created_at).toLocaleDateString() : 'None' %></strong></article>
+  <article class="metric"><span>Subscription</span><strong><%= user.subscriptionStatus || 'inactive' %></strong></article>
+  <% if (isAdmin) { %><article class="metric"><span>Admin</span><strong>Enabled</strong></article><% } %>
+</section>
+
 <section class="dashboard-hero">
   <form method="get" class="account-picker">
     <label>Current Account

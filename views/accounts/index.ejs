@@ -39,6 +39,7 @@
     <select name="status"><option value="">Status</option><% accountStatuses.forEach(s => { %><option value="<%= s %>" <%= filters.status === s ? 'selected' : '' %>><%= s %></option><% }) %></select>
     <select name="has_proxy"><option value="">Has Proxy</option><option value="yes" <%= filters.has_proxy === 'yes' ? 'selected' : '' %>>Yes</option><option value="no" <%= filters.has_proxy === 'no' ? 'selected' : '' %>>No</option></select>
     <select name="has_otp"><option value="">Has OTP</option><option value="yes" <%= filters.has_otp === 'yes' ? 'selected' : '' %>>Yes</option><option value="no" <%= filters.has_otp === 'no' ? 'selected' : '' %>>No</option></select>
+    <select name="archived"><option value="">Archived</option><option value="no" <%= filters.archived === 'no' ? 'selected' : '' %>>Active list</option><option value="yes" <%= filters.archived === 'yes' ? 'selected' : '' %>>Archived</option></select>
     <select name="country_code"><option value="">Country</option><% countries.forEach(country => { %><option value="<%= country %>" <%= filters.country_code === country ? 'selected' : '' %>><%= country %></option><% }) %></select>
     <select name="created_date">
       <option value="">Created Date</option>
@@ -50,9 +51,28 @@
     <button class="button">Filter</button>
   </form>
 
-  <form id="account-export-form" method="post" action="/accounts/export">
+  <form id="account-action-form" method="post" action="/accounts/export">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <% ['q','account_type','category','status','has_proxy','has_otp','archived','country_code','created_date'].forEach(key => { %>
+      <input type="hidden" name="<%= key %>" value="<%= filters[key] || '' %>">
+    <% }) %>
   </form>
+  <div class="bulk-bar">
+    <select form="account-action-form" name="bulk_action">
+      <option value="archive">Archive selected</option>
+      <option value="delete">Delete selected</option>
+      <option value="assign_proxy">Assign proxy</option>
+      <option value="assign_category_status">Assign category/status</option>
+    </select>
+    <select form="account-action-form" name="proxy_id">
+      <option value="">No proxy / unchanged</option>
+      <% proxies.forEach(proxy => { %><option value="<%= proxy.id %>"><%= proxy.name || `${proxy.host}:${proxy.port}` %> - <%= proxy.proxy_type %></option><% }) %>
+    </select>
+    <input form="account-action-form" name="bulk_category" placeholder="Category">
+    <select form="account-action-form" name="bulk_status"><% accountStatuses.forEach(status => { %><option value="<%= status %>"><%= status %></option><% }) %></select>
+    <label class="check"><input form="account-action-form" type="checkbox" name="confirm_bulk_delete" value="yes"> Confirm permanent bulk delete</label>
+    <button class="button" form="account-action-form" formaction="/accounts/bulk">Apply bulk action</button>
+  </div>
   <table>
     <thead>
       <tr>
@@ -71,7 +91,7 @@
     <tbody>
       <% accounts.forEach(account => { %>
         <tr>
-          <td><input form="account-export-form" type="checkbox" name="account_ids" value="<%= account.id %>"></td>
+          <td><input form="account-action-form" type="checkbox" name="account_ids" value="<%= account.id %>"></td>
           <td><span class="tag"><%= account.account_type %></span></td>
           <td>
             <strong><%= mask(account.legacy_login || account.username) %></strong>
@@ -91,10 +111,16 @@
           <td><%= account.notes ? account.notes.slice(0, 80) : '' %></td>
           <td><%= new Date(account.updated_at).toLocaleDateString() %></td>
           <td class="actions">
+            <a class="button small" href="/accounts/<%= account.id %>">View</a>
             <a class="button small" href="/accounts/<%= account.id %>">Edit</a>
             <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_login">Copy login</button>
             <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_password">Copy pass</button>
             <% if (account.otp_secret_encrypted) { %><button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP</button><% } %>
+            <a class="button small" href="/workflows?account_id=<%= account.id %>">Start Workflow</a>
+            <form method="post" action="/accounts/<%= account.id %>/archive">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small">Archive</button>
+            </form>
             <form method="post" action="/accounts/<%= account.id %>/delete" data-confirm="Delete this local account record?">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button class="button small danger">Delete</button>
@@ -123,6 +149,15 @@
       <input type="hidden" name="confirm_import" value="">
       <div class="form-grid three">
         <label>Account Type<select name="account_type" data-account-import-type><option value="legacy">Legacy</option><option value="jagex">Jagex</option></select></label>
+        <label>Import Format<select name="import_format">
+          <option value="">Auto detect</option>
+          <option value="legacy_basic">username:password</option>
+          <option value="legacy_pin">username:password:bank_pin</option>
+          <option value="legacy_pin_otp">username:password:bank_pin:otp_secret</option>
+          <option value="legacy_recovery">username:password:recovery_email:recovery_password</option>
+          <option value="legacy_target_email">username:password:target_email:email_password:first_name:last_name:birth_date</option>
+          <option value="jagex_legacy">jagex_email:jagex_password:legacy_login:legacy_password:otp_secret</option>
+        </select></label>
         <label>Account Category<input list="account-category-options" name="category" placeholder="main"></label>
         <label>Proxy Category<input list="proxy-category-options" name="proxy_category" placeholder="optional"></label>
         <label>Country Code<input list="country-options" name="country_code" maxlength="2" placeholder="US"></label>
@@ -134,8 +169,10 @@
       <datalist id="country-options"><% countries.forEach(country => { %><option value="<%= country %>"></option><% }) %></datalist>
       <div class="notice">
         <strong>Format examples</strong>
-        <p class="muted">Legacy: username:password | Legacy with OTP: username:password:otp_key | Legacy with PIN and OTP: username:password:bank_pin:otp_key</p>
-        <p class="muted">Jagex: email:password | Jagex with recovery: email:password:recovery_email:recovery_password | Extra fields are kept as notes.</p>
+        <p class="muted">Legacy: username:password | username:password:bank_pin | username:password:bank_pin:otp_secret</p>
+        <p class="muted">Legacy recovery: username:password:recovery_email:recovery_password</p>
+        <p class="muted">Target email: username:password:target_email:email_password:first_name:last_name:birth_date</p>
+        <p class="muted">Jagex: email:password | jagex_email:jagex_password:legacy_login:legacy_password:otp_secret</p>
       </div>
       <label>Pasted Accounts<textarea name="accounts_text" rows="10" placeholder="username:password" data-account-import-text></textarea></label>
       <div class="actions">
@@ -158,24 +195,37 @@
     </div>
     <div class="form-grid">
       <p class="notice">TXT export contains sensitive account data. Keep the downloaded file private.</p>
-      <label>Export Format Preset<select form="account-export-form" name="export_format" data-export-format>
+      <label>Export Format Preset<select form="account-action-form" name="export_format" data-export-format>
         <option value="username_password">username:password</option>
+        <option value="username_password_bank_pin">username:password:bank_pin</option>
         <option value="username_password_otp">username:password:otp</option>
         <option value="username_password_bank_pin_otp">username:password:bank_pin:otp</option>
+        <option value="username_password_recovery">username:password:recovery_email:recovery_password</option>
         <option value="email_password">email:password</option>
         <option value="email_password_recovery">email:password:recovery_email:recovery_password</option>
+        <option value="jagex_email_password">jagex_email:jagex_password</option>
+        <option value="legacy_to_jagex">legacy_login:legacy_password:jagex_email:jagex_password</option>
         <option value="full">full</option>
         <option value="custom">custom</option>
       </select></label>
-      <label>Delimiter<input form="account-export-form" name="delimiter" value="<%= settings.default_export_delimiter || ':' %>"></label>
-      <label>Custom fields / order<input form="account-export-form" name="custom_fields" placeholder="username,password,otp,proxy"></label>
+      <label>Export Scope<select form="account-action-form" name="export_scope"><option value="selected">Export selected only</option><option value="filtered">Export all filtered results</option></select></label>
+      <label>Delimiter<input form="account-action-form" name="delimiter" value="<%= settings.default_export_delimiter || ':' %>"></label>
+      <label>Custom fields / order<input form="account-action-form" name="custom_fields" placeholder="username,password,otp,proxy"></label>
       <p class="muted">Allowed custom fields include username, password, email, jagex_password, bank_pin, otp, recovery_email, recovery_password, proxy, category, country, status, notes.</p>
-      <label class="check"><input form="account-export-form" type="checkbox" name="delete_after_export" value="yes" data-delete-after-export> Delete exported accounts after download</label>
+      <div class="form-grid two">
+        <label class="check"><input form="account-action-form" type="checkbox" name="include_sensitive" value="no"> Exclude sensitive fields</label>
+        <label class="check"><input form="account-action-form" type="checkbox" name="include_account_type" value="yes"> Include account type</label>
+        <label class="check"><input form="account-action-form" type="checkbox" name="include_proxy" value="yes"> Include proxy</label>
+        <label class="check"><input form="account-action-form" type="checkbox" name="include_notes" value="yes"> Include notes</label>
+        <label class="check"><input form="account-action-form" type="checkbox" name="include_otp_secret" value="yes"> Include OTP secret</label>
+      </div>
+      <label>After export<select form="account-action-form" name="post_export_action" data-post-export-action><option value="keep">No, keep them</option><option value="archive">Archive them</option><option value="delete">Delete them permanently</option></select></label>
+      <label class="check"><input form="account-action-form" type="checkbox" name="delete_after_export" value="yes" data-delete-after-export> Enable delete-after-export confirmation</label>
       <div class="notice danger delete-confirm-block" hidden>
         <p>This will permanently delete the selected accounts from your account list after export. This cannot be recovered.</p>
-        <label class="check"><input form="account-export-form" type="checkbox" name="confirm_delete_after_export" value="yes"> I understand and confirm deletion after export generation.</label>
+        <label class="check"><input form="account-action-form" type="checkbox" name="confirm_delete_after_export" value="yes"> I understand this permanently deletes these accounts and cannot be recovered.</label>
       </div>
-      <button class="button primary" form="account-export-form">Download TXT</button>
+      <button class="button primary" form="account-action-form" formaction="/accounts/export">Download TXT</button>
     </div>
   </div>
 </div>

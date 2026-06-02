@@ -46,6 +46,14 @@ const jagexRows = parseAccountImport('email@example.com:pass:recovery@example.co
 assert.strictEqual(jagexRows[0].recovery_email, 'recovery@example.com');
 assert.strictEqual(jagexRows[0].recovery_email_password, 'recoverypass');
 
+const targetEmailRows = parseAccountImport('legacy:pass:target@example.com:emailpass:First:Last:1/2/1999', ':', { account_type: 'legacy' });
+assert.strictEqual(targetEmailRows[0].target_email, 'target@example.com');
+assert.strictEqual(targetEmailRows[0].first_name, 'First');
+
+const jagexLegacyRows = parseAccountImport('jagex@example.com:jpass:legacylogin:lpass:JBSWY3DPEHPK3PXP', ':', { account_type: 'jagex', import_format: 'jagex_legacy' });
+assert.strictEqual(jagexLegacyRows[0].legacy_login, 'legacylogin');
+assert.strictEqual(jagexLegacyRows[0].legacy_password, 'lpass');
+
 const proxies = parseProxyImport([
   '127.0.0.1:8080',
   '127.0.0.2:8080:user:pass',
@@ -112,14 +120,27 @@ async function main() {
     const serverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
     assert(serverSource.includes("app.get('/healthz'"));
     assert(serverSource.includes("app.get('/login'"));
+    assert(serverSource.includes("app.get('/auth/discord'"));
+    assert(serverSource.includes("app.get('/auth/discord/callback'"));
+    assert(serverSource.includes("app.get('/locked'"));
+    assert(serverSource.includes("app.get('/admin'"));
     assert(serverSource.includes("app.get('/admin/users'"));
+    assert(serverSource.includes("app.get('/accounts'"));
+    assert(serverSource.includes("app.get('/proxies'"));
+    assert(serverSource.includes("app.get('/settings'"));
+    assert(serverSource.includes("app.get('/logs'"));
     assert(serverSource.includes("app.get('/downloads'"));
     assert(serverSource.includes("app.get('/companion'"));
+    assert(serverSource.includes("app.get('/workflows'"));
     assert(serverSource.includes("app.post('/accounts/import'"));
     assert(serverSource.includes("app.post('/accounts/export'"));
+    assert(serverSource.includes("app.post('/accounts/bulk'"));
     assert(serverSource.includes("app.post('/proxies/import'"));
+    assert(serverSource.includes("app.post('/proxies/export'"));
     assert(serverSource.includes("app.post('/api/companion/pair/complete'"));
     assert(serverSource.includes("app.post('/api/companion/heartbeat'"));
+    assert(serverSource.includes("app.get('/api/companion/jobs/next'"));
+    assert(serverSource.includes("app.post('/api/companion/jobs/:id/status'"));
     assert(serverSource.includes('requireActiveSubscription'));
     assert(serverSource.includes('requireAdmin'));
     assert(serverSource.includes('a.user_id=$2'));
@@ -129,17 +150,30 @@ async function main() {
     return;
   }
 
+  assert(routeExists('get', '/healthz'));
   assert(routeExists('get', '/login'));
   assert(routeExists('get', '/auth/discord'));
   assert(routeExists('get', '/auth/discord/callback'));
+  assert(routeExists('get', '/locked'));
+  assert(routeExists('get', '/'));
+  assert(routeExists('get', '/accounts'));
+  assert(routeExists('get', '/proxies'));
+  assert(routeExists('get', '/settings'));
+  assert(routeExists('get', '/logs'));
   assert(routeExists('get', '/downloads'));
   assert(routeExists('get', '/companion'));
+  assert(routeExists('get', '/workflows'));
+  assert(routeExists('get', '/admin'));
   assert(routeExists('get', '/admin/users'));
   assert(routeExists('post', '/accounts/import'));
   assert(routeExists('post', '/accounts/export'));
+  assert(routeExists('post', '/accounts/bulk'));
   assert(routeExists('post', '/proxies/import'));
+  assert(routeExists('post', '/proxies/export'));
   assert(routeExists('post', '/api/companion/pair/complete'));
   assert(routeExists('post', '/api/companion/heartbeat'));
+  assert(routeExists('get', '/api/companion/jobs/next'));
+  assert(routeExists('post', '/api/companion/jobs/:id/status'));
 
   const loginLayer = app._router.stack.find(layer => layer.route && layer.route.path === '/login');
   const loginRes = fakeResponse();

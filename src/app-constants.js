@@ -15,9 +15,19 @@ const exportFormats = [
   'legacy_user_pass_otp', 'jagex_email_pass', 'login_email_pass_proxy',
   'jagex_email_pass_otp', 'full_account_export', 'safe_csv',
   'username_password', 'username_password_otp', 'username_password_bank_pin_otp',
-  'email_password', 'email_password_recovery', 'full', 'custom'
+  'username_password_bank_pin', 'username_password_recovery',
+  'email_password', 'email_password_recovery', 'jagex_email_password',
+  'legacy_to_jagex', 'full', 'custom'
 ];
 const workflowModes = ['manual'];
+const workflowTypes = ['login_fill', 'account_creation_fill', 'generic_form_fill', 'custom'];
+const workflowDefinitionStatuses = ['draft', 'active', 'archived'];
+const workflowRunStatuses = ['queued', 'running', 'paused', 'waiting_for_user', 'completed', 'failed', 'cancelled'];
+const workflowStepTypes = [
+  'open_url', 'wait_for_selector', 'fill_field', 'click', 'pause_for_user',
+  'wait_for_user_continue', 'mark_complete', 'fail', 'screenshot', 'note'
+];
+const companionJobStatuses = ['queued', 'accepted', 'running', 'paused', 'waiting_for_user', 'completed', 'failed', 'cancelled'];
 const paymentMethods = ['LTC', 'BTC', 'ETH', 'manual_admin_activation'];
 
 module.exports = {
@@ -32,5 +42,10 @@ module.exports = {
   activeSubscriptionStatuses,
   exportFormats,
   workflowModes,
+  workflowTypes,
+  workflowDefinitionStatuses,
+  workflowRunStatuses,
+  workflowStepTypes,
+  companionJobStatuses,
   paymentMethods
 };

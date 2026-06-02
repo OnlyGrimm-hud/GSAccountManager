@@ -1,16 +1,39 @@
 <%- include('partials/head') %>
 <section class="panel">
   <div class="panel-head">
-    <h2>Safe Activity Logs</h2>
+    <div>
+      <p class="eyebrow">Audit Safe</p>
+      <h2>Activity Logs</h2>
+    </div>
   </div>
-  <form class="filters compact" method="get">
+  <form class="filters log-filters" method="get">
     <input name="q" placeholder="Search logs" value="<%= filters.q || '' %>">
     <select name="action"><option value="">All actions</option><% actions.forEach(action => { %><option value="<%= action %>" <%= filters.action === action ? 'selected' : '' %>><%= action %></option><% }) %></select>
+    <select name="entity_type"><option value="">All types</option><% entityTypes.forEach(type => { %><option value="<%= type %>" <%= filters.entity_type === type ? 'selected' : '' %>><%= type %></option><% }) %></select>
+    <select name="date">
+      <option value="">Any date</option>
+      <option value="today" <%= filters.date === 'today' ? 'selected' : '' %>>Today</option>
+      <option value="7d" <%= filters.date === '7d' ? 'selected' : '' %>>Last 7 days</option>
+      <option value="30d" <%= filters.date === '30d' ? 'selected' : '' %>>Last 30 days</option>
+    </select>
     <button class="button">Filter</button>
   </form>
+  <p class="muted">Logs never include raw passwords, OTP secrets, proxy passwords, tokens, cookies, or encrypted values.</p>
   <table>
-    <thead><tr><th>Time</th><% if (admin) { %><th>User</th><% } %><th>Action</th><th>Entity</th><th>Message</th></tr></thead>
-    <tbody><% logs.forEach(log => { %><tr><td><%= new Date(log.created_at).toLocaleString() %></td><% if (admin) { %><td><%= log.log_username || 'System' %></td><% } %><td><%= log.action %></td><td><%= log.entity_type || '' %> <%= log.entity_id || '' %></td><td><%= log.message || '' %></td></tr><% }) %></tbody>
+    <thead><tr><th>Time</th><% if (admin) { %><th>User</th><% } %><th>Action</th><th>Entity</th><th>Message</th><th>Safe Details</th></tr></thead>
+    <tbody>
+      <% logs.forEach(log => { %>
+        <tr>
+          <td><%= new Date(log.created_at).toLocaleString() %></td>
+          <% if (admin) { %><td><%= log.log_username || 'System' %></td><% } %>
+          <td><%= log.action %></td>
+          <td><%= log.entity_type || '' %> <%= log.entity_id || '' %></td>
+          <td><%= log.message || '' %></td>
+          <td><button class="button small copy-text" type="button" data-copy-text="<%= `${new Date(log.created_at).toLocaleString()} | ${log.action} | ${log.entity_type || ''} ${log.entity_id || ''} | ${log.message || ''}` %>">Copy safe details</button></td>
+        </tr>
+      <% }) %>
+      <% if (!logs.length) { %><tr><td colspan="<%= admin ? 6 : 5 %>"><p class="muted">No logs match these filters.</p></td></tr><% } %>
+    </tbody>
   </table>
 </section>
 <%- include('partials/foot') %>

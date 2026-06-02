@@ -50,12 +50,16 @@
     <tbody>
       <% devices.forEach(device => { %>
         <tr>
-          <td><%= device.device_name || `Device ${device.id}` %></td>
+          <td><input class="table-input" form="device-<%= device.id %>" name="device_name" value="<%= device.device_name || `Device ${device.id}` %>"></td>
           <td><span class="status <%= device.status %>"><%= device.status %></span></td>
           <td><%= device.companion_version || 'Unknown' %></td>
           <td><%= device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : 'Never' %></td>
-          <td><%= device.allow_screenshots ? 'Opt-in enabled' : 'Disabled' %></td>
+          <td><label class="check"><input form="device-<%= device.id %>" type="checkbox" name="allow_screenshots" value="yes" <%= device.allow_screenshots ? 'checked' : '' %>> Opt-in</label></td>
           <td>
+            <form id="device-<%= device.id %>" method="post" action="/companion/devices/<%= device.id %>">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small">Save</button>
+            </form>
             <% if (device.status !== 'revoked') { %>
               <form method="post" action="/companion/devices/<%= device.id %>/revoke" data-confirm="Revoke this companion device?">
                 <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -68,6 +72,28 @@
         </tr>
       <% }) %>
       <% if (!devices.length) { %><tr><td colspan="6"><p class="muted">No companion devices paired yet.</p></td></tr><% } %>
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Workflow Jobs</h2>
+    <a class="button small" href="/workflows">Open Workflows</a>
+  </div>
+  <table>
+    <thead><tr><th>Created</th><th>Workflow</th><th>Status</th><th>Device</th><th>Run</th></tr></thead>
+    <tbody>
+      <% jobs.forEach(job => { %>
+        <tr>
+          <td><%= new Date(job.created_at).toLocaleString() %></td>
+          <td><%= job.workflow_name || job.job_type %></td>
+          <td><span class="status <%= job.status %>"><%= job.status %></span></td>
+          <td><%= job.companion_device_id || 'Any paired device' %></td>
+          <td><% if (job.workflow_run_id) { %><a class="button small" href="/workflows/runs/<%= job.workflow_run_id %>">Live Status</a><% } %></td>
+        </tr>
+      <% }) %>
+      <% if (!jobs.length) { %><tr><td colspan="5"><p class="muted">No workflow jobs queued yet.</p></td></tr><% } %>
     </tbody>
   </table>
 </section>

@@ -28,6 +28,7 @@
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
     <h2>Add Proxy</h2>
     <label>Type<select name="proxy_type"><% proxyTypes.forEach(t => { %><option value="<%= t %>" <%= t === 'HTTP' ? 'selected' : '' %>><%= t %></option><% }) %></select></label>
+    <label>Name<input name="name" placeholder="US HTTP 1"></label>
     <label>Host<input name="host"></label>
     <label>Port<input name="port" type="number" min="1" max="65535"></label>
     <label>Username<input name="username" type="password"></label>
@@ -35,13 +36,18 @@
     <label>Category<input list="proxy-category-options-page" name="category"></label>
     <label>Country Code<input name="country_code" maxlength="2"></label>
     <label>Status<select name="status"><% proxyStatuses.forEach(s => { %><option value="<%= s %>"><%= s %></option><% }) %></select></label>
+    <label>Max Accounts Override<input name="max_accounts_per_proxy" type="number" min="1" placeholder="<%= settings.max_accounts_per_proxy || 5 %>"></label>
     <label>Notes<textarea name="notes"></textarea></label>
     <button class="button primary">Save proxy</button>
   </form>
   <article class="panel">
-    <h2>Import Proxies</h2>
+    <h2>Import / Export Proxies</h2>
     <p class="muted">Use the import modal for preview and confirmation before saving. Supported formats are host:port and host:port:username:password.</p>
-    <button class="button primary" type="button" data-open-modal="proxy-import-modal">Open Import Proxies</button>
+    <div class="actions">
+      <button class="button primary" type="button" data-open-modal="proxy-import-modal">Open Import Proxies</button>
+      <button class="button" type="button" data-open-modal="proxy-export-modal">Export Proxies</button>
+      <button class="button" type="button" disabled>Test Proxy Coming Soon</button>
+    </div>
   </article>
 </section>
 
@@ -53,10 +59,12 @@
     <span class="tag">Max <%= settings.max_accounts_per_proxy || 5 %> accounts per proxy</span>
   </div>
   <table>
-    <thead><tr><th>Host</th><th>Port</th><th>Type</th><th>Category</th><th>Country</th><th>Status</th><th>Assigned</th><th>Notes</th><th>Credentials</th><th>Actions</th></tr></thead>
+    <thead><tr><th><input type="checkbox" data-select-all="[name='proxy_ids']"></th><th>Name</th><th>Host</th><th>Port</th><th>Type</th><th>Category</th><th>Country</th><th>Status</th><th>Assigned</th><th>Max</th><th>Notes</th><th>Credentials</th><th>Actions</th></tr></thead>
     <tbody>
       <% proxies.forEach(proxy => { %>
         <tr>
+          <td><input form="proxy-export-form" type="checkbox" name="proxy_ids" value="<%= proxy.id %>"></td>
+          <td><input class="table-input" form="proxy-<%= proxy.id %>" name="name" value="<%= proxy.name || '' %>"></td>
           <td><input class="table-input" form="proxy-<%= proxy.id %>" name="host" value="<%= proxy.host %>" required></td>
           <td><input class="table-input short" form="proxy-<%= proxy.id %>" name="port" type="number" min="1" max="65535" value="<%= proxy.port %>" required></td>
           <td><select form="proxy-<%= proxy.id %>" name="proxy_type"><% proxyTypes.forEach(type => { %><option value="<%= type %>" <%= proxy.proxy_type === type ? 'selected' : '' %>><%= type %></option><% }) %></select></td>
@@ -64,6 +72,7 @@
           <td><input class="table-input short" form="proxy-<%= proxy.id %>" name="country_code" maxlength="2" value="<%= proxy.country_code || '' %>"></td>
           <td><select form="proxy-<%= proxy.id %>" name="status"><% proxyStatuses.forEach(status => { %><option value="<%= status %>" <%= proxy.status === status ? 'selected' : '' %>><%= status %></option><% }) %></select></td>
           <td><%= proxy.assigned_count %></td>
+          <td><input class="table-input short" form="proxy-<%= proxy.id %>" name="max_accounts_per_proxy" type="number" min="1" value="<%= proxy.max_accounts_per_proxy || '' %>" placeholder="<%= settings.max_accounts_per_proxy || 5 %>"></td>
           <td><input class="table-input" form="proxy-<%= proxy.id %>" name="notes" value="<%= proxy.notes || '' %>"></td>
           <td>
             <input class="table-input" form="proxy-<%= proxy.id %>" name="username" type="password" placeholder="new username">
@@ -81,10 +90,14 @@
           </td>
         </tr>
       <% }) %>
-      <% if (!proxies.length) { %><tr><td colspan="10"><p class="muted">Import proxies or add one manually.</p></td></tr><% } %>
+      <% if (!proxies.length) { %><tr><td colspan="13"><p class="muted">Import proxies or add one manually.</p></td></tr><% } %>
     </tbody>
   </table>
 </section>
+
+<form id="proxy-export-form" method="post" action="/proxies/export">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+</form>
 
 <div class="modal" id="proxy-import-modal" hidden>
   <div class="modal-panel">
@@ -114,6 +127,24 @@
       </div>
       <div class="preview-box" data-proxy-import-preview></div>
     </form>
+  </div>
+</div>
+
+<div class="modal" id="proxy-export-modal" hidden>
+  <div class="modal-panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Export</p>
+        <h2>Export Proxies</h2>
+      </div>
+      <button class="icon-button" type="button" data-close-modal>Close</button>
+    </div>
+    <div class="form-grid">
+      <p class="notice">Proxy export can include sensitive proxy passwords only when explicitly selected.</p>
+      <label>Delimiter<input form="proxy-export-form" name="delimiter" value=":"></label>
+      <label class="check"><input form="proxy-export-form" type="checkbox" name="include_credentials" value="yes"> Include proxy usernames/passwords</label>
+      <button class="button primary" form="proxy-export-form">Download TXT</button>
+    </div>
   </div>
 </div>
 <%- include('partials/foot') %>

@@ -30,7 +30,11 @@
       <li>Enter the pairing code in the local app.</li>
       <li>Confirm the website shows the device as connected.</li>
     </ol>
-    <p class="muted">The companion foundation currently supports pairing and heartbeat placeholders. Controlled browser fill remains planned and user-triggered only.</p>
+    <div class="notice">
+      <strong>Packaging commands</strong>
+      <p class="muted">From the companion folder: npm install, npm start, npm run build, npm run package.</p>
+    </div>
+    <p class="muted">The companion foundation currently supports pairing, heartbeat, job polling, and job status reporting. Controlled browser fill remains user-triggered and manual-check safe.</p>
   </article>
 </section>
 <%- include('partials/foot') %>

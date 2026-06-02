@@ -5,8 +5,12 @@ Local Windows companion app skeleton for GS Account Manager.
 Current status:
 
 - Electron shell
-- pairing UI placeholder
+- pairing UI
 - safe companion API pairing request
+- local device token storage
+- heartbeat placeholder
+- job polling and job status reporting placeholders
+- manual local status reporting placeholder
 - no browser automation implementation yet
 - no CAPTCHA, MFA, security-check, or anti-abuse bypass
 - no hidden automation
@@ -26,7 +30,8 @@ Commands:
 ```bash
 npm install
 npm start
-npm run package:win
+npm run build
+npm run package
 ```
 
-The packaged Windows artifact is planned as `GSWorkFlowManager.exe`.
+The packaged Windows artifact is planned as `GS Account Manager Companion Setup.exe`.

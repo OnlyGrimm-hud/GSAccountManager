@@ -20,6 +20,7 @@
     <nav class="tabs" aria-label="Companion tabs">
       <button class="active" data-tab-button="pair">Pair Device</button>
       <button data-tab-button="status">Status</button>
+      <button data-tab-button="jobs">Jobs</button>
       <button data-tab-button="clients">Detected Clients</button>
       <button data-tab-button="browser">Controlled Browser</button>
       <button data-tab-button="settings">Settings</button>
@@ -44,9 +45,23 @@
       <button id="heartbeatButton">Send Heartbeat Placeholder</button>
     </section>
 
+    <section class="panel" data-tab-panel="jobs" hidden>
+      <h2>Queued / Running Jobs</h2>
+      <p>Jobs come from GS Account Manager workflows and must run in a visible browser. Security checks pause for manual completion.</p>
+      <div class="actions">
+        <button id="fetchJobButton">Fetch Next Job</button>
+        <button id="markRunningButton">Mark Running</button>
+        <button id="markWaitingButton">Pause For Manual Check</button>
+        <button id="markCompleteButton">Mark Complete</button>
+        <button id="markFailedButton">Mark Failed</button>
+      </div>
+      <pre id="jobOutput">No job loaded.</pre>
+    </section>
+
     <section class="panel" data-tab-panel="clients" hidden>
       <h2>Detected Clients</h2>
       <p>Local client detection is scaffolded only. Future detection will require user permission and will report allowed client open/closed status only.</p>
+      <button id="sendStatusButton">Send Manual Status Placeholder</button>
       <pre>No client status reported yet.</pre>
     </section>
 

@@ -1,0 +1,67 @@
+<%- include('../partials/head') %>
+<section class="workflow-hero">
+  <div>
+    <p class="eyebrow">Live Run Status</p>
+    <h2><%= run.workflow_name || 'Workflow run' %></h2>
+    <p class="muted">Companion job <%= run.companion_job_id || 'not queued' %> is <%= run.companion_job_status || run.status %>.</p>
+  </div>
+  <span class="status <%= run.status %>"><%= run.status %></span>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <h2>Run Details</h2>
+    <div class="checklist-grid">
+      <p class="row-line"><span>Account</span><strong><%= run.account_display_name || run.account_legacy_login || run.account_username || 'None' %></strong></p>
+      <p class="row-line"><span>Proxy</span><strong><%= run.proxy_host ? `${run.proxy_name || ''} ${run.proxy_type || ''} ${run.proxy_host}:${run.proxy_port}` : 'Account/default or direct' %></strong></p>
+      <p class="row-line"><span>Device</span><strong><%= run.companion_device_name || 'Any paired device' %></strong></p>
+      <p class="row-line"><span>Created</span><strong><%= new Date(run.created_at).toLocaleString() %></strong></p>
+      <p class="row-line"><span>Started</span><strong><%= run.started_at ? new Date(run.started_at).toLocaleString() : 'Not started' %></strong></p>
+      <p class="row-line"><span>Completed</span><strong><%= run.completed_at ? new Date(run.completed_at).toLocaleString() : 'Not completed' %></strong></p>
+    </div>
+    <div class="actions">
+      <form method="post" action="/workflows/runs/<%= run.id %>/continue">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button class="button">Continue After Manual Check</button>
+      </form>
+      <form method="post" action="/workflows/runs/<%= run.id %>/cancel" data-confirm="Cancel this workflow run?">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button class="button danger">Cancel Run</button>
+      </form>
+    </div>
+  </article>
+
+  <article class="panel">
+    <h2>Latest Snapshot</h2>
+    <% if (snapshot) { %>
+      <p class="row-line"><span>Time</span><strong><%= new Date(snapshot.created_at).toLocaleString() %></strong></p>
+      <p class="row-line"><span>Window</span><strong><%= snapshot.window_title || 'Not provided' %></strong></p>
+      <p class="row-line"><span>Size</span><strong><%= snapshot.image_size %> bytes</strong></p>
+    <% } else { %>
+      <p class="notice">No snapshot uploaded yet.</p>
+    <% } %>
+    <p class="muted">Snapshots are opt-in and must not capture passwords, private tabs, or the full desktop.</p>
+  </article>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <h2>Workflow Events</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Type</th><th>Message</th></tr></thead>
+      <tbody>
+        <% events.forEach(event => { %><tr><td><%= new Date(event.created_at).toLocaleString() %></td><td><%= event.event_type %></td><td><%= event.message || '' %></td></tr><% }) %>
+      </tbody>
+    </table>
+  </article>
+  <article class="panel">
+    <h2>Companion Events</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Type</th><th>Message</th></tr></thead>
+      <tbody>
+        <% jobEvents.forEach(event => { %><tr><td><%= new Date(event.created_at).toLocaleString() %></td><td><%= event.event_type %></td><td><%= event.message || '' %></td></tr><% }) %>
+      </tbody>
+    </table>
+  </article>
+</section>
+<%- include('../partials/foot') %>

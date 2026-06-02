@@ -131,6 +131,10 @@ Existing MVP columns are preserved. The v1 migration adds:
 - `email_creation_status`
 - `exported_at`
 - `archived_at`
+- proxy `name`
+- proxy `max_accounts_per_proxy`
+- workflow tables: `workflows`, `workflow_steps`, `workflow_runs`, and `workflow_run_events`
+- companion job tables: `companion_jobs` and `companion_job_events`
 
 User roles are `user`, `staff`, or `admin`. Subscription statuses are `inactive`, `active`, `trial`, `expired`, and `banned`.
 
@@ -160,21 +164,26 @@ WHERE discord_id = 'YOUR_DISCORD_ID';
 Default delimiter is `:`.
 
 - `username:password`
-- `username:password:otp`
-- `username:password:bank_pin:otp`
-- `username:password:otp:notes`
+- `username:password:bank_pin`
+- `username:password:bank_pin:otp_secret`
+- `username:password:recovery_email:recovery_password`
+- `username:password:target_email:email_password:first_name:last_name:birth_date`
+- `jagex_email:jagex_password:legacy_login:legacy_password:otp_secret`
 
-The import page shows valid rows, duplicate rows, and invalid rows before committing.
+The Accounts page import modal shows valid rows, duplicate rows, and invalid rows before committing. Passwords and OTP secrets are not written to logs.
 
 ## Export Formats
 
-- `legacy username:password`
-- `legacy username:password:otp`
-- `jagex email:password`
-- `jagex email:password:otp`
-- `full safe CSV export`
+- `username:password`
+- `username:password:bank_pin`
+- `username:password:bank_pin:otp_secret`
+- `username:password:recovery_email:recovery_password`
+- `jagex_email:jagex_password`
+- `legacy_login:legacy_password:jagex_email:jagex_password`
+- `full account export`
+- `custom` field order
 
-After export, accounts can be kept, marked exported, or archived. Delete-after-export is review-only and never deletes automatically.
+Selected accounts can be exported from the Accounts page. After export, accounts can be kept, archived, or permanently deleted only when the user selects delete and confirms the irreversible-delete checkbox.
 
 ## GS Account Manager Companion
 
@@ -188,12 +197,14 @@ Current web-side support:
 - user-scoped companion device/session/status/snapshot tables
 - short-lived pairing code generation
 - hashed pairing-code storage
-- companion status cards and website-only browser warnings
+- companion status cards, device rename/revoke controls, and screenshot opt-in controls
+- user setting to disable snapshots globally
+- workflow job queue APIs for paired companion devices
 - companion settings for proxy/browser-open behavior
 - assisted-fill command creators that create user-scoped helper commands only
 - masked proxy-mode summaries on Dashboard and Workflow
 - Electron companion skeleton in `companion/`
-- token-authenticated companion API placeholders
+- token-authenticated companion APIs for pairing, heartbeat, job polling, job status, status placeholders, and opt-in snapshots
 
 Default Companion settings:
 
@@ -203,6 +214,14 @@ Default Companion settings:
 - require confirmation before direct/no-proxy open: true
 - show proxy mode before opening page: true
 - enable assisted fill buttons: false
+
+Implemented scaffold:
+
+- workflow templates for login form fill, account creation form fill, and generic multi-field form fill
+- visible-browser-only workflow job payloads
+- live run status/event pages
+- companion job fetch and status buttons
+- manual client status placeholder
 
 Planned helper capabilities:
 

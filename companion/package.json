@@ -6,6 +6,8 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
+    "build": "electron-builder --dir",
+    "package": "electron-builder --win",
     "package:win": "electron-builder --win"
   },
   "dependencies": {
@@ -18,7 +20,7 @@
   "build": {
     "appId": "com.gsaccountmanager.companion",
     "productName": "GS Account Manager Companion",
-    "artifactName": "GSWorkFlowManager-${version}.${ext}",
+    "artifactName": "GS Account Manager Companion Setup.${ext}",
     "win": {
       "target": "nsis"
     }

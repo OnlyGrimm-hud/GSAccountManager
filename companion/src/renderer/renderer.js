@@ -1,5 +1,7 @@
 const pairOutput = document.getElementById('pairOutput');
 const logsOutput = document.getElementById('logsOutput');
+const jobOutput = document.getElementById('jobOutput');
+let currentJob = null;
 const storageKeys = {
   baseUrl: 'gsam.baseUrl',
   deviceToken: 'gsam.deviceToken',
@@ -82,8 +84,91 @@ async function heartbeat() {
   }
 }
 
+function authHeaders() {
+  const token = saved(storageKeys.deviceToken);
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`
+  };
+}
+
+async function fetchNextJob() {
+  const baseUrl = saved(storageKeys.baseUrl).replace(/\/+$/, '');
+  const token = saved(storageKeys.deviceToken);
+  if (!baseUrl || !token) {
+    log('Job fetch skipped: device is not paired.');
+    return;
+  }
+  try {
+    const response = await fetch(`${baseUrl}/api/companion/jobs/next`, {
+      headers: authHeaders()
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not fetch job.');
+    currentJob = data.job || null;
+    jobOutput.textContent = currentJob ? JSON.stringify(currentJob, null, 2) : 'No queued jobs.';
+    log(currentJob ? `Fetched job ${currentJob.id}.` : 'No queued jobs.');
+  } catch (error) {
+    log(`Job fetch failed: ${error.message}`);
+  }
+}
+
+async function updateJobStatus(status, message) {
+  const baseUrl = saved(storageKeys.baseUrl).replace(/\/+$/, '');
+  if (!currentJob) {
+    log('No current job loaded.');
+    return;
+  }
+  try {
+    const response = await fetch(`${baseUrl}/api/companion/jobs/${currentJob.id}/status`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ status, message })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Status update failed.');
+    currentJob.status = status;
+    jobOutput.textContent = JSON.stringify(currentJob, null, 2);
+    log(`Job ${currentJob.id} marked ${status}.`);
+  } catch (error) {
+    log(`Job status failed: ${error.message}`);
+  }
+}
+
+async function sendManualClientStatus() {
+  const baseUrl = saved(storageKeys.baseUrl).replace(/\/+$/, '');
+  const token = saved(storageKeys.deviceToken);
+  if (!baseUrl || !token) {
+    log('Client status skipped: device is not paired.');
+    return;
+  }
+  try {
+    const response = await fetch(`${baseUrl}/api/companion/status`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        process_name: 'manual-placeholder',
+        window_title: 'User-controlled status placeholder',
+        running: true,
+        matched_account_hint: ''
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Client status failed.');
+    log(`Manual client status sent (${data.count || 1}).`);
+  } catch (error) {
+    log(`Client status failed: ${error.message}`);
+  }
+}
+
 document.getElementById('pairButton').addEventListener('click', pair);
 document.getElementById('heartbeatButton').addEventListener('click', heartbeat);
+document.getElementById('sendStatusButton').addEventListener('click', sendManualClientStatus);
+document.getElementById('fetchJobButton').addEventListener('click', fetchNextJob);
+document.getElementById('markRunningButton').addEventListener('click', () => updateJobStatus('running', 'Visible browser placeholder started.'));
+document.getElementById('markWaitingButton').addEventListener('click', () => updateJobStatus('waiting_for_user', 'Paused for manual CAPTCHA, 2FA, verification, or security check.'));
+document.getElementById('markCompleteButton').addEventListener('click', () => updateJobStatus('completed', 'User marked workflow complete.'));
+document.getElementById('markFailedButton').addEventListener('click', () => updateJobStatus('failed', 'User marked workflow failed.'));
 document.getElementById('saveSettingsButton').addEventListener('click', () => {
   save(storageKeys.deviceName, document.getElementById('deviceName').value.trim() || 'Windows Companion');
   log('Settings placeholder saved.');

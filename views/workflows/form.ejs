@@ -1,0 +1,35 @@
+<%- include('../partials/head') %>
+<form method="post" action="/workflows/<%= workflow.id %>" class="edit-grid">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Workflow</p>
+        <h2><%= workflow.name %></h2>
+      </div>
+      <a class="button small" href="/workflows">Back</a>
+    </div>
+    <div class="form-grid three">
+      <label>Name<input name="name" value="<%= workflow.name %>" required></label>
+      <label>Type<select name="type"><% workflowTypes.forEach(type => { %><option value="<%= type %>" <%= workflow.type === type ? 'selected' : '' %>><%= type %></option><% }) %></select></label>
+      <label>Status<select name="status"><% workflowDefinitionStatuses.forEach(status => { %><option value="<%= status %>" <%= workflow.status === status ? 'selected' : '' %>><%= status %></option><% }) %></select></label>
+    </div>
+    <label>Description<textarea name="description" rows="3"><%= workflow.description || '' %></textarea></label>
+  </section>
+
+  <section class="panel">
+    <h2>Step Builder JSON</h2>
+    <p class="muted">Use field references such as account.login_email, account.login_password, account.recovery_email, account.recovery_email_password, account.display_name, and account.otp_code. Do not store plaintext passwords or OTP secrets inside workflow definitions.</p>
+    <label>Steps<textarea name="steps_json" rows="18"><%= stepsJson %></textarea></label>
+    <div class="notice">
+      <strong>Allowed step types</strong>
+      <p class="muted"><%= workflowStepTypes.join(', ') %></p>
+    </div>
+  </section>
+
+  <div class="sticky-actions">
+    <button class="button primary">Save workflow</button>
+    <a class="button" href="/workflows">Back</a>
+  </div>
+</form>
+<%- include('../partials/foot') %>

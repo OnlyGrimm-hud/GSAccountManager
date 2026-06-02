@@ -94,6 +94,8 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 
 ALTER TABLE proxies ADD COLUMN IF NOT EXISTS user_id BIGINT;
+ALTER TABLE proxies ADD COLUMN IF NOT EXISTS name TEXT;
+ALTER TABLE proxies ADD COLUMN IF NOT EXISTS max_accounts_per_proxy INTEGER;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS user_id BIGINT;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS legacy_login TEXT;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS legacy_password_encrypted TEXT;
@@ -421,6 +423,84 @@ CREATE TABLE IF NOT EXISTS live_snapshots (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS workflows (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  type TEXT NOT NULL DEFAULT 'custom',
+  status TEXT NOT NULL DEFAULT 'draft',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS workflow_steps (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  workflow_id BIGINT NOT NULL,
+  step_order INTEGER NOT NULL DEFAULT 1,
+  step_type TEXT NOT NULL,
+  label TEXT,
+  config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  manual_pause BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  workflow_id BIGINT,
+  account_id BIGINT,
+  proxy_id BIGINT,
+  companion_device_id BIGINT,
+  status TEXT NOT NULL DEFAULT 'queued',
+  current_step_order INTEGER,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS workflow_run_events (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  workflow_run_id BIGINT NOT NULL,
+  event_type TEXT NOT NULL,
+  message TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS companion_jobs (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  companion_device_id BIGINT,
+  workflow_id BIGINT,
+  workflow_run_id BIGINT,
+  account_id BIGINT,
+  proxy_id BIGINT,
+  job_type TEXT NOT NULL DEFAULT 'workflow_run',
+  status TEXT NOT NULL DEFAULT 'queued',
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  result JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  accepted_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS companion_job_events (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  companion_job_id BIGINT NOT NULL,
+  workflow_run_id BIGINT,
+  event_type TEXT NOT NULL,
+  message TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   user_id BIGINT,
   key TEXT PRIMARY KEY,
@@ -481,6 +561,10 @@ FROM (VALUES
   ('workflow_mode', 'manual'),
   ('dense_table_mode', 'false'),
   ('screenshot_interval_seconds', '30'),
+  ('companion_heartbeat_interval_seconds', '30'),
+  ('default_browser_type', 'chromium'),
+  ('require_confirmation_before_export_delete', 'true'),
+  ('allow_companion_snapshots', 'false'),
   ('payment_method_ltc_enabled', 'false'),
   ('payment_method_btc_enabled', 'false'),
   ('payment_method_eth_enabled', 'false'),
@@ -516,6 +600,7 @@ CREATE INDEX IF NOT EXISTS idx_accounts_exported_at ON accounts(exported_at);
 CREATE INDEX IF NOT EXISTS idx_accounts_archived_at ON accounts(archived_at);
 CREATE INDEX IF NOT EXISTS idx_proxies_user ON proxies(user_id);
 CREATE INDEX IF NOT EXISTS idx_proxies_status ON proxies(status);
+CREATE INDEX IF NOT EXISTS idx_proxies_category ON proxies(category);
 CREATE INDEX IF NOT EXISTS idx_settings_user ON settings(user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON activity_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON activity_logs(created_at DESC);
@@ -531,6 +616,16 @@ CREATE INDEX IF NOT EXISTS idx_companion_devices_status ON companion_devices(sta
 CREATE INDEX IF NOT EXISTS idx_companion_sessions_user ON companion_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_companion_client_status_user ON companion_client_status(user_id);
 CREATE INDEX IF NOT EXISTS idx_live_snapshots_user ON live_snapshots(user_id);
+CREATE INDEX IF NOT EXISTS idx_workflows_user ON workflows(user_id);
+CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_user ON workflow_runs(user_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_events_run ON workflow_run_events(workflow_run_id);
+CREATE INDEX IF NOT EXISTS idx_companion_jobs_user ON companion_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_companion_jobs_device_status ON companion_jobs(companion_device_id, status);
+CREATE INDEX IF NOT EXISTS idx_companion_jobs_status ON companion_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_companion_job_events_job ON companion_job_events(companion_job_id);
 CREATE INDEX IF NOT EXISTS idx_helper_devices_user ON helper_devices(user_id);
 CREATE INDEX IF NOT EXISTS idx_helper_devices_status ON helper_devices(status);
 CREATE INDEX IF NOT EXISTS idx_helper_commands_user ON helper_commands(user_id);
@@ -650,6 +745,101 @@ BEGIN
     ALTER TABLE live_snapshots
       ADD CONSTRAINT live_snapshots_session_id_fkey
       FOREIGN KEY (companion_session_id) REFERENCES companion_sessions(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflows_user_id_fkey') THEN
+    ALTER TABLE workflows
+      ADD CONSTRAINT workflows_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_steps_user_id_fkey') THEN
+    ALTER TABLE workflow_steps
+      ADD CONSTRAINT workflow_steps_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_steps_workflow_id_fkey') THEN
+    ALTER TABLE workflow_steps
+      ADD CONSTRAINT workflow_steps_workflow_id_fkey
+      FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_runs_user_id_fkey') THEN
+    ALTER TABLE workflow_runs
+      ADD CONSTRAINT workflow_runs_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_runs_workflow_id_fkey') THEN
+    ALTER TABLE workflow_runs
+      ADD CONSTRAINT workflow_runs_workflow_id_fkey
+      FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_runs_account_id_fkey') THEN
+    ALTER TABLE workflow_runs
+      ADD CONSTRAINT workflow_runs_account_id_fkey
+      FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_runs_proxy_id_fkey') THEN
+    ALTER TABLE workflow_runs
+      ADD CONSTRAINT workflow_runs_proxy_id_fkey
+      FOREIGN KEY (proxy_id) REFERENCES proxies(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_runs_companion_device_id_fkey') THEN
+    ALTER TABLE workflow_runs
+      ADD CONSTRAINT workflow_runs_companion_device_id_fkey
+      FOREIGN KEY (companion_device_id) REFERENCES companion_devices(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_run_events_user_id_fkey') THEN
+    ALTER TABLE workflow_run_events
+      ADD CONSTRAINT workflow_run_events_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflow_run_events_run_id_fkey') THEN
+    ALTER TABLE workflow_run_events
+      ADD CONSTRAINT workflow_run_events_run_id_fkey
+      FOREIGN KEY (workflow_run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_user_id_fkey') THEN
+    ALTER TABLE companion_jobs
+      ADD CONSTRAINT companion_jobs_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_device_id_fkey') THEN
+    ALTER TABLE companion_jobs
+      ADD CONSTRAINT companion_jobs_device_id_fkey
+      FOREIGN KEY (companion_device_id) REFERENCES companion_devices(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_workflow_id_fkey') THEN
+    ALTER TABLE companion_jobs
+      ADD CONSTRAINT companion_jobs_workflow_id_fkey
+      FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_run_id_fkey') THEN
+    ALTER TABLE companion_jobs
+      ADD CONSTRAINT companion_jobs_run_id_fkey
+      FOREIGN KEY (workflow_run_id) REFERENCES workflow_runs(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_account_id_fkey') THEN
+    ALTER TABLE companion_jobs
+      ADD CONSTRAINT companion_jobs_account_id_fkey
+      FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_proxy_id_fkey') THEN
+    ALTER TABLE companion_jobs
+      ADD CONSTRAINT companion_jobs_proxy_id_fkey
+      FOREIGN KEY (proxy_id) REFERENCES proxies(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_job_events_user_id_fkey') THEN
+    ALTER TABLE companion_job_events
+      ADD CONSTRAINT companion_job_events_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_job_events_job_id_fkey') THEN
+    ALTER TABLE companion_job_events
+      ADD CONSTRAINT companion_job_events_job_id_fkey
+      FOREIGN KEY (companion_job_id) REFERENCES companion_jobs(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_job_events_run_id_fkey') THEN
+    ALTER TABLE companion_job_events
+      ADD CONSTRAINT companion_job_events_run_id_fkey
+      FOREIGN KEY (workflow_run_id) REFERENCES workflow_runs(id) ON DELETE SET NULL;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'helper_devices_user_id_fkey') THEN
     ALTER TABLE helper_devices

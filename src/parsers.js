@@ -16,6 +16,15 @@ function parseAccountImport(text, delimiter = ':', options = {}) {
       otp_secret: '',
       recovery_email: '',
       recovery_email_password: '',
+      target_email: '',
+      email_password: '',
+      first_name: '',
+      last_name: '',
+      birth_date: '',
+      legacy_login: '',
+      legacy_password: '',
+      jagex_email: '',
+      jagex_password: '',
       notes: '',
       extra_fields: [],
       valid: false,
@@ -29,21 +38,47 @@ function parseAccountImport(text, delimiter = ':', options = {}) {
     }
 
     const extras = parts.slice(2);
+    const importFormat = String(options.import_format || options.importFormat || '').toLowerCase();
     if (accountType === 'jagex') {
-      row.recovery_email = extras[0] || '';
-      row.recovery_email_password = extras[1] || '';
-      row.otp_secret = extras[2] || '';
-      row.notes = extras.slice(3).filter(Boolean).join(' ');
-      row.extra_fields = extras.slice(3);
+      row.jagex_email = row.username;
+      row.jagex_password = row.password;
+      const looksLikeLegacyBundle = importFormat === 'jagex_legacy' || (extras.length >= 3 && !/@/.test(extras[0] || ''));
+      if (looksLikeLegacyBundle) {
+        row.legacy_login = extras[0] || '';
+        row.legacy_password = extras[1] || '';
+        row.otp_secret = extras[2] || '';
+        row.notes = extras.slice(3).filter(Boolean).join(' ');
+        row.extra_fields = extras.slice(3);
+      } else {
+        row.recovery_email = extras[0] || '';
+        row.recovery_email_password = extras[1] || '';
+        row.otp_secret = extras[2] || '';
+        row.notes = extras.slice(3).filter(Boolean).join(' ');
+        row.extra_fields = extras.slice(3);
+      }
     } else {
       if (extras.length === 1) {
         row.otp_secret = extras[0] || '';
       }
       if (extras.length >= 2) {
         const thirdLooksLikePin = /^\d{3,8}$/.test(extras[0] || '');
+        const thirdLooksLikeEmail = /@/.test(extras[0] || '');
         if (thirdLooksLikePin) {
           row.bank_pin = extras[0] || '';
           row.otp_secret = extras[1] || '';
+          row.notes = extras.slice(2).filter(Boolean).join(' ');
+          row.extra_fields = extras.slice(2);
+        } else if (thirdLooksLikeEmail && extras.length >= 5) {
+          row.target_email = extras[0] || '';
+          row.email_password = extras[1] || '';
+          row.first_name = extras[2] || '';
+          row.last_name = extras[3] || '';
+          row.birth_date = extras[4] || '';
+          row.notes = extras.slice(5).filter(Boolean).join(' ');
+          row.extra_fields = extras.slice(5);
+        } else if (thirdLooksLikeEmail) {
+          row.recovery_email = extras[0] || '';
+          row.recovery_email_password = extras[1] || '';
           row.notes = extras.slice(2).filter(Boolean).join(' ');
           row.extra_fields = extras.slice(2);
         } else {

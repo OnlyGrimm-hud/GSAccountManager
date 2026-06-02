@@ -20,6 +20,21 @@ document.addEventListener('click', event => {
   copyFromApi(button.dataset.url, button);
 });
 
+document.addEventListener('click', async event => {
+  const button = event.target.closest('.copy-text');
+  if (!button) return;
+  event.preventDefault();
+  const original = button.textContent;
+  try {
+    await navigator.clipboard.writeText(button.dataset.copyText || '');
+    button.textContent = 'Copied';
+  } catch (error) {
+    button.textContent = 'Copy failed';
+  } finally {
+    window.setTimeout(() => { button.textContent = original; }, 1400);
+  }
+});
+
 document.querySelectorAll('[data-countdown]').forEach(el => {
   let remaining = Number(el.dataset.countdown || 0);
   window.setInterval(() => {
@@ -103,10 +118,13 @@ document.addEventListener('click', event => {
 });
 
 document.addEventListener('change', event => {
-  const control = event.target.closest('[data-delete-after-export]');
+  const control = event.target.closest('[data-delete-after-export], [data-post-export-action]');
   if (!control) return;
   const block = document.querySelector('.delete-confirm-block');
-  if (block) block.hidden = !control.checked;
+  const deleteCheckbox = document.querySelector('[data-delete-after-export]');
+  const postAction = document.querySelector('[data-post-export-action]');
+  const deleting = Boolean((deleteCheckbox && deleteCheckbox.checked) || (postAction && postAction.value === 'delete'));
+  if (block) block.hidden = !deleting;
 });
 
 function parseDelimitedRows(text, delimiter, type) {
