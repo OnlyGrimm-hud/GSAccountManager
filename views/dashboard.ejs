@@ -15,7 +15,7 @@
       <select name="account_id">
         <% selectable.forEach(item => { %>
           <option value="<%= item.id %>" <%= selected && selected.id === item.id ? 'selected' : '' %>>
-            <%= item.display_name || item.legacy_login || item.username %> - <%= item.status %>
+            <%= item.display_name || mask(item.legacy_login || item.username) %> - <%= item.status %>
           </option>
         <% }) %>
       </select>
@@ -25,7 +25,7 @@
   <% if (selected) { %>
     <div class="current-account">
       <p class="eyebrow"><%= selected.account_type %> workflow</p>
-      <h2><%= selected.display_name || selected.legacy_login || selected.username %></h2>
+      <h2><%= selected.display_name || mask(selected.legacy_login || selected.username) %></h2>
       <p class="muted"><%= nextStep %></p>
       <div class="actions">
         <span class="status <%= selected.status %>"><%= selected.status %></span>

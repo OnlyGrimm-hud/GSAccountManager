@@ -2,7 +2,7 @@
 <section class="panel">
   <form method="get" class="filters compact">
     <select name="account_id">
-      <% accounts.forEach(account => { %><option value="<%= account.id %>" <%= selected && selected.id === account.id ? 'selected' : '' %>><%= account.display_name || account.legacy_login || account.username %> - <%= account.status %></option><% }) %>
+      <% accounts.forEach(account => { %><option value="<%= account.id %>" <%= selected && selected.id === account.id ? 'selected' : '' %>><%= account.display_name || mask(account.legacy_login || account.username) %> - <%= account.status %></option><% }) %>
     </select>
     <button class="button">Load</button>
   </form>
@@ -11,7 +11,7 @@
   <section class="workflow-hero">
     <div>
       <p class="eyebrow"><%= selected.account_type %> manual workflow</p>
-      <h2><%= selected.display_name || selected.legacy_login || selected.username %></h2>
+      <h2><%= selected.display_name || mask(selected.legacy_login || selected.username) %></h2>
       <p class="muted"><%= nextStep %></p>
       <div class="actions">
         <span class="status <%= selected.status %>"><%= selected.status %></span>

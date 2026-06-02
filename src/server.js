@@ -137,7 +137,13 @@ app.get('/auth/discord/callback', async (req, res, next) => {
     setUserSession(req, user);
     await activity.log(user.id, 'login', 'user', user.id, `Discord login succeeded for ${user.username || user.discord_username}`, { provider: 'discord' });
     res.redirect('/');
-  } catch (err) { next(err); }
+  } catch (err) {
+    console.error(`Discord OAuth callback failed: ${err.message}`);
+    res.status(400).render('login', {
+      title: 'Login',
+      error: 'Discord login could not be completed. Please try again.'
+    });
+  }
 });
 
 app.post('/login', loginLimiter, async (req, res, next) => {
