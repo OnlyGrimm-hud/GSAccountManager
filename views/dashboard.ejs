@@ -1,4 +1,20 @@
 <%- include('partials/head') %>
+<% if (isLimitedAccess) { %>
+  <section class="panel limited-panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Limited Access</p>
+        <h2>Export-only mode</h2>
+      </div>
+      <span class="tag">Subscription inactive</span>
+    </div>
+    <p class="muted">You can view this dashboard and export your own saved accounts or proxies. Imports, uploads, edits, deletes, settings, workflows, companion actions, and copy/reveal tools are disabled until access is active.</p>
+    <div class="actions">
+      <a class="button primary" href="/accounts">Export Accounts</a>
+      <a class="button" href="/proxies">Export Proxies</a>
+    </div>
+  </section>
+<% } %>
 <section class="metric-grid dashboard-metrics">
   <article class="metric"><span>Total Accounts</span><strong><%= dashboardStats.total_accounts || 0 %></strong></article>
   <article class="metric"><span>Total Proxies</span><strong><%= dashboardStats.total_proxies || 0 %></strong></article>
@@ -56,17 +72,20 @@
   <% }) %>
 </section>
 
-<section class="step-grid">
-  <% ['Prepare Account','Create Email Manually','Login + Authenticator','Upgrade / Jagex Info','Save Result Locally'].forEach((step, index) => { %>
-    <article class="panel step">
-      <span class="step-num"><%= index + 1 %></span>
-      <h2><%= step %></h2>
-      <p class="muted"><%= index === 0 ? 'Check credentials, proxy, OTP, and notes.' : 'Complete this step manually and update local status.' %></p>
-    </article>
-  <% }) %>
-</section>
+<% if (!isLimitedAccess) { %>
+  <section class="step-grid">
+    <% ['Prepare Account','Create Email Manually','Login + Authenticator','Upgrade / Jagex Info','Save Result Locally'].forEach((step, index) => { %>
+      <article class="panel step">
+        <span class="step-num"><%= index + 1 %></span>
+        <h2><%= step %></h2>
+        <p class="muted"><%= index === 0 ? 'Check credentials, proxy, OTP, and notes.' : 'Complete this step manually and update local status.' %></p>
+      </article>
+    <% }) %>
+  </section>
+<% } %>
 
-<section class="content-grid">
+<% if (!isLimitedAccess) { %>
+  <section class="content-grid">
   <article class="panel">
     <div class="panel-head">
       <h2>Quick Copy</h2>
@@ -129,6 +148,7 @@
     <% } %>
   </article>
 </section>
+<% } %>
 
 <section class="panel">
   <div class="panel-head">

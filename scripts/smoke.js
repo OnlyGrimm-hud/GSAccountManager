@@ -144,7 +144,8 @@ async function main() {
     assert(serverSource.includes("app.post('/api/companion/heartbeat'"));
     assert(serverSource.includes("app.get('/api/companion/jobs/next'"));
     assert(serverSource.includes("app.post('/api/companion/jobs/:id/status'"));
-    assert(serverSource.includes('requireActiveSubscription'));
+    assert(serverSource.includes('restrictLimitedUsers'));
+    assert(serverSource.includes('requireNotBlocked'));
     assert(serverSource.includes('requireAdmin'));
     assert(serverSource.includes('a.user_id=$2'));
     assert(serverSource.includes('WHERE id=$1 AND user_id=$2'));
@@ -186,27 +187,63 @@ async function main() {
   const protectedCheck = invokeMiddleware(requireAuth, { session: {} });
   assert.strictEqual(protectedCheck.res.redirected, '/login');
 
-  const inactiveCheck = invokeMiddleware(testInternals.requireActiveSubscription, {
+  const inactiveHome = invokeMiddleware(testInternals.restrictLimitedUsers, {
+    method: 'GET',
+    path: '/',
     currentUserRecord: { role: 'user', subscription_status: 'inactive' }
   });
-  assert.strictEqual(inactiveCheck.res.redirected, '/locked');
+  assert.strictEqual(inactiveHome.nextCalled, true);
 
-  const bannedCheck = invokeMiddleware(testInternals.requireActiveSubscription, {
+  const inactiveExport = invokeMiddleware(testInternals.restrictLimitedUsers, {
+    method: 'POST',
+    path: '/accounts/export',
+    currentUserRecord: { role: 'user', subscription_status: 'inactive' }
+  });
+  assert.strictEqual(inactiveExport.nextCalled, true);
+
+  const inactiveImport = invokeMiddleware(testInternals.restrictLimitedUsers, {
+    method: 'POST',
+    path: '/accounts/import',
+    currentUserRecord: { role: 'user', subscription_status: 'inactive' }
+  });
+  assert.strictEqual(inactiveImport.statusCode, 403);
+
+  const inactiveSettings = invokeMiddleware(testInternals.restrictLimitedUsers, {
+    method: 'GET',
+    path: '/settings',
+    currentUserRecord: { role: 'user', subscription_status: 'inactive' }
+  });
+  assert.strictEqual(inactiveSettings.statusCode, 403);
+
+  const inactiveFullAccess = invokeMiddleware(testInternals.requireFullAccess, {
+    method: 'GET',
+    path: '/workflows',
+    currentUserRecord: { role: 'user', subscription_status: 'inactive' }
+  });
+  assert.strictEqual(inactiveFullAccess.statusCode, 403);
+
+  const bannedCheck = invokeMiddleware(testInternals.requireNotBlocked, {
     currentUserRecord: { role: 'user', subscription_status: 'banned' }
   });
   assert.strictEqual(bannedCheck.res.redirected, '/locked');
 
-  const activeCheck = invokeMiddleware(testInternals.requireActiveSubscription, {
+  const activeCheck = invokeMiddleware(testInternals.restrictLimitedUsers, {
+    method: 'GET',
+    path: '/settings',
     currentUserRecord: { role: 'user', subscription_status: 'active' }
   });
   assert.strictEqual(activeCheck.nextCalled, true);
 
-  const trialCheck = invokeMiddleware(testInternals.requireActiveSubscription, {
+  const trialCheck = invokeMiddleware(testInternals.restrictLimitedUsers, {
+    method: 'POST',
+    path: '/accounts/import',
     currentUserRecord: { role: 'user', subscription_status: 'trial' }
   });
   assert.strictEqual(trialCheck.nextCalled, true);
 
-  const adminBypass = invokeMiddleware(testInternals.requireActiveSubscription, {
+  const adminBypass = invokeMiddleware(testInternals.restrictLimitedUsers, {
+    method: 'GET',
+    path: '/settings',
     currentUserRecord: { role: 'admin', subscription_status: 'banned' }
   });
   assert.strictEqual(adminBypass.nextCalled, true);

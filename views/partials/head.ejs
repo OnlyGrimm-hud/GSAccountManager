@@ -15,11 +15,13 @@
       <a class="<%= path === '/' ? 'active' : '' %>" href="/">Dashboard</a>
       <a class="<%= path.startsWith('/accounts') ? 'active' : '' %>" href="/accounts">Accounts</a>
       <a class="<%= path.startsWith('/proxies') ? 'active' : '' %>" href="/proxies">Proxies</a>
-      <a class="<%= path.startsWith('/workflow') ? 'active' : '' %>" href="/workflows">Workflows</a>
-      <a class="<%= path.startsWith('/companion') || path.startsWith('/local-helper') ? 'active' : '' %>" href="/companion">Companion</a>
-      <a class="<%= path.startsWith('/downloads') ? 'active' : '' %>" href="/downloads">Downloads</a>
+      <% if (hasFullAccess) { %>
+        <a class="<%= path.startsWith('/workflow') ? 'active' : '' %>" href="/workflows">Workflows</a>
+        <a class="<%= path.startsWith('/companion') || path.startsWith('/local-helper') ? 'active' : '' %>" href="/companion">Companion</a>
+        <a class="<%= path.startsWith('/downloads') ? 'active' : '' %>" href="/downloads">Downloads</a>
+      <% } %>
       <a class="<%= path.startsWith('/logs') ? 'active' : '' %>" href="/logs">Logs</a>
-      <a class="<%= path.startsWith('/settings') ? 'active' : '' %>" href="/settings">Settings</a>
+      <% if (hasFullAccess) { %><a class="<%= path.startsWith('/settings') ? 'active' : '' %>" href="/settings">Settings</a><% } %>
       <% if (isAdmin) { %><a class="<%= path.startsWith('/admin') ? 'active' : '' %>" href="/admin">Admin</a><% } %>
     </nav>
   </aside>
@@ -37,6 +39,7 @@
         <% } %>
         <span><%= user.globalName || user.username %></span>
         <% if (isAdmin) { %><span class="tag admin-badge">Admin</span><% } %>
+        <% if (isLimitedAccess) { %><span class="tag">Limited</span><% } %>
         <form method="post" action="/logout">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
           <button class="button small">Logout</button>

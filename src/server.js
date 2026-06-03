@@ -173,6 +173,9 @@ app.post('/api/companion/pair/complete', companionLimiter, async (req, res, next
       [codeHash]
     );
     if (!pair.rows[0]) return res.status(404).json({ error: 'Pairing code is invalid or expired.' });
+    if (!await userIdHasFullAccess(pair.rows[0].user_id)) {
+      return res.status(403).json({ error: 'Companion pairing requires active access.' });
+    }
     const token = crypto.randomBytes(32).toString('base64url');
     const tokenHash = hashDeviceToken(token);
     const result = await db.query(
@@ -206,6 +209,7 @@ app.post('/api/companion/browser/session', companionLimiter, async (req, res, ne
   try {
     const device = await companionDeviceFromRequest(req);
     if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion browser actions require active access.' });
     const accountId = req.body.selected_account_id ? Number(req.body.selected_account_id) : null;
     const proxyId = req.body.selected_proxy_id ? Number(req.body.selected_proxy_id) : null;
     if (accountId) await assertAccountOwnership(device.user_id, accountId);
@@ -232,6 +236,7 @@ app.post('/api/companion/browser/fill', companionLimiter, async (req, res, next)
   try {
     const device = await companionDeviceFromRequest(req);
     if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion fill actions require active access.' });
     const accountId = req.body.account_id ? Number(req.body.account_id) : null;
     if (accountId) await assertAccountOwnership(device.user_id, accountId);
     await auditLog(device.user_id, device.user_id, 'companion_fill_event', 'account', accountId, 'Companion fill event recorded', {
@@ -246,6 +251,7 @@ app.post('/api/companion/status', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
     if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion status uploads require active access.' });
     const windows = Array.isArray(req.body.windows) ? req.body.windows.slice(0, 20) : [req.body];
     for (const item of windows) {
       await db.query(
@@ -269,6 +275,7 @@ app.post('/api/companion/snapshot', companionLimiter, async (req, res, next) => 
   try {
     const device = await companionDeviceFromRequest(req);
     if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion snapshots require active access.' });
     if (!device.allow_screenshots) return res.status(403).json({ error: 'Snapshots are disabled for this device.' });
     const settings = await getSettings(device.user_id);
     if (settings.allow_companion_snapshots !== 'true') return res.status(403).json({ error: 'Snapshots are disabled in user settings.' });
@@ -291,6 +298,7 @@ app.get('/api/companion/jobs/next', companionLimiter, async (req, res, next) => 
   try {
     const device = await companionDeviceFromRequest(req);
     if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion jobs require active access.' });
     const result = await db.query(
       `UPDATE companion_jobs
        SET status='accepted',
@@ -329,6 +337,7 @@ app.post('/api/companion/jobs/:id/status', companionLimiter, async (req, res, ne
   try {
     const device = await companionDeviceFromRequest(req);
     if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion jobs require active access.' });
     const status = oneOf(req.body.status, companionJobStatuses, 'running');
     const message = escapeText(req.body.message);
     const job = await loadCompanionJobForDevice(device, req.params.id);
@@ -360,6 +369,7 @@ app.post('/api/companion/jobs/:id/events', companionLimiter, async (req, res, ne
   try {
     const device = await companionDeviceFromRequest(req);
     if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion jobs require active access.' });
     const job = await loadCompanionJobForDevice(device, req.params.id);
     const eventType = escapeText(req.body.event_type || req.body.type || 'status');
     const message = escapeText(req.body.message);
@@ -373,6 +383,7 @@ app.get('/api/companion/accounts/:id/field/:field', companionLimiter, async (req
   try {
     const device = await companionDeviceFromRequest(req);
     if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion account fields require active access.' });
     const { account, decrypted } = await loadAccount(device.user_id, req.params.id);
     const field = escapeText(req.params.field);
     const value = accountFieldForCompanion(account, decrypted, field);
@@ -394,11 +405,12 @@ app.post('/logout', requireAuth, async (req, res, next) => {
 });
 
 app.get('/locked', requireAuth, (req, res) => {
-  if (hasAppAccess(req.currentUserRecord)) return res.redirect('/');
+  if (!isBlockedUser(req.currentUserRecord)) return res.redirect('/');
   res.status(403).render('locked', { title: 'Access Locked', lockedShell: true });
 });
 
-app.use(requireActiveSubscription);
+app.use(requireNotBlocked);
+app.use(restrictLimitedUsers);
 
 app.post('/api/companion/pair/start', companionLimiter, requireAuth, async (req, res, next) => {
   try {
@@ -763,6 +775,9 @@ app.post('/accounts/export', requireAuth, async (req, res, next) => {
     if (!exportResult.rows.length) throw new Error('No selected accounts were available to export.');
     const filename = `gs-accounts-${new Date().toISOString().slice(0, 10)}.txt`;
     const postExportAction = escapeText(req.body.post_export_action || 'keep');
+    if (hasLimitedAccess(req.currentUserRecord) && postExportAction !== 'keep') {
+      throw new Error('Limited access can export data, but cannot archive or delete records after export.');
+    }
     const deleteAfterExport = req.body.delete_after_export === 'yes' || postExportAction === 'delete';
     const confirmDelete = req.body.confirm_delete_after_export === 'yes';
     await recordImportExportRun(userId, 'export_accounts', exportResult.rows.length, format, {
@@ -1740,6 +1755,9 @@ function attachCurrentUser(req, res, next) {
   res.locals.companionJobStatuses = companionJobStatuses;
   res.locals.paymentMethods = paymentMethods;
   res.locals.isAdmin = req.currentUser && req.currentUser.role === 'admin';
+  res.locals.hasFullAccess = false;
+  res.locals.isLimitedAccess = false;
+  res.locals.canExport = false;
   next();
 }
 
@@ -1769,6 +1787,9 @@ async function requireUserRecord(req, res, next) {
     req.session.discordId = user.discord_id;
     res.locals.user = req.currentUser;
     res.locals.isAdmin = isAdminUser(user);
+    res.locals.hasFullAccess = hasFullAppAccess(user);
+    res.locals.isLimitedAccess = hasLimitedAccess(user);
+    res.locals.canExport = canExportData(user);
     next();
   } catch (error) {
     next(error);
@@ -1779,13 +1800,59 @@ function isAdminUser(user) {
   return Boolean(user && user.role === 'admin');
 }
 
-function hasAppAccess(user) {
+function hasFullAppAccess(user) {
   return isAdminUser(user) || activeSubscriptionStatuses.includes(user && user.subscription_status);
 }
 
-function requireActiveSubscription(req, res, next) {
-  if (hasAppAccess(req.currentUserRecord)) return next();
+function hasLimitedAccess(user) {
+  return Boolean(user && !isAdminUser(user) && ['inactive', 'expired'].includes(user.subscription_status));
+}
+
+function canExportData(user) {
+  return hasFullAppAccess(user) || hasLimitedAccess(user);
+}
+
+function isBlockedUser(user) {
+  return Boolean(user && !isAdminUser(user) && (user.subscription_status === 'banned' || user.disabled_at));
+}
+
+function requireNotBlocked(req, res, next) {
+  if (!isBlockedUser(req.currentUserRecord)) return next();
   return res.redirect('/locked');
+}
+
+function limitedAccessAllowed(req) {
+  if (!hasLimitedAccess(req.currentUserRecord)) return false;
+  if (['GET', 'HEAD'].includes(req.method)) {
+    return ['/', '/accounts', '/proxies', '/logs'].includes(req.path);
+  }
+  if (req.method === 'POST') {
+    return ['/accounts/export', '/proxies/export'].includes(req.path);
+  }
+  return false;
+}
+
+function restrictLimitedUsers(req, res, next) {
+  if (hasFullAppAccess(req.currentUserRecord) || limitedAccessAllowed(req)) return next();
+  return limitedAccessResponse(req, res);
+}
+
+function requireFullAccess(req, res, next) {
+  if (hasFullAppAccess(req.currentUserRecord)) return next();
+  return limitedAccessResponse(req, res);
+}
+
+function limitedAccessResponse(req, res) {
+  const message = 'This account has limited access. You can view your dashboard and export your saved data, but imports, edits, uploads, settings, workflows, and companion actions require active access.';
+  if (req.path.startsWith('/api/') || (req.get('accept') || '').includes('application/json')) {
+    return res.status(403).json({ error: message });
+  }
+  return res.status(403).render('error', { title: 'Limited access', message });
+}
+
+async function userIdHasFullAccess(userId) {
+  const result = await db.query('SELECT role, subscription_status, disabled_at FROM users WHERE id=$1', [userId]);
+  return hasFullAppAccess(result.rows[0]) && !isBlockedUser(result.rows[0]);
 }
 
 function requireAdmin(req, res, next) {
@@ -2770,9 +2837,14 @@ module.exports = {
   app,
   parseAccountImport,
   testInternals: {
-    hasAppAccess,
+    hasFullAppAccess,
+    hasLimitedAccess,
+    canExportData,
+    isBlockedUser,
+    requireNotBlocked,
+    restrictLimitedUsers,
+    requireFullAccess,
     isAdminUser,
-    requireActiveSubscription,
     requireAdmin,
     loadAccount,
     getSettings

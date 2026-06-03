@@ -12,17 +12,22 @@
       <h2>Proxies</h2>
     </div>
     <div class="actions">
-      <button class="button" type="button" data-open-modal="proxy-import-modal">Import Proxies</button>
-      <form method="post" action="/proxies/auto-assign">
-        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-        <button class="button">Auto assign HTTP proxies</button>
-      </form>
+      <% if (!isLimitedAccess) { %>
+        <button class="button" type="button" data-open-modal="proxy-import-modal">Import Proxies</button>
+        <form method="post" action="/proxies/auto-assign">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <button class="button">Auto assign HTTP proxies</button>
+        </form>
+      <% } %>
+      <button class="button primary" type="button" data-open-modal="proxy-export-modal">Export Proxies</button>
     </div>
   </div>
   <% if (query && query.imported) { %><p class="notice">Imported <%= Number(query.imported || 0) %> proxy line(s). Invalid <%= Number(query.invalid || 0) %>.</p><% } %>
   <p class="muted">Default proxy type is HTTP. Proxy credentials stay encrypted and hidden in tables.</p>
+  <% if (isLimitedAccess) { %><p class="notice">Limited access: proxy import, upload, edit, delete, and testing actions are disabled. Export is available for your own saved records.</p><% } %>
 </section>
 
+<% if (!isLimitedAccess) { %>
 <section class="content-grid">
   <form method="post" action="/proxies" class="panel form-grid">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -50,6 +55,7 @@
     </div>
   </article>
 </section>
+<% } %>
 
 <datalist id="proxy-category-options-page"><% categories.forEach(category => { %><option value="<%= category %>"></option><% }) %></datalist>
 
@@ -64,29 +70,35 @@
       <% proxies.forEach(proxy => { %>
         <tr>
           <td><input form="proxy-export-form" type="checkbox" name="proxy_ids" value="<%= proxy.id %>"></td>
-          <td><input class="table-input" form="proxy-<%= proxy.id %>" name="name" value="<%= proxy.name || '' %>"></td>
-          <td><input class="table-input" form="proxy-<%= proxy.id %>" name="host" value="<%= proxy.host %>" required></td>
-          <td><input class="table-input short" form="proxy-<%= proxy.id %>" name="port" type="number" min="1" max="65535" value="<%= proxy.port %>" required></td>
-          <td><select form="proxy-<%= proxy.id %>" name="proxy_type"><% proxyTypes.forEach(type => { %><option value="<%= type %>" <%= proxy.proxy_type === type ? 'selected' : '' %>><%= type %></option><% }) %></select></td>
-          <td><input class="table-input" form="proxy-<%= proxy.id %>" name="category" value="<%= proxy.category || '' %>"></td>
-          <td><input class="table-input short" form="proxy-<%= proxy.id %>" name="country_code" maxlength="2" value="<%= proxy.country_code || '' %>"></td>
-          <td><select form="proxy-<%= proxy.id %>" name="status"><% proxyStatuses.forEach(status => { %><option value="<%= status %>" <%= proxy.status === status ? 'selected' : '' %>><%= status %></option><% }) %></select></td>
+          <td><% if (isLimitedAccess) { %><%= proxy.name || '' %><% } else { %><input class="table-input" form="proxy-<%= proxy.id %>" name="name" value="<%= proxy.name || '' %>"><% } %></td>
+          <td><% if (isLimitedAccess) { %><%= proxy.host %><% } else { %><input class="table-input" form="proxy-<%= proxy.id %>" name="host" value="<%= proxy.host %>" required><% } %></td>
+          <td><% if (isLimitedAccess) { %><%= proxy.port %><% } else { %><input class="table-input short" form="proxy-<%= proxy.id %>" name="port" type="number" min="1" max="65535" value="<%= proxy.port %>" required><% } %></td>
+          <td><% if (isLimitedAccess) { %><%= proxy.proxy_type %><% } else { %><select form="proxy-<%= proxy.id %>" name="proxy_type"><% proxyTypes.forEach(type => { %><option value="<%= type %>" <%= proxy.proxy_type === type ? 'selected' : '' %>><%= type %></option><% }) %></select><% } %></td>
+          <td><% if (isLimitedAccess) { %><%= proxy.category || '' %><% } else { %><input class="table-input" form="proxy-<%= proxy.id %>" name="category" value="<%= proxy.category || '' %>"><% } %></td>
+          <td><% if (isLimitedAccess) { %><%= proxy.country_code || '' %><% } else { %><input class="table-input short" form="proxy-<%= proxy.id %>" name="country_code" maxlength="2" value="<%= proxy.country_code || '' %>"><% } %></td>
+          <td><% if (isLimitedAccess) { %><span class="status <%= proxy.status %>"><%= proxy.status %></span><% } else { %><select form="proxy-<%= proxy.id %>" name="status"><% proxyStatuses.forEach(status => { %><option value="<%= status %>" <%= proxy.status === status ? 'selected' : '' %>><%= status %></option><% }) %></select><% } %></td>
           <td><%= proxy.assigned_count %></td>
-          <td><input class="table-input short" form="proxy-<%= proxy.id %>" name="max_accounts_per_proxy" type="number" min="1" value="<%= proxy.max_accounts_per_proxy || '' %>" placeholder="<%= settings.max_accounts_per_proxy || 5 %>"></td>
-          <td><input class="table-input" form="proxy-<%= proxy.id %>" name="notes" value="<%= proxy.notes || '' %>"></td>
+          <td><% if (isLimitedAccess) { %><%= proxy.max_accounts_per_proxy || settings.max_accounts_per_proxy || 5 %><% } else { %><input class="table-input short" form="proxy-<%= proxy.id %>" name="max_accounts_per_proxy" type="number" min="1" value="<%= proxy.max_accounts_per_proxy || '' %>" placeholder="<%= settings.max_accounts_per_proxy || 5 %>"><% } %></td>
+          <td><% if (isLimitedAccess) { %><%= proxy.notes || '' %><% } else { %><input class="table-input" form="proxy-<%= proxy.id %>" name="notes" value="<%= proxy.notes || '' %>"><% } %></td>
           <td>
-            <input class="table-input" form="proxy-<%= proxy.id %>" name="username" type="password" placeholder="new username">
-            <input class="table-input" form="proxy-<%= proxy.id %>" name="password" type="password" placeholder="new password">
+            <% if (isLimitedAccess) { %><span class="tag">Encrypted</span><% } else { %>
+              <input class="table-input" form="proxy-<%= proxy.id %>" name="username" type="password" placeholder="new username">
+              <input class="table-input" form="proxy-<%= proxy.id %>" name="password" type="password" placeholder="new password">
+            <% } %>
           </td>
           <td class="actions">
-            <form id="proxy-<%= proxy.id %>" method="post" action="/proxies/<%= proxy.id %>">
-              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-              <button class="button small">Save</button>
-            </form>
-            <form method="post" action="/proxies/<%= proxy.id %>/delete" data-confirm="Delete this local proxy record?">
-              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-              <button class="button small danger">Delete</button>
-            </form>
+            <% if (isLimitedAccess) { %>
+              <span class="tag">Export only</span>
+            <% } else { %>
+              <form id="proxy-<%= proxy.id %>" method="post" action="/proxies/<%= proxy.id %>">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button class="button small">Save</button>
+              </form>
+              <form method="post" action="/proxies/<%= proxy.id %>/delete" data-confirm="Delete this local proxy record?">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button class="button small danger">Delete</button>
+              </form>
+            <% } %>
           </td>
         </tr>
       <% }) %>
@@ -99,6 +111,7 @@
   <input type="hidden" name="_csrf" value="<%= csrfToken %>">
 </form>
 
+<% if (!isLimitedAccess) { %>
 <div class="modal" id="proxy-import-modal" hidden>
   <div class="modal-panel">
     <div class="panel-head">
@@ -129,6 +142,7 @@
     </form>
   </div>
 </div>
+<% } %>
 
 <div class="modal" id="proxy-export-modal" hidden>
   <div class="modal-panel">

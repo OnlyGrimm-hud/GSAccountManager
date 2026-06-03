@@ -23,8 +23,10 @@
       <h2>Accounts</h2>
     </div>
     <div class="actions">
-      <button class="button" type="button" data-open-modal="account-import-modal">Import Accounts</button>
-      <a class="button" href="/accounts/new">Add Account Manually</a>
+      <% if (!isLimitedAccess) { %>
+        <button class="button" type="button" data-open-modal="account-import-modal">Import Accounts</button>
+        <a class="button" href="/accounts/new">Add Account Manually</a>
+      <% } %>
       <button class="button primary" type="button" data-open-modal="account-export-modal">Export Selected</button>
     </div>
   </div>
@@ -57,22 +59,26 @@
       <input type="hidden" name="<%= key %>" value="<%= filters[key] || '' %>">
     <% }) %>
   </form>
-  <div class="bulk-bar">
-    <select form="account-action-form" name="bulk_action">
-      <option value="archive">Archive selected</option>
-      <option value="delete">Delete selected</option>
-      <option value="assign_proxy">Assign proxy</option>
-      <option value="assign_category_status">Assign category/status</option>
-    </select>
-    <select form="account-action-form" name="proxy_id">
-      <option value="">No proxy / unchanged</option>
-      <% proxies.forEach(proxy => { %><option value="<%= proxy.id %>"><%= proxy.name || `${proxy.host}:${proxy.port}` %> - <%= proxy.proxy_type %></option><% }) %>
-    </select>
-    <input form="account-action-form" name="bulk_category" placeholder="Category">
-    <select form="account-action-form" name="bulk_status"><% accountStatuses.forEach(status => { %><option value="<%= status %>"><%= status %></option><% }) %></select>
-    <label class="check"><input form="account-action-form" type="checkbox" name="confirm_bulk_delete" value="yes"> Confirm permanent bulk delete</label>
-    <button class="button" form="account-action-form" formaction="/accounts/bulk">Apply bulk action</button>
-  </div>
+  <% if (isLimitedAccess) { %>
+    <p class="notice">Limited access: account import, upload, edit, copy, archive, delete, settings, workflows, and companion actions are disabled. Export is available for your own saved records.</p>
+  <% } else { %>
+    <div class="bulk-bar">
+      <select form="account-action-form" name="bulk_action">
+        <option value="archive">Archive selected</option>
+        <option value="delete">Delete selected</option>
+        <option value="assign_proxy">Assign proxy</option>
+        <option value="assign_category_status">Assign category/status</option>
+      </select>
+      <select form="account-action-form" name="proxy_id">
+        <option value="">No proxy / unchanged</option>
+        <% proxies.forEach(proxy => { %><option value="<%= proxy.id %>"><%= proxy.name || `${proxy.host}:${proxy.port}` %> - <%= proxy.proxy_type %></option><% }) %>
+      </select>
+      <input form="account-action-form" name="bulk_category" placeholder="Category">
+      <select form="account-action-form" name="bulk_status"><% accountStatuses.forEach(status => { %><option value="<%= status %>"><%= status %></option><% }) %></select>
+      <label class="check"><input form="account-action-form" type="checkbox" name="confirm_bulk_delete" value="yes"> Confirm permanent bulk delete</label>
+      <button class="button" form="account-action-form" formaction="/accounts/bulk">Apply bulk action</button>
+    </div>
+  <% } %>
   <table>
     <thead>
       <tr>
@@ -111,20 +117,24 @@
           <td><%= account.notes ? account.notes.slice(0, 80) : '' %></td>
           <td><%= new Date(account.updated_at).toLocaleDateString() %></td>
           <td class="actions">
-            <a class="button small" href="/accounts/<%= account.id %>">View</a>
-            <a class="button small" href="/accounts/<%= account.id %>">Edit</a>
-            <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_login">Copy login</button>
-            <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_password">Copy pass</button>
-            <% if (account.otp_secret_encrypted) { %><button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP</button><% } %>
-            <a class="button small" href="/workflows?account_id=<%= account.id %>">Start Workflow</a>
-            <form method="post" action="/accounts/<%= account.id %>/archive">
-              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-              <button class="button small">Archive</button>
-            </form>
-            <form method="post" action="/accounts/<%= account.id %>/delete" data-confirm="Delete this local account record?">
-              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-              <button class="button small danger">Delete</button>
-            </form>
+            <% if (isLimitedAccess) { %>
+              <span class="tag">Export only</span>
+            <% } else { %>
+              <a class="button small" href="/accounts/<%= account.id %>">View</a>
+              <a class="button small" href="/accounts/<%= account.id %>">Edit</a>
+              <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_login">Copy login</button>
+              <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_password">Copy pass</button>
+              <% if (account.otp_secret_encrypted) { %><button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP</button><% } %>
+              <a class="button small" href="/workflows?account_id=<%= account.id %>">Start Workflow</a>
+              <form method="post" action="/accounts/<%= account.id %>/archive">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button class="button small">Archive</button>
+              </form>
+              <form method="post" action="/accounts/<%= account.id %>/delete" data-confirm="Delete this local account record?">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button class="button small danger">Delete</button>
+              </form>
+            <% } %>
           </td>
         </tr>
       <% }) %>
@@ -135,6 +145,7 @@
   </table>
 </section>
 
+<% if (!isLimitedAccess) { %>
 <div class="modal" id="account-import-modal" hidden>
   <div class="modal-panel">
     <div class="panel-head">
@@ -183,6 +194,7 @@
     </form>
   </div>
 </div>
+<% } %>
 
 <div class="modal" id="account-export-modal" hidden>
   <div class="modal-panel">
@@ -219,12 +231,17 @@
         <label class="check"><input form="account-action-form" type="checkbox" name="include_notes" value="yes"> Include notes</label>
         <label class="check"><input form="account-action-form" type="checkbox" name="include_otp_secret" value="yes"> Include OTP secret</label>
       </div>
-      <label>After export<select form="account-action-form" name="post_export_action" data-post-export-action><option value="keep">No, keep them</option><option value="archive">Archive them</option><option value="delete">Delete them permanently</option></select></label>
-      <label class="check"><input form="account-action-form" type="checkbox" name="delete_after_export" value="yes" data-delete-after-export> Enable delete-after-export confirmation</label>
-      <div class="notice danger delete-confirm-block" hidden>
-        <p>This will permanently delete the selected accounts from your account list after export. This cannot be recovered.</p>
-        <label class="check"><input form="account-action-form" type="checkbox" name="confirm_delete_after_export" value="yes"> I understand this permanently deletes these accounts and cannot be recovered.</label>
-      </div>
+      <% if (isLimitedAccess) { %>
+        <input form="account-action-form" type="hidden" name="post_export_action" value="keep">
+        <p class="notice">Limited access exports do not archive or delete records.</p>
+      <% } else { %>
+        <label>After export<select form="account-action-form" name="post_export_action" data-post-export-action><option value="keep">No, keep them</option><option value="archive">Archive them</option><option value="delete">Delete them permanently</option></select></label>
+        <label class="check"><input form="account-action-form" type="checkbox" name="delete_after_export" value="yes" data-delete-after-export> Enable delete-after-export confirmation</label>
+        <div class="notice danger delete-confirm-block" hidden>
+          <p>This will permanently delete the selected accounts from your account list after export. This cannot be recovered.</p>
+          <label class="check"><input form="account-action-form" type="checkbox" name="confirm_delete_after_export" value="yes"> I understand this permanently deletes these accounts and cannot be recovered.</label>
+        </div>
+      <% } %>
       <button class="button primary" form="account-action-form" formaction="/accounts/export">Download TXT</button>
     </div>
   </div>
