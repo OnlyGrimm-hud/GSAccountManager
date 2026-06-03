@@ -128,8 +128,12 @@ async function main() {
     assert(serverSource.includes("app.get('/locked'"));
     assert(serverSource.includes("app.get('/admin'"));
     assert(serverSource.includes("app.get('/admin/users'"));
+    assert(serverSource.includes("app.get('/admin/logs'"));
+    assert(serverSource.includes("app.get('/admin/system'"));
+    assert(serverSource.includes("app.get('/admin/subscriptions'"));
     assert(serverSource.includes("app.get('/accounts'"));
     assert(serverSource.includes("app.get('/proxies'"));
+    assert(serverSource.includes("app.get('/clients'"));
     assert(serverSource.includes("app.get('/settings'"));
     assert(serverSource.includes("app.get('/logs'"));
     assert(serverSource.includes("app.get('/downloads'"));
@@ -142,8 +146,14 @@ async function main() {
     assert(serverSource.includes("app.post('/proxies/export'"));
     assert(serverSource.includes("app.post('/api/companion/pair/complete'"));
     assert(serverSource.includes("app.post('/api/companion/heartbeat'"));
+    assert(serverSource.includes("app.post('/api/companion/clients/status'"));
+    assert(serverSource.includes("app.post('/api/companion/clients/instance'"));
+    assert(serverSource.includes("app.post('/api/companion/snapshots'"));
     assert(serverSource.includes("app.get('/api/companion/jobs/next'"));
+    assert(serverSource.includes("app.get('/api/companion/jobs/poll'"));
     assert(serverSource.includes("app.post('/api/companion/jobs/:id/status'"));
+    assert(serverSource.includes('client_profiles'));
+    assert(serverSource.includes('client_instances'));
     assert(serverSource.includes('restrictLimitedUsers'));
     assert(serverSource.includes('requireNotBlocked'));
     assert(serverSource.includes('requireAdmin'));
@@ -166,9 +176,14 @@ async function main() {
   assert(routeExists('get', '/logs'));
   assert(routeExists('get', '/downloads'));
   assert(routeExists('get', '/companion'));
+  assert(routeExists('get', '/clients'));
+  assert(routeExists('get', '/instances'));
   assert(routeExists('get', '/workflows'));
   assert(routeExists('get', '/admin'));
   assert(routeExists('get', '/admin/users'));
+  assert(routeExists('get', '/admin/logs'));
+  assert(routeExists('get', '/admin/system'));
+  assert(routeExists('get', '/admin/subscriptions'));
   assert(routeExists('post', '/accounts/import'));
   assert(routeExists('post', '/accounts/export'));
   assert(routeExists('post', '/accounts/bulk'));
@@ -176,7 +191,11 @@ async function main() {
   assert(routeExists('post', '/proxies/export'));
   assert(routeExists('post', '/api/companion/pair/complete'));
   assert(routeExists('post', '/api/companion/heartbeat'));
+  assert(routeExists('post', '/api/companion/clients/status'));
+  assert(routeExists('post', '/api/companion/clients/instance'));
+  assert(routeExists('post', '/api/companion/snapshots'));
   assert(routeExists('get', '/api/companion/jobs/next'));
+  assert(routeExists('get', '/api/companion/jobs/poll'));
   assert(routeExists('post', '/api/companion/jobs/:id/status'));
 
   const loginLayer = app._router.stack.find(layer => layer.route && layer.route.path === '/login');
@@ -206,21 +225,28 @@ async function main() {
     path: '/accounts/import',
     currentUserRecord: { role: 'user', subscription_status: 'inactive' }
   });
-  assert.strictEqual(inactiveImport.statusCode, 403);
+  assert.strictEqual(inactiveImport.res.statusCode, 403);
 
   const inactiveSettings = invokeMiddleware(testInternals.restrictLimitedUsers, {
     method: 'GET',
     path: '/settings',
     currentUserRecord: { role: 'user', subscription_status: 'inactive' }
   });
-  assert.strictEqual(inactiveSettings.statusCode, 403);
+  assert.strictEqual(inactiveSettings.res.statusCode, 403);
+
+  const inactiveClients = invokeMiddleware(testInternals.restrictLimitedUsers, {
+    method: 'GET',
+    path: '/clients',
+    currentUserRecord: { role: 'user', subscription_status: 'inactive' }
+  });
+  assert.strictEqual(inactiveClients.res.statusCode, 403);
 
   const inactiveFullAccess = invokeMiddleware(testInternals.requireFullAccess, {
     method: 'GET',
     path: '/workflows',
     currentUserRecord: { role: 'user', subscription_status: 'inactive' }
   });
-  assert.strictEqual(inactiveFullAccess.statusCode, 403);
+  assert.strictEqual(inactiveFullAccess.res.statusCode, 403);
 
   const bannedCheck = invokeMiddleware(testInternals.requireNotBlocked, {
     currentUserRecord: { role: 'user', subscription_status: 'banned' }
@@ -251,8 +277,8 @@ async function main() {
   const adminOnlyBlocked = invokeMiddleware(testInternals.requireAdmin, {
     currentUserRecord: { role: 'user', subscription_status: 'active' }
   });
-  assert.strictEqual(adminOnlyBlocked.statusCode, 403);
-  assert.strictEqual(adminOnlyBlocked.rendered.view, 'error');
+  assert.strictEqual(adminOnlyBlocked.res.statusCode, 403);
+  assert.strictEqual(adminOnlyBlocked.res.rendered.view, 'error');
 
   const adminOnlyAllowed = invokeMiddleware(testInternals.requireAdmin, {
     currentUserRecord: { role: 'admin', subscription_status: 'inactive' }

@@ -33,6 +33,9 @@ const {
   workflowRunStatuses,
   workflowStepTypes,
   companionJobStatuses,
+  companionJobTypes,
+  clientTypes,
+  clientInstanceStatuses,
   paymentMethods
 } = require('./app-constants');
 
@@ -205,6 +208,33 @@ app.post('/api/companion/heartbeat', companionLimiter, async (req, res, next) =>
   } catch (err) { next(err); }
 });
 
+app.post('/api/companion/clients/status', companionLimiter, async (req, res, next) => {
+  try {
+    const device = await companionDeviceFromRequest(req);
+    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion client status requires active access.' });
+    const instances = normalizeClientStatusPayload(req.body);
+    const saved = [];
+    for (const item of instances) {
+      saved.push(await upsertClientInstance(device, item));
+    }
+    await activity.log(device.user_id, 'companion_client_status_received', 'client_instance', null, `Companion reported ${saved.length} client instance(s)`, { count: saved.length });
+    await auditLog(device.user_id, device.user_id, 'companion_client_status_received', 'client_instance', null, `Companion reported ${saved.length} client instance(s)`, { count: saved.length });
+    res.json({ ok: true, count: saved.length, instances: saved });
+  } catch (err) { next(err); }
+});
+
+app.post('/api/companion/clients/instance', companionLimiter, async (req, res, next) => {
+  try {
+    const device = await companionDeviceFromRequest(req);
+    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion client status requires active access.' });
+    const instance = await upsertClientInstance(device, normalizeClientInstance(req.body));
+    await activity.log(device.user_id, 'companion_client_instance_updated', 'client_instance', instance.id, `Client instance ${instance.status}`);
+    res.json({ ok: true, instance });
+  } catch (err) { next(err); }
+});
+
 app.post('/api/companion/browser/session', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
@@ -252,7 +282,7 @@ app.post('/api/companion/status', companionLimiter, async (req, res, next) => {
     const device = await companionDeviceFromRequest(req);
     if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
     if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion status uploads require active access.' });
-    const windows = Array.isArray(req.body.windows) ? req.body.windows.slice(0, 20) : [req.body];
+    const windows = normalizeClientStatusPayload(req.body);
     for (const item of windows) {
       await db.query(
         `INSERT INTO companion_client_status (user_id, companion_device_id, process_name, window_title, running, metadata, last_seen_at)
@@ -266,12 +296,16 @@ app.post('/api/companion/status', companionLimiter, async (req, res, next) => {
           { source: 'companion', matched_account_hint: escapeText(item.matched_account_hint || item.matchedAccountHint) }
         ]
       );
+      await upsertClientInstance(device, item);
     }
     res.json({ ok: true, count: windows.length });
   } catch (err) { next(err); }
 });
 
-app.post('/api/companion/snapshot', companionLimiter, async (req, res, next) => {
+app.post('/api/companion/snapshot', companionLimiter, handleCompanionSnapshot);
+app.post('/api/companion/snapshots', companionLimiter, handleCompanionSnapshot);
+
+async function handleCompanionSnapshot(req, res, next) {
   try {
     const device = await companionDeviceFromRequest(req);
     if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
@@ -282,17 +316,39 @@ app.post('/api/companion/snapshot', companionLimiter, async (req, res, next) => 
     const base64 = String(req.body.image_base64 || '').replace(/^data:image\/[a-z]+;base64,/i, '');
     const image = base64 ? Buffer.from(base64, 'base64') : Buffer.alloc(0);
     if (!image.length || image.length > 750 * 1024) return res.status(400).json({ error: 'Snapshot must be a PNG/JPEG under 750KB.' });
+    const clientInstanceId = req.body.client_instance_id ? Number(req.body.client_instance_id) : null;
+    const accountId = req.body.account_id ? Number(req.body.account_id) : null;
+    if (clientInstanceId) await assertClientInstanceOwnership(device.user_id, clientInstanceId);
+    if (accountId) await assertAccountOwnership(device.user_id, accountId);
+    const mimeType = escapeText(req.body.mime_type || req.body.content_type || 'image/png');
+    const retention = Number(settings.client_snapshot_retention_hours || 24);
+    const retentionHours = Number.isFinite(retention) && retention > 0 ? Math.floor(Math.min(retention, 168)) : 24;
     const result = await db.query(
-      `INSERT INTO live_snapshots (user_id, companion_device_id, window_title, content_type, image_data, image_size)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, created_at, image_size`,
-      [device.user_id, device.id, escapeText(req.body.window_title), escapeText(req.body.content_type || 'image/png'), image, image.length]
+      `INSERT INTO live_snapshots (
+         user_id, companion_device_id, client_instance_id, account_id, window_title,
+         content_type, mime_type, image_data, image_size, file_size, width, height, expires_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $8, $9, $10, CASE WHEN $11::int > 0 THEN NOW() + ($11::int * INTERVAL '1 hour') ELSE NULL END)
+       RETURNING id, created_at, image_size, file_size`,
+      [
+        device.user_id,
+        device.id,
+        clientInstanceId,
+        accountId,
+        escapeText(req.body.window_title),
+        mimeType,
+        image,
+        image.length,
+        numberOrNull(req.body.width),
+        numberOrNull(req.body.height),
+        retentionHours
+      ]
     );
     await activity.log(device.user_id, 'companion_screenshot_received', 'live_snapshot', result.rows[0].id, 'Companion snapshot received', { image_size: image.length });
     await auditLog(device.user_id, device.user_id, 'companion_screenshot_received', 'live_snapshot', result.rows[0].id, 'Companion snapshot received', { image_size: image.length });
     res.json({ snapshot: result.rows[0] });
   } catch (err) { next(err); }
-});
+}
 
 app.get('/api/companion/jobs/next', companionLimiter, async (req, res, next) => {
   try {
@@ -333,6 +389,54 @@ app.get('/api/companion/jobs/next', companionLimiter, async (req, res, next) => 
   } catch (err) { next(err); }
 });
 
+app.get('/api/companion/jobs/poll', companionLimiter, async (req, res, next) => {
+  try {
+    const device = await companionDeviceFromRequest(req);
+    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion jobs require active access.' });
+    const result = await db.query(
+      `UPDATE companion_jobs
+       SET status='accepted',
+           companion_device_id=COALESCE(companion_device_id, $1),
+           accepted_at=COALESCE(accepted_at, NOW()),
+           updated_at=NOW()
+       WHERE id = (
+         SELECT id
+         FROM companion_jobs
+         WHERE user_id=$2
+           AND status='queued'
+           AND (companion_device_id IS NULL OR companion_device_id=$1)
+         ORDER BY created_at ASC
+         LIMIT 1
+       )
+       RETURNING *`,
+      [device.id, device.user_id]
+    );
+    const job = result.rows[0];
+    if (!job) return res.json({ job: null });
+    if (job.workflow_run_id) {
+      await db.query(
+        `UPDATE workflow_runs
+         SET status='running', companion_device_id=$1, started_at=COALESCE(started_at, NOW()), updated_at=NOW()
+         WHERE id=$2 AND user_id=$3 AND status IN ('queued','paused','waiting_for_user')`,
+        [device.id, job.workflow_run_id, device.user_id]
+      );
+      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, 'accepted_by_companion', 'Companion accepted workflow job.', { companion_job_id: job.id });
+    }
+    if (job.client_instance_id) {
+      await db.query(
+        `UPDATE client_instances
+         SET companion_device_id=$1, status=CASE WHEN status='unknown' THEN 'running' ELSE status END, updated_at=NOW(), last_seen_at=NOW()
+         WHERE id=$2 AND user_id=$3`,
+        [device.id, job.client_instance_id, device.user_id]
+      );
+      await insertClientInstanceEvent(device.user_id, job.client_instance_id, 'accepted_by_companion', 'Companion accepted client job.', { companion_job_id: job.id });
+    }
+    await insertCompanionJobEvent(device.user_id, job.id, job.workflow_run_id, 'accepted', 'Companion accepted job.');
+    res.json({ job: safeCompanionJob(job) });
+  } catch (err) { next(err); }
+});
+
 app.post('/api/companion/jobs/:id/status', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
@@ -349,6 +453,35 @@ app.post('/api/companion/jobs/:id/status', companionLimiter, async (req, res, ne
        WHERE id=$4 AND user_id=$5`,
       [status, safeJobResult(req.body.result || {}), completed, job.id, device.user_id]
     );
+    let clientInstanceId = job.client_instance_id || null;
+    if (['launch_client', 'stop_client', 'detect_clients', 'request_snapshot'].includes(job.job_type)) {
+      const instancePayload = req.body.client_instance || (req.body.result && (req.body.result.client_instance || req.body.result.instance));
+      if (instancePayload && typeof instancePayload === 'object') {
+        const instance = await upsertClientInstance(device, {
+          ...normalizeClientInstance(instancePayload),
+          client_profile_id: job.client_profile_id || instancePayload.client_profile_id,
+          account_id: job.account_id || instancePayload.account_id,
+          proxy_id: job.proxy_id || instancePayload.proxy_id,
+          status: oneOf(instancePayload.status || statusToClientInstanceStatus(status), clientInstanceStatuses, statusToClientInstanceStatus(status))
+        });
+        clientInstanceId = instance.id;
+        await db.query('UPDATE companion_jobs SET client_instance_id=$1 WHERE id=$2 AND user_id=$3', [clientInstanceId, job.id, device.user_id]);
+      } else if (clientInstanceId) {
+        await db.query(
+          `UPDATE client_instances
+           SET status=$1,
+               stopped_at=CASE WHEN $1='stopped' THEN NOW() ELSE stopped_at END,
+               error_message=CASE WHEN $1='crashed' THEN $2 ELSE error_message END,
+               last_seen_at=NOW(),
+               updated_at=NOW()
+           WHERE id=$3 AND user_id=$4`,
+          [statusToClientInstanceStatus(status), message || null, clientInstanceId, device.user_id]
+        );
+      }
+      if (clientInstanceId) await insertClientInstanceEvent(device.user_id, clientInstanceId, status, message || `Companion client job ${status}.`, { companion_job_id: job.id, job_type: job.job_type });
+      if (status === 'completed') await activity.log(device.user_id, 'client_job_completed', 'client_instance', clientInstanceId, `Client job completed: ${job.job_type}`);
+      if (status === 'failed') await activity.log(device.user_id, 'client_job_failed', 'client_instance', clientInstanceId, `Client job failed: ${job.job_type}`);
+    }
     if (job.workflow_run_id) {
       await db.query(
         `UPDATE workflow_runs
@@ -464,7 +597,7 @@ app.post('/api/companion/devices/:id/revoke', requireAuth, async (req, res, next
 
 app.get('/admin', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    const [userCounts, userTotals, accountCounts, proxyCounts, companionCounts, auditRows] = await Promise.all([
+    const [userCounts, userTotals, accountCounts, proxyCounts, companionCounts, clientCounts, jobCounts, auditRows] = await Promise.all([
       db.query(`SELECT subscription_status, COUNT(*)::int count FROM users GROUP BY subscription_status`),
       db.query(`SELECT
         COUNT(*)::int total,
@@ -475,6 +608,8 @@ app.get('/admin', requireAuth, requireAdmin, async (req, res, next) => {
       db.query(`SELECT COUNT(*)::int total FROM accounts`),
       db.query(`SELECT COUNT(*)::int total FROM proxies`),
       db.query(`SELECT status, COUNT(*)::int count FROM companion_devices GROUP BY status`),
+      db.query(`SELECT status, COUNT(*)::int count FROM client_instances GROUP BY status`),
+      db.query(`SELECT status, COUNT(*)::int count FROM companion_jobs GROUP BY status`),
       db.query(`SELECT a.*, COALESCE(actor.global_name, actor.username, actor.discord_username) actor_name,
                         COALESCE(target.global_name, target.username, target.discord_username) target_name
                  FROM audit_logs a
@@ -490,6 +625,8 @@ app.get('/admin', requireAuth, requireAdmin, async (req, res, next) => {
       accountCount: accountCounts.rows[0].total,
       proxyCount: proxyCounts.rows[0].total,
       companionCounts: companionCounts.rows,
+      clientCounts: clientCounts.rows,
+      jobCounts: jobCounts.rows,
       auditLogs: auditRows.rows
     });
   } catch (err) { next(err); }
@@ -502,10 +639,14 @@ app.get('/admin/users', requireAuth, requireAdmin, async (req, res, next) => {
               u.discord_username, u.discord_email, u.role, u.subscription_status,
               u.created_at, u.updated_at, u.last_login_at, u.disabled_at,
               COUNT(DISTINCT a.id)::int account_count,
-              COUNT(DISTINCT p.id)::int proxy_count
+              COUNT(DISTINCT p.id)::int proxy_count,
+              COUNT(DISTINCT d.id)::int companion_count,
+              COUNT(DISTINCT ci.id)::int client_count
        FROM users u
        LEFT JOIN accounts a ON a.user_id = u.id
        LEFT JOIN proxies p ON p.user_id = u.id
+       LEFT JOIN companion_devices d ON d.user_id = u.id AND d.status <> 'revoked'
+       LEFT JOIN client_instances ci ON ci.user_id = u.id
        GROUP BY u.id
        ORDER BY u.created_at DESC, u.id DESC`
     );
@@ -568,6 +709,101 @@ app.post('/admin/users/:id', requireAuth, requireAdmin, async (req, res, next) =
       });
     }
     res.redirect('/admin/users');
+  } catch (err) { next(err); }
+});
+
+app.get('/admin/logs', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const filters = {
+      q: escapeText(req.query.q),
+      action: escapeText(req.query.action),
+      entity_type: escapeText(req.query.entity_type),
+      date: escapeText(req.query.date)
+    };
+    const clauses = [];
+    const params = [];
+    if (filters.q) {
+      params.push(`%${filters.q}%`);
+      clauses.push(`(l.action ILIKE $${params.length} OR l.message ILIKE $${params.length})`);
+    }
+    if (filters.action) {
+      params.push(filters.action);
+      clauses.push(`l.action = $${params.length}`);
+    }
+    if (filters.entity_type) {
+      params.push(filters.entity_type);
+      clauses.push(`l.entity_type = $${params.length}`);
+    }
+    if (filters.date === 'today') clauses.push(`l.created_at >= CURRENT_DATE`);
+    if (filters.date === '7d') clauses.push(`l.created_at >= NOW() - INTERVAL '7 days'`);
+    if (filters.date === '30d') clauses.push(`l.created_at >= NOW() - INTERVAL '30 days'`);
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const [rows, actions, auditRows] = await Promise.all([
+      db.query(
+        `SELECT l.*, COALESCE(u.global_name, u.username, u.discord_username, 'System') log_username
+         FROM activity_logs l
+         LEFT JOIN users u ON u.id = l.user_id
+         ${where}
+         ORDER BY l.created_at DESC
+         LIMIT 300`,
+        params
+      ),
+      db.query(`SELECT DISTINCT action FROM activity_logs ORDER BY action`),
+      db.query(
+        `SELECT a.*, COALESCE(actor.global_name, actor.username, actor.discord_username) actor_name,
+                  COALESCE(target.global_name, target.username, target.discord_username) target_name
+         FROM audit_logs a
+         LEFT JOIN users actor ON actor.id = a.actor_user_id
+         LEFT JOIN users target ON target.id = a.user_id
+         ORDER BY a.created_at DESC
+         LIMIT 100`
+      )
+    ]);
+    const entityTypes = [...new Set(rows.rows.map(row => row.entity_type).filter(Boolean))].sort();
+    res.render('admin/logs', {
+      title: 'Platform Logs',
+      logs: rows.rows,
+      auditLogs: auditRows.rows,
+      actions: actions.rows.map(row => row.action),
+      entityTypes,
+      filters
+    });
+  } catch (err) { next(err); }
+});
+
+app.get('/admin/system', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const [users, accounts, proxies, devices, clients, jobs, snapshots] = await Promise.all([
+      db.query(`SELECT COUNT(*)::int total FROM users`),
+      db.query(`SELECT COUNT(*)::int total FROM accounts`),
+      db.query(`SELECT COUNT(*)::int total FROM proxies`),
+      db.query(`SELECT status, COUNT(*)::int count FROM companion_devices GROUP BY status`),
+      db.query(`SELECT status, COUNT(*)::int count FROM client_instances GROUP BY status`),
+      db.query(`SELECT status, COUNT(*)::int count FROM companion_jobs GROUP BY status`),
+      db.query(`SELECT COUNT(*)::int total, MAX(created_at) latest FROM live_snapshots`)
+    ]);
+    res.render('admin/system', {
+      title: 'System Health',
+      users: users.rows[0],
+      accounts: accounts.rows[0],
+      proxies: proxies.rows[0],
+      devices: devices.rows,
+      clients: clients.rows,
+      jobs: jobs.rows,
+      snapshots: snapshots.rows[0],
+      config
+    });
+  } catch (err) { next(err); }
+});
+
+app.get('/admin/subscriptions', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const counts = await db.query(`SELECT subscription_status, COUNT(*)::int count FROM users GROUP BY subscription_status ORDER BY subscription_status`);
+    res.render('admin/subscriptions', {
+      title: 'Subscription Controls',
+      counts: counts.rows,
+      paymentMethods
+    });
   } catch (err) { next(err); }
 });
 
@@ -1170,6 +1406,226 @@ app.post('/workflow/:id/status', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+app.get('/instances', requireAuth, (req, res) => res.redirect('/clients'));
+
+app.get('/clients', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const [helper, settings, devices, profiles, instances, snapshot, jobs, accounts, proxies, workflows, stats] = await Promise.all([
+      helperStatus(userId),
+      getSettings(userId),
+      db.query(`SELECT id, device_name, companion_version, status, allow_screenshots, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId]),
+      db.query(
+        `SELECT cp.*, p.name default_proxy_name, p.host default_proxy_host, p.port default_proxy_port, w.name default_workflow_name
+         FROM client_profiles cp
+         LEFT JOIN proxies p ON p.id=cp.default_proxy_id AND p.user_id=cp.user_id
+         LEFT JOIN workflows w ON w.id=cp.default_workflow_id AND w.user_id=cp.user_id
+         WHERE cp.user_id=$1
+         ORDER BY cp.enabled DESC, cp.updated_at DESC`,
+        [userId]
+      ),
+      db.query(
+        `SELECT ci.*, cp.name profile_name, a.username account_username, a.legacy_login account_legacy_login, a.display_name account_display_name,
+                p.name proxy_name, p.host proxy_host, p.port proxy_port, p.proxy_type, d.device_name
+         FROM client_instances ci
+         LEFT JOIN client_profiles cp ON cp.id=ci.client_profile_id AND cp.user_id=ci.user_id
+         LEFT JOIN accounts a ON a.id=ci.account_id AND a.user_id=ci.user_id
+         LEFT JOIN proxies p ON p.id=ci.proxy_id AND p.user_id=ci.user_id
+         LEFT JOIN companion_devices d ON d.id=ci.companion_device_id AND d.user_id=ci.user_id
+         WHERE ci.user_id=$1
+         ORDER BY ci.last_seen_at DESC NULLS LAST, ci.updated_at DESC
+         LIMIT 200`,
+        [userId]
+      ),
+      db.query(
+        `SELECT s.id, s.window_title, s.mime_type, s.content_type, COALESCE(s.file_size, s.image_size) file_size, s.created_at,
+                ci.instance_name, ci.process_name
+         FROM live_snapshots s
+         LEFT JOIN client_instances ci ON ci.id=s.client_instance_id AND ci.user_id=s.user_id
+         WHERE s.user_id=$1
+         ORDER BY s.created_at DESC
+         LIMIT 1`,
+        [userId]
+      ),
+      db.query(
+        `SELECT j.*, cp.name profile_name, ci.instance_name
+         FROM companion_jobs j
+         LEFT JOIN client_profiles cp ON cp.id=j.client_profile_id AND cp.user_id=j.user_id
+         LEFT JOIN client_instances ci ON ci.id=j.client_instance_id AND ci.user_id=j.user_id
+         WHERE j.user_id=$1
+         ORDER BY j.created_at DESC
+         LIMIT 25`,
+        [userId]
+      ),
+      db.query(`SELECT id, username, legacy_login, display_name FROM accounts WHERE user_id=$1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 200`, [userId]),
+      db.query(`SELECT id, name, proxy_type, host, port, status FROM proxies WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200`, [userId]),
+      db.query(`SELECT id, name, type, status FROM workflows WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200`, [userId]),
+      db.query(
+        `SELECT
+          (SELECT COUNT(*)::int FROM companion_devices WHERE user_id=$1 AND status='connected') connected_devices,
+          (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1 AND status IN ('running','launching','detected')) running_clients,
+          (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1 AND status IN ('stopped','crashed','unknown')) stopped_clients,
+          (SELECT COUNT(*)::int FROM companion_jobs WHERE user_id=$1 AND status IN ('queued','accepted','running','paused','waiting_for_user')) active_jobs`,
+        [userId]
+      )
+    ]);
+    res.render('clients', {
+      title: 'Clients / Instances',
+      helper,
+      settings,
+      devices: devices.rows,
+      profiles: profiles.rows,
+      instances: instances.rows,
+      snapshot: snapshot.rows[0] || null,
+      jobs: jobs.rows,
+      accounts: accounts.rows,
+      proxies: proxies.rows,
+      workflows: workflows.rows,
+      stats: stats.rows[0],
+      query: req.query,
+      mask
+    });
+  } catch (err) { next(err); }
+});
+
+app.post('/clients/profiles', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const profile = await clientProfileFromBody(userId, req.body);
+    const result = await db.query(
+      `INSERT INTO client_profiles (user_id, name, client_type, launch_args_encrypted, default_proxy_id, default_workflow_id, notes, enabled, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+       RETURNING id`,
+      [
+        userId,
+        profile.name,
+        profile.client_type,
+        encrypt(profile.launch_args),
+        profile.default_proxy_id,
+        profile.default_workflow_id,
+        profile.notes,
+        profile.enabled
+      ]
+    );
+    await activity.log(userId, 'client_profile_created', 'client_profile', result.rows[0].id, `Created client profile ${profile.name}`, { client_type: profile.client_type });
+    await auditLog(userId, userId, 'client_profile_created', 'client_profile', result.rows[0].id, `Created client profile ${profile.name}`, { client_type: profile.client_type });
+    res.redirect('/clients');
+  } catch (err) { next(err); }
+});
+
+app.post('/clients/profiles/:id', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const existing = await loadClientProfile(userId, req.params.id);
+    const profile = await clientProfileFromBody(userId, req.body);
+    await db.query(
+      `UPDATE client_profiles
+       SET name=$1, client_type=$2, launch_args_encrypted=$3, default_proxy_id=$4, default_workflow_id=$5, notes=$6, enabled=$7, updated_at=NOW()
+       WHERE id=$8 AND user_id=$9`,
+      [
+        profile.name,
+        profile.client_type,
+        profile.launch_args ? encrypt(profile.launch_args) : existing.launch_args_encrypted,
+        profile.default_proxy_id,
+        profile.default_workflow_id,
+        profile.notes,
+        profile.enabled,
+        req.params.id,
+        userId
+      ]
+    );
+    await activity.log(userId, 'client_profile_updated', 'client_profile', req.params.id, `Updated client profile ${profile.name}`, { client_type: profile.client_type });
+    res.redirect('/clients');
+  } catch (err) { next(err); }
+});
+
+app.post('/clients/profiles/:id/launch', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const profile = await loadClientProfile(userId, req.params.id);
+    const deviceId = req.body.companion_device_id ? Number(req.body.companion_device_id) : null;
+    const accountId = req.body.account_id ? Number(req.body.account_id) : null;
+    let proxyId = req.body.proxy_id ? Number(req.body.proxy_id) : profile.default_proxy_id || null;
+    if (deviceId) await assertDeviceOwnership(userId, deviceId);
+    if (accountId) await assertAccountOwnership(userId, accountId);
+    if (!proxyId && accountId) {
+      const accountProxy = await db.query('SELECT COALESCE(assigned_http_proxy_id, proxy_id, assigned_socks5_proxy_id) proxy_id FROM accounts WHERE id=$1 AND user_id=$2', [accountId, userId]);
+      proxyId = accountProxy.rows[0] ? accountProxy.rows[0].proxy_id : null;
+    }
+    if (proxyId) await assertProxyOwnership(userId, proxyId);
+    const payload = await clientLaunchPayload(userId, profile, { accountId, proxyId });
+    const job = await db.query(
+      `INSERT INTO companion_jobs (user_id, companion_device_id, client_profile_id, account_id, proxy_id, job_type, status, payload, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'launch_client', 'queued', $6, NOW())
+       RETURNING id`,
+      [userId, deviceId, profile.id, accountId, proxyId, payload]
+    );
+    await activity.log(userId, 'client_launch_requested', 'client_profile', profile.id, `Queued launch for ${profile.name}`, { companion_job_id: job.rows[0].id });
+    await auditLog(userId, userId, 'client_launch_requested', 'client_profile', profile.id, `Queued launch for ${profile.name}`, { companion_job_id: job.rows[0].id });
+    res.redirect(`/clients?launch_job=${job.rows[0].id}`);
+  } catch (err) { next(err); }
+});
+
+app.post('/clients/instances/:id/attach', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const instance = await loadClientInstance(userId, req.params.id);
+    const accountId = req.body.account_id ? Number(req.body.account_id) : null;
+    const proxyId = req.body.proxy_id ? Number(req.body.proxy_id) : null;
+    if (accountId) await assertAccountOwnership(userId, accountId);
+    if (proxyId) await assertProxyOwnership(userId, proxyId);
+    await db.query(
+      `UPDATE client_instances SET account_id=$1, proxy_id=$2, updated_at=NOW() WHERE id=$3 AND user_id=$4`,
+      [accountId, proxyId, instance.id, userId]
+    );
+    await insertClientInstanceEvent(userId, instance.id, 'attached_account_proxy', 'Attached account/proxy to client instance.', { account_id: accountId, proxy_id: proxyId });
+    await activity.log(userId, 'client_instance_attached', 'client_instance', instance.id, 'Attached account/proxy to client instance');
+    res.redirect('/clients');
+  } catch (err) { next(err); }
+});
+
+app.post('/clients/instances/:id/stop-tracking', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const instance = await loadClientInstance(userId, req.params.id);
+    await db.query(
+      `UPDATE client_instances SET status='stopped', stopped_at=NOW(), updated_at=NOW() WHERE id=$1 AND user_id=$2`,
+      [instance.id, userId]
+    );
+    await insertClientInstanceEvent(userId, instance.id, 'stop_tracking', 'User stopped tracking this client instance.');
+    await activity.log(userId, 'client_stopped_tracking', 'client_instance', instance.id, 'Stopped tracking client instance');
+    res.redirect('/clients');
+  } catch (err) { next(err); }
+});
+
+app.post('/clients/instances/:id/request-snapshot', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const instance = await loadClientInstance(userId, req.params.id);
+    const settings = await getSettings(userId);
+    if (settings.allow_companion_snapshots !== 'true') throw new Error('Snapshots are disabled in Settings.');
+    const payload = {
+      command: 'request_snapshot',
+      client_instance_id: instance.id,
+      window_title: instance.window_title,
+      safety: {
+        user_opt_in_required: true,
+        capture_only_selected_window: true,
+        no_secret_capture_intent: true
+      }
+    };
+    const job = await db.query(
+      `INSERT INTO companion_jobs (user_id, companion_device_id, client_instance_id, account_id, proxy_id, job_type, status, payload, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'request_snapshot', 'queued', $6, NOW())
+       RETURNING id`,
+      [userId, instance.companion_device_id, instance.id, instance.account_id, instance.proxy_id, payload]
+    );
+    await insertClientInstanceEvent(userId, instance.id, 'snapshot_requested', 'Snapshot requested by user.', { companion_job_id: job.rows[0].id });
+    await activity.log(userId, 'snapshot_requested', 'client_instance', instance.id, 'Snapshot requested for client instance');
+    res.redirect(`/clients?snapshot_job=${job.rows[0].id}`);
+  } catch (err) { next(err); }
+});
+
 app.get('/proxies', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
@@ -1613,6 +2069,7 @@ app.post('/settings', requireAuth, async (req, res, next) => {
       'password_length', 'max_accounts_per_proxy', 'preferred_export_format', 'export_format_default',
       'default_export_delimiter', 'export_behavior_default', 'mask_sensitive_values', 'otp_refresh_interval',
       'companion_heartbeat_interval_seconds', 'default_browser_type', 'require_confirmation_before_export_delete', 'allow_companion_snapshots',
+      'client_detection_process_names', 'client_snapshot_retention_hours', 'client_launcher_requires_confirmation',
       'require_helper_for_proxy_actions', 'allow_website_only_browser_open',
       'warn_before_opening_without_helper', 'require_confirmation_before_direct_open',
       'show_proxy_mode_before_open', 'enable_assisted_fill_buttons', 'theme_name', 'workflow_mode'
@@ -1637,7 +2094,7 @@ app.post('/settings', requireAuth, async (req, res, next) => {
 app.get('/logs', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
-    const admin = isAdminUser(req.currentUserRecord);
+    const admin = false;
     const filters = {
       q: escapeText(req.query.q),
       action: escapeText(req.query.action),
@@ -1645,11 +2102,8 @@ app.get('/logs', requireAuth, async (req, res, next) => {
       date: escapeText(req.query.date)
     };
     const clauses = [];
-    const params = [];
-    if (!admin) {
-      params.push(userId);
-      clauses.push(`l.user_id = $${params.length}`);
-    }
+    const params = [userId];
+    clauses.push(`l.user_id = $1`);
     if (filters.q) {
       params.push(`%${filters.q}%`);
       clauses.push(`(l.action ILIKE $${params.length} OR l.message ILIKE $${params.length})`);
@@ -1676,9 +2130,7 @@ app.get('/logs', requireAuth, async (req, res, next) => {
          LIMIT 300`,
         params
       ),
-      admin
-        ? db.query(`SELECT DISTINCT action FROM activity_logs ORDER BY action`)
-        : db.query(`SELECT DISTINCT action FROM activity_logs WHERE user_id=$1 ORDER BY action`, [userId])
+      db.query(`SELECT DISTINCT action FROM activity_logs WHERE user_id=$1 ORDER BY action`, [userId])
     ]);
     const entityTypes = [...new Set(rows.rows.map(row => row.entity_type).filter(Boolean))].sort();
     res.render('logs', { title: 'Logs', logs: rows.rows, actions: actions.rows.map(row => row.action), entityTypes, filters, admin });
@@ -1708,6 +2160,9 @@ const defaultSettings = {
   dense_table_mode: 'false',
   screenshot_interval_seconds: '30',
   companion_heartbeat_interval_seconds: '30',
+  client_detection_process_names: 'RuneLite,JagexLauncher,Jagex Launcher,osclient,DreamBot',
+  client_snapshot_retention_hours: '24',
+  client_launcher_requires_confirmation: 'true',
   default_browser_type: 'chromium',
   require_confirmation_before_export_delete: 'true',
   allow_companion_snapshots: 'false',
@@ -1753,6 +2208,9 @@ function attachCurrentUser(req, res, next) {
   res.locals.workflowRunStatuses = workflowRunStatuses;
   res.locals.workflowStepTypes = workflowStepTypes;
   res.locals.companionJobStatuses = companionJobStatuses;
+  res.locals.companionJobTypes = companionJobTypes;
+  res.locals.clientTypes = clientTypes;
+  res.locals.clientInstanceStatuses = clientInstanceStatuses;
   res.locals.paymentMethods = paymentMethods;
   res.locals.isAdmin = req.currentUser && req.currentUser.role === 'admin';
   res.locals.hasFullAccess = false;
@@ -1844,7 +2302,8 @@ function requireFullAccess(req, res, next) {
 
 function limitedAccessResponse(req, res) {
   const message = 'This account has limited access. You can view your dashboard and export your saved data, but imports, edits, uploads, settings, workflows, and companion actions require active access.';
-  if (req.path.startsWith('/api/') || (req.get('accept') || '').includes('application/json')) {
+  const accept = typeof req.get === 'function' ? req.get('accept') || '' : '';
+  if (req.path.startsWith('/api/') || accept.includes('application/json')) {
     return res.status(403).json({ error: message });
   }
   return res.status(403).render('error', { title: 'Limited access', message });
@@ -1983,6 +2442,221 @@ async function companionDeviceFromRequest(req) {
     [hashDeviceToken(token)]
   );
   return result.rows[0] || null;
+}
+
+async function clientProfileFromBody(userId, body) {
+  const defaultProxyId = body.default_proxy_id ? Number(body.default_proxy_id) : null;
+  const defaultWorkflowId = body.default_workflow_id ? Number(body.default_workflow_id) : null;
+  if (defaultProxyId) await assertProxyOwnership(userId, defaultProxyId);
+  if (defaultWorkflowId) await loadWorkflow(userId, defaultWorkflowId);
+  const name = escapeText(body.name);
+  if (!name) throw new Error('Client profile name is required.');
+  return {
+    name,
+    client_type: oneOf(body.client_type, clientTypes, 'custom'),
+    launch_args: escapeText(body.launch_args),
+    default_proxy_id: defaultProxyId,
+    default_workflow_id: defaultWorkflowId,
+    notes: escapeText(body.notes),
+    enabled: Array.isArray(body.enabled) ? body.enabled.includes('yes') : body.enabled !== 'no'
+  };
+}
+
+async function assertClientProfileOwnership(userId, profileId) {
+  const result = await db.query('SELECT id FROM client_profiles WHERE id=$1 AND user_id=$2', [profileId, userId]);
+  if (!result.rows[0]) throw new Error('Client profile not found for this user.');
+}
+
+async function loadClientProfile(userId, profileId) {
+  const result = await db.query('SELECT * FROM client_profiles WHERE id=$1 AND user_id=$2', [profileId, userId]);
+  if (!result.rows[0]) throw new Error('Client profile not found.');
+  return result.rows[0];
+}
+
+async function assertClientInstanceOwnership(userId, instanceId) {
+  const result = await db.query('SELECT id FROM client_instances WHERE id=$1 AND user_id=$2', [instanceId, userId]);
+  if (!result.rows[0]) throw new Error('Client instance not found for this user.');
+}
+
+async function loadClientInstance(userId, instanceId) {
+  const result = await db.query('SELECT * FROM client_instances WHERE id=$1 AND user_id=$2', [instanceId, userId]);
+  if (!result.rows[0]) throw new Error('Client instance not found.');
+  return result.rows[0];
+}
+
+async function clientLaunchPayload(userId, profile, options) {
+  let account = null;
+  let proxy = null;
+  if (options.accountId) {
+    const result = await db.query(
+      `SELECT id, username, legacy_login, display_name, account_type, status
+       FROM accounts WHERE id=$1 AND user_id=$2`,
+      [options.accountId, userId]
+    );
+    account = result.rows[0] || null;
+  }
+  if (options.proxyId) {
+    const result = await db.query(
+      `SELECT id, name, proxy_type, host, port, status
+       FROM proxies WHERE id=$1 AND user_id=$2`,
+      [options.proxyId, userId]
+    );
+    proxy = result.rows[0] || null;
+  }
+  return {
+    command: 'launch_client',
+    client_profile: {
+      id: profile.id,
+      name: profile.name,
+      client_type: profile.client_type,
+      local_path_required: true,
+      executable_path_source: 'companion_local_settings',
+      launch_args_template: decrypt(profile.launch_args_encrypted) || ''
+    },
+    account: account ? {
+      id: account.id,
+      label: account.display_name || account.legacy_login || account.username,
+      account_type: account.account_type,
+      status: account.status
+    } : null,
+    proxy: proxy ? {
+      id: proxy.id,
+      name: proxy.name,
+      proxy_type: proxy.proxy_type,
+      endpoint: `${maskEndpoint(proxy.host)}:${proxy.port}`,
+      status: proxy.status
+    } : null,
+    safety: {
+      visible_user_triggered_launch: true,
+      no_gameplay_automation: true,
+      no_injection: true,
+      no_anti_detection_flags: true,
+      no_security_bypass: true
+    }
+  };
+}
+
+function normalizeClientStatusPayload(body) {
+  const source = Array.isArray(body.instances) ? body.instances : Array.isArray(body.windows) ? body.windows : [body];
+  return source.slice(0, 50).map(item => normalizeClientInstance(item));
+}
+
+function normalizeClientInstance(item) {
+  const running = item.running !== false;
+  return {
+    id: item.client_instance_id || item.instance_id || item.id || null,
+    client_profile_id: item.client_profile_id || item.profile_id || null,
+    account_id: item.account_id || null,
+    proxy_id: item.proxy_id || null,
+    instance_name: escapeText(item.instance_name || item.name),
+    process_name: escapeText(item.process_name || item.processName),
+    process_id: numberOrNull(item.process_id || item.processId || item.pid),
+    window_title: escapeText(item.window_title || item.windowTitle),
+    status: oneOf(item.status, clientInstanceStatuses, running ? 'running' : 'stopped'),
+    current_activity: escapeText(item.current_activity || item.activity),
+    error_message: escapeText(item.error_message || item.error),
+    metadata: safeMetadata(item.metadata || {})
+  };
+}
+
+async function upsertClientInstance(device, item) {
+  const userId = device.user_id;
+  const clientProfileId = item.client_profile_id ? Number(item.client_profile_id) : null;
+  const accountId = item.account_id ? Number(item.account_id) : null;
+  const proxyId = item.proxy_id ? Number(item.proxy_id) : null;
+  if (clientProfileId) await assertClientProfileOwnership(userId, clientProfileId);
+  if (accountId) await assertAccountOwnership(userId, accountId);
+  if (proxyId) await assertProxyOwnership(userId, proxyId);
+  let result;
+  if (item.id) {
+    result = await db.query(
+      `UPDATE client_instances
+       SET companion_device_id=$1, client_profile_id=COALESCE($2, client_profile_id), account_id=COALESCE($3, account_id),
+           proxy_id=COALESCE($4, proxy_id), instance_name=COALESCE(NULLIF($5, ''), instance_name),
+           process_name=COALESCE(NULLIF($6, ''), process_name), process_id=COALESCE($7, process_id),
+           window_title=COALESCE(NULLIF($8, ''), window_title), status=$9, current_activity=COALESCE(NULLIF($10, ''), current_activity),
+           last_seen_at=NOW(), started_at=CASE WHEN $9 IN ('running','launching','detected') THEN COALESCE(started_at, NOW()) ELSE started_at END,
+           stopped_at=CASE WHEN $9='stopped' THEN NOW() ELSE stopped_at END, error_message=NULLIF($11, ''), updated_at=NOW()
+       WHERE id=$12 AND user_id=$13
+       RETURNING *`,
+      [
+        device.id,
+        clientProfileId,
+        accountId,
+        proxyId,
+        item.instance_name,
+        item.process_name,
+        item.process_id,
+        item.window_title,
+        item.status,
+        item.current_activity,
+        item.error_message,
+        item.id,
+        userId
+      ]
+    );
+  }
+  if (!result || !result.rows[0]) {
+    result = await db.query(
+      `INSERT INTO client_instances (
+         user_id, companion_device_id, client_profile_id, account_id, proxy_id, instance_name,
+         process_name, process_id, window_title, status, current_activity, last_seen_at,
+         started_at, stopped_at, error_message, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(),
+               CASE WHEN $10 IN ('running','launching','detected') THEN NOW() ELSE NULL END,
+               CASE WHEN $10='stopped' THEN NOW() ELSE NULL END, NULLIF($12, ''), NOW())
+       RETURNING *`,
+      [
+        userId,
+        device.id,
+        clientProfileId,
+        accountId,
+        proxyId,
+        item.instance_name || item.window_title || item.process_name || 'Client instance',
+        item.process_name,
+        item.process_id,
+        item.window_title,
+        item.status,
+        item.current_activity,
+        item.error_message
+      ]
+    );
+  }
+  const instance = result.rows[0];
+  await insertClientInstanceEvent(userId, instance.id, 'status_update', `Client instance reported ${instance.status}.`, {
+    process_name: instance.process_name,
+    process_id: instance.process_id,
+    window_title: instance.window_title,
+    companion_device_id: device.id
+  });
+  return safeClientInstance(instance);
+}
+
+async function insertClientInstanceEvent(userId, clientInstanceId, eventType, message, metadata = {}) {
+  await db.query(
+    `INSERT INTO client_instance_events (user_id, client_instance_id, event_type, message, safe_metadata_json)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [userId, clientInstanceId, escapeText(eventType), escapeText(message), safeMetadata(metadata)]
+  );
+}
+
+function safeClientInstance(instance) {
+  return {
+    id: instance.id,
+    client_profile_id: instance.client_profile_id,
+    account_id: instance.account_id,
+    proxy_id: instance.proxy_id,
+    instance_name: instance.instance_name,
+    process_name: instance.process_name,
+    process_id: instance.process_id,
+    window_title: instance.window_title,
+    status: instance.status,
+    current_activity: instance.current_activity,
+    last_seen_at: instance.last_seen_at,
+    started_at: instance.started_at,
+    stopped_at: instance.stopped_at
+  };
 }
 
 async function assertAccountOwnership(userId, accountId) {
@@ -2213,6 +2887,8 @@ function safeCompanionJob(job) {
     status: job.status,
     workflow_id: job.workflow_id,
     workflow_run_id: job.workflow_run_id,
+    client_profile_id: job.client_profile_id,
+    client_instance_id: job.client_instance_id,
     account_id: job.account_id,
     proxy_id: job.proxy_id,
     payload: job.payload,
@@ -2226,6 +2902,15 @@ function workflowRunStatusFromJob(status) {
   if (status === 'cancelled') return 'cancelled';
   if (status === 'paused') return 'paused';
   if (status === 'waiting_for_user') return 'waiting_for_user';
+  return 'running';
+}
+
+function statusToClientInstanceStatus(status) {
+  if (status === 'completed') return 'running';
+  if (status === 'failed') return 'crashed';
+  if (status === 'cancelled') return 'stopped';
+  if (status === 'queued' || status === 'accepted') return 'launching';
+  if (status === 'paused' || status === 'waiting_for_user') return 'running';
   return 'running';
 }
 

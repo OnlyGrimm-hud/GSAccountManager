@@ -113,6 +113,9 @@ Existing MVP columns are preserved. The v1 migration adds:
 - `companion_sessions`
 - `companion_client_status`
 - `live_snapshots`
+- `client_profiles`
+- `client_instances`
+- `client_instance_events`
 - `user_id` ownership columns on accounts, proxies, settings, and activity logs
 - `legacy_login`
 - `legacy_password_encrypted`
@@ -146,10 +149,13 @@ If old rows have no `user_id`, they are assigned to the first admin user when on
 
 - New Discord users default to `role=user` and `subscription_status=inactive`.
 - Discord IDs listed in `ADMIN_DISCORD_IDS` are automatically set to admin and active on login.
-- Inactive, expired, or banned users only see the locked access page.
+- Inactive or expired users can view Dashboard, Accounts, Proxies, and Logs in export-only mode.
+- Banned or disabled users see the locked access page.
 - Active and trial users can access the dashboard.
 - Admin users bypass subscription gating.
 - Admins manage users at `/admin/users`.
+- Admin management pages live under `/admin`, `/admin/users`, `/admin/logs`, `/admin/system`, and `/admin/subscriptions`.
+- Admins still have their own personal workspace at Dashboard, Accounts, Proxies, Workflows, Clients / Instances, Companion, Downloads, Logs, and Settings.
 - Admins can set role and subscription status, including `banned` to disable a user.
 - To make a Discord account admin directly in PostgreSQL:
 
@@ -192,6 +198,7 @@ GS Account Manager is a hosted web app, so it cannot directly launch a user's lo
 Current web-side support:
 
 - Companion page at `/companion` with `/local-helper` kept as a compatibility redirect target
+- Clients / Instances page at `/clients` for user-scoped client profiles, reported instances, launch jobs, and latest snapshot metadata
 - Downloads page at `/downloads`
 - Windows download placeholder at `/downloads/helper/windows`
 - user-scoped companion device/session/status/snapshot tables
@@ -204,7 +211,10 @@ Current web-side support:
 - assisted-fill command creators that create user-scoped helper commands only
 - masked proxy-mode summaries on Dashboard and Workflow
 - Electron companion skeleton in `companion/`
-- token-authenticated companion APIs for pairing, heartbeat, job polling, job status, status placeholders, and opt-in snapshots
+- token-authenticated companion APIs for pairing, heartbeat, job polling, job status, client instance status, and opt-in snapshots
+- local Companion tabs for Pair Device, Status, Clients, Launch Profiles, Browser Assist, Settings, and Logs
+- Windows process/window detection using normal OS APIs only
+- local-only executable path storage and visible user-triggered launch support
 
 Default Companion settings:
 

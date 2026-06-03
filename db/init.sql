@@ -423,6 +423,63 @@ CREATE TABLE IF NOT EXISTS live_snapshots (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS client_profiles (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  name TEXT NOT NULL,
+  client_type TEXT NOT NULL DEFAULT 'custom',
+  executable_path_encrypted TEXT,
+  launch_args_encrypted TEXT,
+  default_proxy_id BIGINT,
+  default_workflow_id BIGINT,
+  notes TEXT,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS client_instances (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  companion_device_id BIGINT,
+  client_profile_id BIGINT,
+  account_id BIGINT,
+  proxy_id BIGINT,
+  instance_name TEXT,
+  process_name TEXT,
+  process_id INTEGER,
+  window_title TEXT,
+  status TEXT NOT NULL DEFAULT 'unknown',
+  current_activity TEXT,
+  last_seen_at TIMESTAMPTZ,
+  started_at TIMESTAMPTZ,
+  stopped_at TIMESTAMPTZ,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS client_instance_events (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  client_instance_id BIGINT NOT NULL,
+  event_type TEXT NOT NULL,
+  message TEXT,
+  safe_metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE live_snapshots ADD COLUMN IF NOT EXISTS client_instance_id BIGINT;
+ALTER TABLE live_snapshots ADD COLUMN IF NOT EXISTS account_id BIGINT;
+ALTER TABLE live_snapshots ADD COLUMN IF NOT EXISTS storage_ref TEXT;
+ALTER TABLE live_snapshots ADD COLUMN IF NOT EXISTS mime_type TEXT;
+ALTER TABLE live_snapshots ADD COLUMN IF NOT EXISTS width INTEGER;
+ALTER TABLE live_snapshots ADD COLUMN IF NOT EXISTS height INTEGER;
+ALTER TABLE live_snapshots ADD COLUMN IF NOT EXISTS file_size INTEGER;
+ALTER TABLE live_snapshots ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+UPDATE live_snapshots SET mime_type = content_type WHERE mime_type IS NULL AND content_type IS NOT NULL;
+UPDATE live_snapshots SET file_size = image_size WHERE file_size IS NULL AND image_size IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS workflows (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL,
@@ -478,6 +535,8 @@ CREATE TABLE IF NOT EXISTS companion_jobs (
   companion_device_id BIGINT,
   workflow_id BIGINT,
   workflow_run_id BIGINT,
+  client_profile_id BIGINT,
+  client_instance_id BIGINT,
   account_id BIGINT,
   proxy_id BIGINT,
   job_type TEXT NOT NULL DEFAULT 'workflow_run',
@@ -489,6 +548,9 @@ CREATE TABLE IF NOT EXISTS companion_jobs (
   accepted_at TIMESTAMPTZ,
   completed_at TIMESTAMPTZ
 );
+
+ALTER TABLE companion_jobs ADD COLUMN IF NOT EXISTS client_profile_id BIGINT;
+ALTER TABLE companion_jobs ADD COLUMN IF NOT EXISTS client_instance_id BIGINT;
 
 CREATE TABLE IF NOT EXISTS companion_job_events (
   id BIGSERIAL PRIMARY KEY,
@@ -562,6 +624,9 @@ FROM (VALUES
   ('dense_table_mode', 'false'),
   ('screenshot_interval_seconds', '30'),
   ('companion_heartbeat_interval_seconds', '30'),
+  ('client_detection_process_names', 'RuneLite,JagexLauncher,Jagex Launcher,osclient,DreamBot'),
+  ('client_snapshot_retention_hours', '24'),
+  ('client_launcher_requires_confirmation', 'true'),
   ('default_browser_type', 'chromium'),
   ('require_confirmation_before_export_delete', 'true'),
   ('allow_companion_snapshots', 'false'),
@@ -616,6 +681,15 @@ CREATE INDEX IF NOT EXISTS idx_companion_devices_status ON companion_devices(sta
 CREATE INDEX IF NOT EXISTS idx_companion_sessions_user ON companion_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_companion_client_status_user ON companion_client_status(user_id);
 CREATE INDEX IF NOT EXISTS idx_live_snapshots_user ON live_snapshots(user_id);
+CREATE INDEX IF NOT EXISTS idx_live_snapshots_instance ON live_snapshots(client_instance_id);
+CREATE INDEX IF NOT EXISTS idx_client_profiles_user ON client_profiles(user_id);
+CREATE INDEX IF NOT EXISTS idx_client_profiles_enabled ON client_profiles(user_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_client_instances_user ON client_instances(user_id);
+CREATE INDEX IF NOT EXISTS idx_client_instances_device ON client_instances(companion_device_id);
+CREATE INDEX IF NOT EXISTS idx_client_instances_status ON client_instances(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_client_instances_last_seen ON client_instances(user_id, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_client_instance_events_user ON client_instance_events(user_id);
+CREATE INDEX IF NOT EXISTS idx_client_instance_events_instance ON client_instance_events(client_instance_id);
 CREATE INDEX IF NOT EXISTS idx_workflows_user ON workflows(user_id);
 CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
 CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id);
@@ -625,6 +699,7 @@ CREATE INDEX IF NOT EXISTS idx_workflow_run_events_run ON workflow_run_events(wo
 CREATE INDEX IF NOT EXISTS idx_companion_jobs_user ON companion_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_companion_jobs_device_status ON companion_jobs(companion_device_id, status);
 CREATE INDEX IF NOT EXISTS idx_companion_jobs_status ON companion_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_companion_jobs_client ON companion_jobs(user_id, client_profile_id, client_instance_id);
 CREATE INDEX IF NOT EXISTS idx_companion_job_events_job ON companion_job_events(companion_job_id);
 CREATE INDEX IF NOT EXISTS idx_helper_devices_user ON helper_devices(user_id);
 CREATE INDEX IF NOT EXISTS idx_helper_devices_status ON helper_devices(status);
@@ -746,6 +821,66 @@ BEGIN
       ADD CONSTRAINT live_snapshots_session_id_fkey
       FOREIGN KEY (companion_session_id) REFERENCES companion_sessions(id) ON DELETE SET NULL;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'live_snapshots_client_instance_id_fkey') THEN
+    ALTER TABLE live_snapshots
+      ADD CONSTRAINT live_snapshots_client_instance_id_fkey
+      FOREIGN KEY (client_instance_id) REFERENCES client_instances(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'live_snapshots_account_id_fkey') THEN
+    ALTER TABLE live_snapshots
+      ADD CONSTRAINT live_snapshots_account_id_fkey
+      FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_profiles_user_id_fkey') THEN
+    ALTER TABLE client_profiles
+      ADD CONSTRAINT client_profiles_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_profiles_proxy_id_fkey') THEN
+    ALTER TABLE client_profiles
+      ADD CONSTRAINT client_profiles_proxy_id_fkey
+      FOREIGN KEY (default_proxy_id) REFERENCES proxies(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_profiles_workflow_id_fkey') THEN
+    ALTER TABLE client_profiles
+      ADD CONSTRAINT client_profiles_workflow_id_fkey
+      FOREIGN KEY (default_workflow_id) REFERENCES workflows(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instances_user_id_fkey') THEN
+    ALTER TABLE client_instances
+      ADD CONSTRAINT client_instances_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instances_device_id_fkey') THEN
+    ALTER TABLE client_instances
+      ADD CONSTRAINT client_instances_device_id_fkey
+      FOREIGN KEY (companion_device_id) REFERENCES companion_devices(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instances_profile_id_fkey') THEN
+    ALTER TABLE client_instances
+      ADD CONSTRAINT client_instances_profile_id_fkey
+      FOREIGN KEY (client_profile_id) REFERENCES client_profiles(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instances_account_id_fkey') THEN
+    ALTER TABLE client_instances
+      ADD CONSTRAINT client_instances_account_id_fkey
+      FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instances_proxy_id_fkey') THEN
+    ALTER TABLE client_instances
+      ADD CONSTRAINT client_instances_proxy_id_fkey
+      FOREIGN KEY (proxy_id) REFERENCES proxies(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instance_events_user_id_fkey') THEN
+    ALTER TABLE client_instance_events
+      ADD CONSTRAINT client_instance_events_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instance_events_instance_id_fkey') THEN
+    ALTER TABLE client_instance_events
+      ADD CONSTRAINT client_instance_events_instance_id_fkey
+      FOREIGN KEY (client_instance_id) REFERENCES client_instances(id) ON DELETE CASCADE;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflows_user_id_fkey') THEN
     ALTER TABLE workflows
       ADD CONSTRAINT workflows_user_id_fkey
@@ -815,6 +950,16 @@ BEGIN
     ALTER TABLE companion_jobs
       ADD CONSTRAINT companion_jobs_run_id_fkey
       FOREIGN KEY (workflow_run_id) REFERENCES workflow_runs(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_client_profile_id_fkey') THEN
+    ALTER TABLE companion_jobs
+      ADD CONSTRAINT companion_jobs_client_profile_id_fkey
+      FOREIGN KEY (client_profile_id) REFERENCES client_profiles(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_client_instance_id_fkey') THEN
+    ALTER TABLE companion_jobs
+      ADD CONSTRAINT companion_jobs_client_instance_id_fkey
+      FOREIGN KEY (client_instance_id) REFERENCES client_instances(id) ON DELETE SET NULL;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_account_id_fkey') THEN
     ALTER TABLE companion_jobs

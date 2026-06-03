@@ -6,6 +6,7 @@
       <h2>Discord Users</h2>
     </div>
   </div>
+  <p class="muted">Admin Management only. User counts are high-level; secrets remain encrypted and are not visible here.</p>
   <table>
     <thead>
       <tr>
@@ -16,7 +17,7 @@
         <th>Subscription</th>
         <th>Created</th>
         <th>Last Login</th>
-        <th>Data</th>
+        <th>Workspace Counts</th>
         <th>Save</th>
       </tr>
     </thead>
@@ -54,7 +55,12 @@
           </td>
           <td><%= new Date(item.created_at).toLocaleString() %></td>
           <td><%= item.last_login_at ? new Date(item.last_login_at).toLocaleString() : 'Never' %></td>
-          <td><%= item.account_count %> accounts<br><span class="muted"><%= item.proxy_count %> proxies</span></td>
+          <td>
+            <%= item.account_count %> accounts<br>
+            <span class="muted"><%= item.proxy_count %> proxies</span><br>
+            <span class="muted"><%= item.companion_count || 0 %> devices</span><br>
+            <span class="muted"><%= item.client_count || 0 %> clients</span>
+          </td>
           <td>
             <form id="user-<%= item.id %>" method="post" action="/admin/users/<%= item.id %>">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">

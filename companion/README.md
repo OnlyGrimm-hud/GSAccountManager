@@ -10,11 +10,16 @@ Current status:
 - local device token storage
 - heartbeat placeholder
 - job polling and job status reporting placeholders
-- manual local status reporting placeholder
+- Windows process/window title detection using normal OS APIs
+- client status reporting to GS Account Manager
+- local-only launch profile storage
+- visible user-triggered executable launch
 - no browser automation implementation yet
+- selected-window screenshot upload is placeholder-only
 - no CAPTCHA, MFA, security-check, or anti-abuse bypass
 - no hidden automation
 - no automatic sensitive form submission
+- no process injection, memory reading, client hooks, or gameplay scripts
 
 Planned local-only features:
 
@@ -22,8 +27,7 @@ Planned local-only features:
 - isolated local profile
 - selected proxy display
 - user-triggered field fill
-- process/window status detection
-- optional snapshots only when enabled by the user
+- selected-window snapshots only when enabled by the user
 
 Commands:
 

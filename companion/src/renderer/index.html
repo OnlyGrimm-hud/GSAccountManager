@@ -20,9 +20,9 @@
     <nav class="tabs" aria-label="Companion tabs">
       <button class="active" data-tab-button="pair">Pair Device</button>
       <button data-tab-button="status">Status</button>
-      <button data-tab-button="jobs">Jobs</button>
-      <button data-tab-button="clients">Detected Clients</button>
-      <button data-tab-button="browser">Controlled Browser</button>
+      <button data-tab-button="clients">Clients</button>
+      <button data-tab-button="profiles">Launch Profiles</button>
+      <button data-tab-button="browser">Browser Assist</button>
       <button data-tab-button="settings">Settings</button>
       <button data-tab-button="logs">Logs</button>
     </nav>
@@ -43,13 +43,10 @@
         <p><span>Heartbeat</span><strong id="statusHeartbeat">Not sent</strong></p>
       </div>
       <button id="heartbeatButton">Send Heartbeat Placeholder</button>
-    </section>
-
-    <section class="panel" data-tab-panel="jobs" hidden>
-      <h2>Queued / Running Jobs</h2>
       <p>Jobs come from GS Account Manager workflows and must run in a visible browser. Security checks pause for manual completion.</p>
       <div class="actions">
         <button id="fetchJobButton">Fetch Next Job</button>
+        <button id="runLaunchJobButton">Run Current Launch Job</button>
         <button id="markRunningButton">Mark Running</button>
         <button id="markWaitingButton">Pause For Manual Check</button>
         <button id="markCompleteButton">Mark Complete</button>
@@ -60,15 +57,39 @@
 
     <section class="panel" data-tab-panel="clients" hidden>
       <h2>Detected Clients</h2>
-      <p>Local client detection is scaffolded only. Future detection will require user permission and will report allowed client open/closed status only.</p>
-      <button id="sendStatusButton">Send Manual Status Placeholder</button>
-      <pre>No client status reported yet.</pre>
+      <p>Client detection enumerates normal Windows process names and window titles only. It does not inject, hook, read memory, or control clients.</p>
+      <label>Allowed process/window names <input id="processNames" value="RuneLite,Jagex Launcher,JagexLauncher,osclient,DreamBot"></label>
+      <div class="actions">
+        <button id="detectClientsButton">Detect Local Clients</button>
+        <button id="sendStatusButton">Send Status Update</button>
+        <button id="stopTrackingButton">Stop Tracking Placeholder</button>
+        <button id="takeSnapshotButton">Take Snapshot Placeholder</button>
+      </div>
+      <pre id="clientsOutput">No clients detected.</pre>
+    </section>
+
+    <section class="panel" data-tab-panel="profiles" hidden>
+      <h2>Launch Profiles</h2>
+      <p>Executable paths are local to this PC and are stored only in this Companion app. Launching is user-triggered and visible.</p>
+      <label>Profile name <input id="localProfileName" placeholder="RuneLite main"></label>
+      <label>Executable path <input id="localExecutablePath" placeholder="C:\\Path\\To\\Client.exe"></label>
+      <label>Launch arguments <input id="localLaunchArgs" placeholder="Optional user-provided args"></label>
+      <div class="actions">
+        <button id="saveProfileButton">Save Local Profile</button>
+        <button id="launchProfileButton">Launch Local Profile</button>
+      </div>
+      <pre id="profilesOutput">No local launch profile saved.</pre>
     </section>
 
     <section class="panel" data-tab-panel="browser" hidden>
-      <h2>Controlled Browser</h2>
+      <h2>Browser Assist</h2>
       <p>Planned manual helper actions require the user to choose an account and click Fill current page. This build does not perform automatic website login, account creation, CAPTCHA solving, or auto-submit.</p>
-      <button disabled>Fill Current Page Placeholder</button>
+      <div class="actions">
+        <button disabled>Open Controlled Browser Placeholder</button>
+        <button disabled>Fill Visible Login Fields Placeholder</button>
+        <button disabled>Pause For Manual Check</button>
+        <button disabled>Continue After Manual Step</button>
+      </div>
       <pre>Complete CAPTCHA manually, then continue.</pre>
     </section>
 

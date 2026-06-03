@@ -1,0 +1,174 @@
+<%- include('partials/head') %>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">My Workspace</p>
+      <h2>Clients / Instances</h2>
+    </div>
+    <div class="actions">
+      <a class="button" href="/companion">Companion</a>
+      <a class="button" href="/downloads">Downloads</a>
+    </div>
+  </div>
+  <% if (query.launch_job) { %><p class="notice">Launch job queued: <%= query.launch_job %>. Open GS Companion to accept it.</p><% } %>
+  <% if (query.snapshot_job) { %><p class="notice">Snapshot job queued: <%= query.snapshot_job %>. The companion must be paired and screenshots must be enabled.</p><% } %>
+  <% if (!helper.connected) { %><p class="notice">Connect GS Companion to detect and launch local clients.</p><% } %>
+  <p class="muted">This page tracks user-reported local client windows and launch jobs. It does not inject into clients, read memory, run gameplay scripts, or bypass security checks.</p>
+</section>
+
+<section class="metric-grid dashboard-metrics">
+  <article class="metric"><span>Connected companion devices</span><strong><%= stats.connected_devices || 0 %></strong></article>
+  <article class="metric"><span>Running clients</span><strong><%= stats.running_clients || 0 %></strong></article>
+  <article class="metric"><span>Stopped clients</span><strong><%= stats.stopped_clients || 0 %></strong></article>
+  <article class="metric"><span>Launch profiles</span><strong><%= profiles.length %></strong></article>
+  <article class="metric"><span>Active jobs</span><strong><%= stats.active_jobs || 0 %></strong></article>
+  <article class="metric"><span>Last snapshot</span><strong><%= snapshot ? new Date(snapshot.created_at).toLocaleDateString() : 'None' %></strong></article>
+  <article class="metric"><span>Snapshots</span><strong><%= settings.allow_companion_snapshots === 'true' ? 'Enabled' : 'Off' %></strong></article>
+</section>
+
+<section class="content-grid">
+  <form class="panel form-grid" method="post" action="/clients/profiles">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Client Launcher</p>
+        <h2>New Client Profile</h2>
+      </div>
+      <button class="button primary">Create Profile</button>
+    </div>
+    <label>Profile name<input name="name" placeholder="RuneLite main"></label>
+    <label>Client type<select name="client_type"><% clientTypes.forEach(type => { %><option value="<%= type %>"><%= type.replace(/_/g, ' ') %></option><% }) %></select></label>
+    <label>Default proxy<select name="default_proxy_id"><option value="">No default proxy</option><% proxies.forEach(proxy => { %><option value="<%= proxy.id %>"><%= proxy.name || `${proxy.host}:${proxy.port}` %> - <%= proxy.proxy_type %></option><% }) %></select></label>
+    <label>Default workflow<select name="default_workflow_id"><option value="">No default workflow</option><% workflows.forEach(workflow => { %><option value="<%= workflow.id %>"><%= workflow.name %></option><% }) %></select></label>
+    <label>Launch args template<textarea name="launch_args" placeholder="Optional user-provided launch args. Do not include secrets."></textarea></label>
+    <label>Notes<textarea name="notes" placeholder="Local reminder for this client profile"></textarea></label>
+    <p class="notice">Executable paths are configured locally inside GS Companion. Website profiles only store the safe profile metadata and optional encrypted launch args template.</p>
+  </form>
+
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Latest Snapshot</p>
+        <h2>Live Status Preview</h2>
+      </div>
+      <span class="tag"><%= settings.allow_companion_snapshots === 'true' ? 'Opt-in enabled' : 'Disabled' %></span>
+    </div>
+    <% if (snapshot) { %>
+      <p class="row-line"><span>Created</span><strong><%= new Date(snapshot.created_at).toLocaleString() %></strong></p>
+      <p class="row-line"><span>Window</span><strong><%= snapshot.window_title || snapshot.instance_name || snapshot.process_name || 'Selected window' %></strong></p>
+      <p class="row-line"><span>Size</span><strong><%= snapshot.file_size || 0 %> bytes</strong></p>
+    <% } else { %>
+      <p class="muted">No snapshots yet.</p>
+    <% } %>
+    <p class="muted">Admin views do not show user snapshots by default. Screenshots require opt-in on both the website and companion device.</p>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Client Profiles</p>
+      <h2>Launch Profiles</h2>
+    </div>
+    <span class="tag"><%= profiles.length %> profile(s)</span>
+  </div>
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>Defaults</th><th>Enabled</th><th>Launch</th><th>Save</th></tr></thead>
+    <tbody>
+      <% profiles.forEach(profile => { %>
+        <tr>
+          <td><input class="table-input" form="profile-<%= profile.id %>" name="name" value="<%= profile.name %>"></td>
+          <td><select form="profile-<%= profile.id %>" name="client_type"><% clientTypes.forEach(type => { %><option value="<%= type %>" <%= profile.client_type === type ? 'selected' : '' %>><%= type.replace(/_/g, ' ') %></option><% }) %></select></td>
+          <td>
+            <select form="profile-<%= profile.id %>" name="default_proxy_id"><option value="">No default proxy</option><% proxies.forEach(proxy => { %><option value="<%= proxy.id %>" <%= Number(profile.default_proxy_id) === Number(proxy.id) ? 'selected' : '' %>><%= proxy.name || `${proxy.host}:${proxy.port}` %></option><% }) %></select>
+            <select form="profile-<%= profile.id %>" name="default_workflow_id"><option value="">No default workflow</option><% workflows.forEach(workflow => { %><option value="<%= workflow.id %>" <%= Number(profile.default_workflow_id) === Number(workflow.id) ? 'selected' : '' %>><%= workflow.name %></option><% }) %></select>
+          </td>
+          <td><input form="profile-<%= profile.id %>" type="hidden" name="enabled" value="no"><label class="check"><input form="profile-<%= profile.id %>" type="checkbox" name="enabled" value="yes" <%= profile.enabled ? 'checked' : '' %>> enabled</label></td>
+          <td>
+            <form method="post" action="/clients/profiles/<%= profile.id %>/launch">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <select name="companion_device_id"><option value="">Any device</option><% devices.forEach(device => { %><option value="<%= device.id %>"><%= device.device_name || `Device ${device.id}` %></option><% }) %></select>
+              <select name="account_id"><option value="">No account</option><% accounts.forEach(account => { %><option value="<%= account.id %>"><%= account.display_name || account.legacy_login || account.username %></option><% }) %></select>
+              <select name="proxy_id"><option value="">Profile/account proxy</option><% proxies.forEach(proxy => { %><option value="<%= proxy.id %>"><%= proxy.name || `${proxy.host}:${proxy.port}` %></option><% }) %></select>
+              <button class="button small">Launch Client</button>
+            </form>
+          </td>
+          <td>
+            <form id="profile-<%= profile.id %>" method="post" action="/clients/profiles/<%= profile.id %>">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <textarea name="launch_args" placeholder="Leave blank to keep existing encrypted launch args"></textarea>
+              <textarea name="notes" placeholder="Notes"><%= profile.notes || '' %></textarea>
+              <button class="button small">Save</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+      <% if (!profiles.length) { %><tr><td colspan="6"><p class="muted">No launch profiles.</p></td></tr><% } %>
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Live Status</p>
+      <h2>Client Instances</h2>
+    </div>
+    <span class="tag"><%= instances.length %> instance(s)</span>
+  </div>
+  <table>
+    <thead><tr><th>Client/Profile</th><th>Account</th><th>Proxy</th><th>Device</th><th>Status</th><th>Window</th><th>Last Seen</th><th>Actions</th></tr></thead>
+    <tbody>
+      <% instances.forEach(instance => { %>
+        <tr>
+          <td><strong><%= instance.instance_name || instance.profile_name || instance.process_name || 'Client Instance' %></strong><br><span class="muted"><%= instance.process_name || '' %> <%= instance.process_id ? `PID ${instance.process_id}` : '' %></span></td>
+          <td><%= instance.account_display_name || instance.account_legacy_login || instance.account_username || 'Unassigned' %></td>
+          <td><%= instance.proxy_name || (instance.proxy_host ? `${mask(instance.proxy_host)}:${instance.proxy_port}` : 'No proxy') %></td>
+          <td><%= instance.device_name || 'Companion' %></td>
+          <td><span class="status <%= instance.status %>"><%= instance.status %></span><br><span class="muted"><%= instance.current_activity || '' %></span></td>
+          <td><%= instance.window_title || '' %></td>
+          <td><%= instance.last_seen_at ? new Date(instance.last_seen_at).toLocaleString() : 'Never' %></td>
+          <td class="actions">
+            <form method="post" action="/clients/instances/<%= instance.id %>/attach">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <select name="account_id"><option value="">No account</option><% accounts.forEach(account => { %><option value="<%= account.id %>" <%= Number(instance.account_id) === Number(account.id) ? 'selected' : '' %>><%= account.display_name || account.legacy_login || account.username %></option><% }) %></select>
+              <select name="proxy_id"><option value="">No proxy</option><% proxies.forEach(proxy => { %><option value="<%= proxy.id %>" <%= Number(instance.proxy_id) === Number(proxy.id) ? 'selected' : '' %>><%= proxy.name || `${proxy.host}:${proxy.port}` %></option><% }) %></select>
+              <button class="button small">Attach</button>
+            </form>
+            <form method="post" action="/clients/instances/<%= instance.id %>/request-snapshot">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small" <%= settings.allow_companion_snapshots === 'true' ? '' : 'disabled' %>>Request Snapshot</button>
+            </form>
+            <form method="post" action="/clients/instances/<%= instance.id %>/stop-tracking" data-confirm="Stop tracking this local client instance?">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small danger">Stop Tracking</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+      <% if (!instances.length) { %><tr><td colspan="8"><p class="muted">No clients detected.</p></td></tr><% } %>
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Recent Client Jobs</h2>
+    <span class="tag"><%= jobs.length %> job(s)</span>
+  </div>
+  <table>
+    <thead><tr><th>Created</th><th>Type</th><th>Target</th><th>Status</th></tr></thead>
+    <tbody>
+      <% jobs.forEach(job => { %>
+        <tr>
+          <td><%= new Date(job.created_at).toLocaleString() %></td>
+          <td><%= job.job_type.replace(/_/g, ' ') %></td>
+          <td><%= job.profile_name || job.instance_name || 'Companion' %></td>
+          <td><span class="status <%= job.status %>"><%= job.status %></span></td>
+        </tr>
+      <% }) %>
+      <% if (!jobs.length) { %><tr><td colspan="4"><p class="muted">No active jobs.</p></td></tr><% } %>
+    </tbody>
+  </table>
+</section>
+<%- include('partials/foot') %>

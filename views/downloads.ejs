@@ -29,12 +29,28 @@
       <li>Install the Windows companion when the package is released.</li>
       <li>Enter the pairing code in the local app.</li>
       <li>Confirm the website shows the device as connected.</li>
+      <li>Open Clients / Instances to review client status and launch jobs.</li>
     </ol>
     <div class="notice">
       <strong>Packaging commands</strong>
       <p class="muted">From the companion folder: npm install, npm start, npm run build, npm run package.</p>
     </div>
-    <p class="muted">The companion foundation currently supports pairing, heartbeat, job polling, and job status reporting. Controlled browser fill remains user-triggered and manual-check safe.</p>
+    <p class="muted">The companion foundation supports pairing, heartbeat, job polling, visible launcher placeholders, Windows process/window detection, and job status reporting. Controlled browser fill remains user-triggered and manual-check safe.</p>
   </article>
+</section>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Changelog Placeholder</p>
+      <h2>GS Companion v<%= appVersion %></h2>
+    </div>
+    <span class="tag"><%= download.available ? 'Available' : 'Coming Soon' %></span>
+  </div>
+  <ul class="helper-list">
+    <li>Pair Device, Status, Clients, Launch Profiles, Browser Assist, Settings, and Logs tabs.</li>
+    <li>Local executable paths are stored in Companion local settings.</li>
+    <li>Client detection uses normal OS process/window enumeration when available.</li>
+    <li>No gameplay automation, CAPTCHA bypass, hidden automation, or client injection.</li>
+  </ul>
 </section>
 <%- include('partials/foot') %>

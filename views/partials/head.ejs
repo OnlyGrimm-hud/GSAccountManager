@@ -12,17 +12,26 @@
   <aside class="sidebar">
     <a class="brand" href="/"><span>GS</span><strong><%= appName %></strong></a>
     <nav>
+      <p class="nav-label">My Workspace</p>
       <a class="<%= path === '/' ? 'active' : '' %>" href="/">Dashboard</a>
       <a class="<%= path.startsWith('/accounts') ? 'active' : '' %>" href="/accounts">Accounts</a>
       <a class="<%= path.startsWith('/proxies') ? 'active' : '' %>" href="/proxies">Proxies</a>
       <% if (hasFullAccess) { %>
         <a class="<%= path.startsWith('/workflow') ? 'active' : '' %>" href="/workflows">Workflows</a>
+        <a class="<%= path.startsWith('/clients') || path.startsWith('/instances') ? 'active' : '' %>" href="/clients">Clients / Instances</a>
         <a class="<%= path.startsWith('/companion') || path.startsWith('/local-helper') ? 'active' : '' %>" href="/companion">Companion</a>
         <a class="<%= path.startsWith('/downloads') ? 'active' : '' %>" href="/downloads">Downloads</a>
       <% } %>
       <a class="<%= path.startsWith('/logs') ? 'active' : '' %>" href="/logs">Logs</a>
       <% if (hasFullAccess) { %><a class="<%= path.startsWith('/settings') ? 'active' : '' %>" href="/settings">Settings</a><% } %>
-      <% if (isAdmin) { %><a class="<%= path.startsWith('/admin') ? 'active' : '' %>" href="/admin">Admin</a><% } %>
+      <% if (isAdmin) { %>
+        <p class="nav-label">Admin Management</p>
+        <a class="<%= path === '/admin' ? 'active' : '' %>" href="/admin">Admin Dashboard</a>
+        <a class="<%= path.startsWith('/admin/users') ? 'active' : '' %>" href="/admin/users">Users</a>
+        <a class="<%= path.startsWith('/admin/logs') ? 'active' : '' %>" href="/admin/logs">Platform Logs</a>
+        <a class="<%= path.startsWith('/admin/system') ? 'active' : '' %>" href="/admin/system">System Health</a>
+        <a class="<%= path.startsWith('/admin/subscriptions') ? 'active' : '' %>" href="/admin/subscriptions">Subscription Controls</a>
+      <% } %>
     </nav>
   </aside>
   <main class="shell">

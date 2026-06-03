@@ -1,0 +1,40 @@
+<%- include('../partials/head') %>
+<% const statusMap = Object.fromEntries(counts.map(row => [row.subscription_status, row.count])); %>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Admin Management</p>
+      <h2>Subscription Controls</h2>
+    </div>
+    <a class="button primary" href="/admin/users">Manage Users</a>
+  </div>
+  <p class="muted">Payment processing is not connected yet. For now, subscriptions are manual/admin-controlled through user status changes.</p>
+</section>
+
+<section class="metric-grid">
+  <% subscriptionStatuses.forEach(status => { %>
+    <article class="metric"><span><%= status %></span><strong><%= statusMap[status] || 0 %></strong></article>
+  <% }) %>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <p class="eyebrow">Placeholder</p>
+    <h2>Future Subscription Handling</h2>
+    <p class="muted">This section is reserved for manual subscription review, crypto/payment confirmations, release access, and billing status notes.</p>
+    <div class="checklist-grid">
+      <% paymentMethods.forEach(method => { %>
+        <p class="row-line"><span><%= method %></span><strong>Placeholder</strong></p>
+      <% }) %>
+    </div>
+  </article>
+  <article class="panel">
+    <p class="eyebrow">Current Rule</p>
+    <h2>Access Gating</h2>
+    <p class="row-line"><span>Admin</span><strong>Full access</strong></p>
+    <p class="row-line"><span>Active/trial</span><strong>Full access</strong></p>
+    <p class="row-line"><span>Inactive/expired</span><strong>Export-only</strong></p>
+    <p class="row-line"><span>Banned/disabled</span><strong>Locked</strong></p>
+  </article>
+</section>
+<%- include('../partials/foot') %>

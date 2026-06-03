@@ -1,0 +1,65 @@
+<%- include('../partials/head') %>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Admin Management</p>
+      <h2>Platform Logs</h2>
+    </div>
+    <a class="button" href="/logs">My Workspace Logs</a>
+  </div>
+  <p class="muted">Platform logs show safe activity and audit details across users. Secrets, tokens, passwords, OTP values, cookies, and raw encrypted values are not logged here.</p>
+  <form class="filters log-filters" method="get">
+    <input name="q" value="<%= filters.q || '' %>" placeholder="Search safe log text">
+    <select name="action"><option value="">All actions</option><% actions.forEach(action => { %><option value="<%= action %>" <%= filters.action === action ? 'selected' : '' %>><%= action %></option><% }) %></select>
+    <select name="entity_type"><option value="">All entities</option><% entityTypes.forEach(type => { %><option value="<%= type %>" <%= filters.entity_type === type ? 'selected' : '' %>><%= type %></option><% }) %></select>
+    <select name="date"><option value="">Any date</option><option value="today" <%= filters.date === 'today' ? 'selected' : '' %>>Today</option><option value="7d" <%= filters.date === '7d' ? 'selected' : '' %>>Last 7 days</option><option value="30d" <%= filters.date === '30d' ? 'selected' : '' %>>Last 30 days</option></select>
+    <button class="button">Filter</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Activity Logs</h2>
+    <span class="tag"><%= logs.length %> shown</span>
+  </div>
+  <table>
+    <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Entity</th><th>Message</th><th>Safe Details</th></tr></thead>
+    <tbody>
+      <% logs.forEach(log => { %>
+        <tr>
+          <td><%= new Date(log.created_at).toLocaleString() %></td>
+          <td><%= log.log_username || 'System' %></td>
+          <td><%= log.action %></td>
+          <td><%= log.entity_type || '' %><% if (log.entity_id) { %> #<%= log.entity_id %><% } %></td>
+          <td><%= log.message || '' %></td>
+          <td><code><%= JSON.stringify(log.metadata || {}) %></code></td>
+        </tr>
+      <% }) %>
+      <% if (!logs.length) { %><tr><td colspan="6"><p class="muted">No platform logs match these filters.</p></td></tr><% } %>
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Recent Audit Logs</h2>
+    <span class="tag"><%= auditLogs.length %> shown</span>
+  </div>
+  <table>
+    <thead><tr><th>Time</th><th>Actor</th><th>User</th><th>Action</th><th>Entity</th><th>Message</th></tr></thead>
+    <tbody>
+      <% auditLogs.forEach(log => { %>
+        <tr>
+          <td><%= new Date(log.created_at).toLocaleString() %></td>
+          <td><%= log.actor_name || 'System/API' %></td>
+          <td><%= log.target_name || '' %></td>
+          <td><%= log.action %></td>
+          <td><%= log.entity_type || '' %><% if (log.entity_id) { %> #<%= log.entity_id %><% } %></td>
+          <td><%= log.message || '' %></td>
+        </tr>
+      <% }) %>
+      <% if (!auditLogs.length) { %><tr><td colspan="6"><p class="muted">No audit logs yet.</p></td></tr><% } %>
+    </tbody>
+  </table>
+</section>
+<%- include('../partials/foot') %>

@@ -56,6 +56,13 @@ button, input, select, textarea { font: inherit; }
 }
 
 .sidebar nav { display: grid; gap: 6px; }
+.nav-label {
+  margin: 14px 0 4px;
+  color: var(--gold);
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 900;
+}
 .sidebar nav a {
   width: 100%;
   padding: 12px 14px;
@@ -205,9 +212,9 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
   text-transform: capitalize;
 }
 .status.upgraded, .status.works, .status.ready { color: var(--ok); border-color: rgba(68, 209, 157, .35); }
-.status.online, .status.exported { color: var(--ok); border-color: rgba(68, 209, 157, .35); }
-.status.blocked { color: var(--danger); border-color: rgba(255, 107, 122, .35); }
-.status.needs_review, .status.review, .status.archived { color: var(--gold); border-color: rgba(214, 168, 79, .35); }
+.status.online, .status.exported, .status.connected, .status.running, .status.detected { color: var(--ok); border-color: rgba(68, 209, 157, .35); }
+.status.blocked, .status.crashed, .status.failed, .status.banned { color: var(--danger); border-color: rgba(255, 107, 122, .35); }
+.status.needs_review, .status.review, .status.archived, .status.launching, .status.queued, .status.accepted, .status.paused, .status.waiting_for_user { color: var(--gold); border-color: rgba(214, 168, 79, .35); }
 .status.ready, .status.review { text-transform: uppercase; font-size: 12px; }
 .notice {
   padding: 12px;

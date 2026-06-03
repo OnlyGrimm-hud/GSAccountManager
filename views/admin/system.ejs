@@ -1,0 +1,42 @@
+<%- include('../partials/head') %>
+<% const deviceMap = Object.fromEntries(devices.map(row => [row.status, row.count])); %>
+<% const clientMap = Object.fromEntries(clients.map(row => [row.status, row.count])); %>
+<% const jobMap = Object.fromEntries(jobs.map(row => [row.status, row.count])); %>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Admin Management</p>
+      <h2>System Health</h2>
+    </div>
+    <span class="tag">v<%= appVersion %></span>
+  </div>
+  <p class="muted">High-level platform counts only. Admin pages do not decrypt user account, proxy, OTP, or recovery credentials.</p>
+</section>
+
+<section class="metric-grid">
+  <article class="metric"><span>Users</span><strong><%= users.total || 0 %></strong></article>
+  <article class="metric"><span>Accounts</span><strong><%= accounts.total || 0 %></strong></article>
+  <article class="metric"><span>Proxies</span><strong><%= proxies.total || 0 %></strong></article>
+  <article class="metric"><span>Connected devices</span><strong><%= deviceMap.connected || 0 %></strong></article>
+  <article class="metric"><span>Running clients</span><strong><%= (clientMap.running || 0) + (clientMap.detected || 0) + (clientMap.launching || 0) %></strong></article>
+  <article class="metric"><span>Queued jobs</span><strong><%= (jobMap.queued || 0) + (jobMap.accepted || 0) + (jobMap.running || 0) %></strong></article>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <p class="eyebrow">Render</p>
+    <h2>Runtime</h2>
+    <p class="row-line"><span>Node env</span><strong><%= config.nodeEnv %></strong></p>
+    <p class="row-line"><span>Cookie secure</span><strong><%= config.cookieSecure ? 'enabled' : 'disabled' %></strong></p>
+    <p class="row-line"><span>Auth mode</span><strong><%= config.authMode %></strong></p>
+    <p class="row-line"><span>Health path</span><strong>/healthz</strong></p>
+  </article>
+  <article class="panel">
+    <p class="eyebrow">Snapshots</p>
+    <h2>Live Snapshot Storage</h2>
+    <p class="row-line"><span>Total snapshots</span><strong><%= snapshots.total || 0 %></strong></p>
+    <p class="row-line"><span>Latest snapshot</span><strong><%= snapshots.latest ? new Date(snapshots.latest).toLocaleString() : 'None' %></strong></p>
+    <p class="muted">Snapshots are user-owned and opt-in. Admins see counts here, not user image data.</p>
+  </article>
+</section>
+<%- include('../partials/foot') %>
