@@ -449,7 +449,7 @@ app.post('/api/companion/jobs/:id/status', companionLimiter, async (req, res, ne
     const runStatus = workflowRunStatusFromJob(status);
     await db.query(
       `UPDATE companion_jobs
-       SET status=$1, result=COALESCE($2, result), updated_at=NOW(), completed_at=CASE WHEN $3 THEN NOW() ELSE completed_at END
+       SET status=$1, result=COALESCE($2, result), safe_result_json=COALESCE($2, safe_result_json), updated_at=NOW(), completed_at=CASE WHEN $3 THEN NOW() ELSE completed_at END
        WHERE id=$4 AND user_id=$5`,
       [status, safeJobResult(req.body.result || {}), completed, job.id, device.user_id]
     );
@@ -538,7 +538,7 @@ app.post('/logout', requireAuth, async (req, res, next) => {
 });
 
 app.get('/locked', requireAuth, (req, res) => {
-  if (!isBlockedUser(req.currentUserRecord)) return res.redirect('/');
+  if (hasFullAppAccess(req.currentUserRecord) && !isBlockedUser(req.currentUserRecord)) return res.redirect('/');
   res.status(403).render('locked', { title: 'Access Locked', lockedShell: true });
 });
 
@@ -821,9 +821,16 @@ app.get('/', requireAuth, async (req, res, next) => {
       db.query(
         `SELECT
           (SELECT COUNT(*)::int FROM accounts WHERE user_id=$1) total_accounts,
+          (SELECT COUNT(*)::int FROM accounts WHERE user_id=$1 AND archived_at IS NULL AND status NOT IN ('archived','locked','invalid','banned_temp','banned_perm')) active_accounts,
+          (SELECT COUNT(*)::int FROM accounts WHERE user_id=$1 AND status='locked') locked_accounts,
+          (SELECT COUNT(*)::int FROM accounts WHERE user_id=$1 AND status='invalid') invalid_accounts,
+          (SELECT COUNT(*)::int FROM accounts WHERE user_id=$1 AND status='banned_temp') banned_temp_accounts,
+          (SELECT COUNT(*)::int FROM accounts WHERE user_id=$1 AND status='banned_perm') banned_perm_accounts,
           (SELECT COUNT(*)::int FROM proxies WHERE user_id=$1) total_proxies,
           (SELECT COUNT(*)::int FROM workflow_runs WHERE user_id=$1 AND status IN ('queued','running','paused','waiting_for_user')) active_workflows,
-          (SELECT COUNT(*)::int FROM companion_devices WHERE user_id=$1 AND status='connected') connected_companions`,
+          (SELECT COUNT(*)::int FROM companion_devices WHERE user_id=$1 AND status='connected') connected_companions,
+          (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1 AND status IN ('pending','launching','running','scanning','detected')) running_instances,
+          (SELECT COUNT(*)::int FROM companion_jobs WHERE user_id=$1 AND status IN ('queued','accepted','running','paused','waiting_for_user')) pending_jobs`,
         [userId]
       ),
       db.query(`SELECT * FROM export_logs WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1`, [userId])
@@ -868,9 +875,19 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
       account_type: escapeText(req.query.account_type),
       status: escapeText(req.query.status),
       category: escapeText(req.query.category),
+      character_type: escapeText(req.query.character_type),
       country_code: escapeText(req.query.country_code),
       has_proxy: escapeText(req.query.has_proxy),
       has_otp: escapeText(req.query.has_otp),
+      has_notes: escapeText(req.query.has_notes),
+      completed_tutorial: escapeText(req.query.completed_tutorial),
+      has_active_instance: escapeText(req.query.has_active_instance),
+      verified: escapeText(req.query.verified),
+      authenticator: escapeText(req.query.authenticator),
+      bans: escapeText(req.query.bans),
+      min_total_level: escapeText(req.query.min_total_level),
+      max_total_level: escapeText(req.query.max_total_level),
+      sort_by: escapeText(req.query.sort_by),
       created_date: escapeText(req.query.created_date),
       archived: escapeText(req.query.archived)
     };
@@ -884,11 +901,32 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
     if (accountTypes.includes(filters.account_type)) add('a.account_type = ?', filters.account_type);
     if (accountStatuses.includes(filters.status)) add('a.status = ?', filters.status);
     if (filters.category) add('a.category ILIKE ?', filters.category);
+    if (filters.character_type) {
+      params.push(`%${filters.character_type}%`);
+      clauses.push(`(a.character_type ILIKE $${params.length} OR a.category ILIKE $${params.length})`);
+    }
     if (filters.country_code) add('a.country_code ILIKE ?', filters.country_code.toUpperCase());
     if (filters.has_proxy === 'yes') clauses.push('(a.assigned_http_proxy_id IS NOT NULL OR a.proxy_id IS NOT NULL)');
     if (filters.has_proxy === 'no') clauses.push('a.assigned_http_proxy_id IS NULL AND a.proxy_id IS NULL');
     if (filters.has_otp === 'yes') clauses.push('a.otp_secret_encrypted IS NOT NULL');
     if (filters.has_otp === 'no') clauses.push('a.otp_secret_encrypted IS NULL');
+    if (filters.has_notes === 'yes') clauses.push("(COALESCE(a.notes, '') <> '' OR a.private_notes_encrypted IS NOT NULL)");
+    if (filters.has_notes === 'no') clauses.push("COALESCE(a.notes, '') = '' AND a.private_notes_encrypted IS NULL");
+    if (filters.completed_tutorial === 'yes') clauses.push('a.completed_tutorial IS TRUE');
+    if (filters.completed_tutorial === 'no') clauses.push('a.completed_tutorial IS FALSE');
+    if (filters.has_active_instance === 'yes') clauses.push("EXISTS (SELECT 1 FROM client_instances ci2 WHERE ci2.user_id=a.user_id AND ci2.account_id=a.id AND ci2.status IN ('pending','launching','running','scanning','detected'))");
+    if (filters.has_active_instance === 'no') clauses.push("NOT EXISTS (SELECT 1 FROM client_instances ci2 WHERE ci2.user_id=a.user_id AND ci2.account_id=a.id AND ci2.status IN ('pending','launching','running','scanning','detected'))");
+    if (['yes', 'no', 'unknown'].includes(filters.verified)) add('a.verified = ?', filters.verified);
+    if (filters.authenticator === 'yes') clauses.push('a.otp_secret_encrypted IS NOT NULL');
+    if (filters.authenticator === 'no') clauses.push('a.otp_secret_encrypted IS NULL');
+    if (filters.bans === 'any') clauses.push("(a.status IN ('banned_temp','banned_perm') OR a.ban_status <> 'none')");
+    if (filters.bans === 'temp') clauses.push("(a.status='banned_temp' OR a.ban_status='temp')");
+    if (filters.bans === 'perm') clauses.push("(a.status='banned_perm' OR a.ban_status='perm')");
+    if (filters.bans === 'none') clauses.push("(a.status NOT IN ('banned_temp','banned_perm') AND a.ban_status='none')");
+    const minTotalLevel = Number(filters.min_total_level);
+    const maxTotalLevel = Number(filters.max_total_level);
+    if (Number.isFinite(minTotalLevel) && minTotalLevel >= 0) add('COALESCE(a.total_level, 0) >= ?', minTotalLevel);
+    if (Number.isFinite(maxTotalLevel) && maxTotalLevel >= 0) add('COALESCE(a.total_level, 0) <= ?', maxTotalLevel);
     if (filters.archived === 'yes') clauses.push('a.archived_at IS NOT NULL OR a.status = \'archived\'');
     if (filters.archived === 'no') clauses.push('a.archived_at IS NULL AND a.status <> \'archived\'');
     if (filters.created_date === 'today') clauses.push(`a.created_at >= CURRENT_DATE`);
@@ -896,11 +934,29 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
     if (filters.created_date === '30d') clauses.push(`a.created_at >= NOW() - INTERVAL '30 days'`);
     if (filters.created_date === 'older_30d') clauses.push(`a.created_at < NOW() - INTERVAL '30 days'`);
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-    const [rows, stats, categories, proxyCategories, countries, proxies, settings] = await Promise.all([
+    const accountSorts = {
+      updated_desc: 'a.updated_at DESC',
+      created_desc: 'a.created_at DESC',
+      username_asc: 'LOWER(COALESCE(a.legacy_login, a.username)) ASC',
+      wealth_desc: 'COALESCE(a.wealth_amount, 0) DESC',
+      gp_desc: 'COALESCE(a.gp_amount, 0) DESC',
+      total_level_desc: 'COALESCE(a.total_level, 0) DESC',
+      status_asc: 'a.status ASC, a.updated_at DESC'
+    };
+    const orderBy = accountSorts[filters.sort_by] || accountSorts.updated_desc;
+    const [rows, stats, categories, proxyCategories, countries, proxies, clientProfiles, settings] = await Promise.all([
       db.query(
-        `SELECT a.*, p.host proxy_host, p.port proxy_port, p.status proxy_status, p.proxy_type
+        `SELECT a.*, p.host proxy_host, p.port proxy_port, p.status proxy_status, p.proxy_type,
+                ci.id active_instance_id, ci.status active_instance_status, ci.window_title active_instance_window
          FROM accounts a LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id) AND p.user_id = a.user_id
-         ${where} ORDER BY a.updated_at DESC LIMIT 300`, params
+         LEFT JOIN LATERAL (
+           SELECT id, status, window_title
+           FROM client_instances
+           WHERE user_id=a.user_id AND account_id=a.id AND status IN ('pending','launching','running','scanning','detected')
+           ORDER BY last_seen_at DESC NULLS LAST, updated_at DESC
+           LIMIT 1
+         ) ci ON TRUE
+         ${where} ORDER BY ${orderBy} LIMIT 300`, params
       ),
       db.query(
         `SELECT
@@ -909,7 +965,10 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
           COUNT(*) FILTER (WHERE account_type='jagex')::int jagex,
           COUNT(*) FILTER (WHERE COALESCE(assigned_http_proxy_id, proxy_id, assigned_socks5_proxy_id) IS NOT NULL)::int with_proxy,
           COUNT(*) FILTER (WHERE COALESCE(assigned_http_proxy_id, proxy_id, assigned_socks5_proxy_id) IS NULL)::int without_proxy,
-          COUNT(*) FILTER (WHERE status='available')::int active,
+          COUNT(*) FILTER (WHERE archived_at IS NULL AND status NOT IN ('archived','locked','invalid','banned_temp','banned_perm'))::int active,
+          COUNT(*) FILTER (WHERE status IN ('banned_temp','banned_perm'))::int banned,
+          COUNT(*) FILTER (WHERE status='locked')::int locked,
+          COUNT(*) FILTER (WHERE status='invalid')::int invalid,
           COUNT(*) FILTER (WHERE status='in_progress')::int in_progress,
           COUNT(*) FILTER (WHERE status='completed')::int completed,
           COUNT(*) FILTER (WHERE status='archived' OR archived_at IS NOT NULL)::int archived
@@ -920,6 +979,7 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
       db.query(`SELECT DISTINCT category FROM proxies WHERE user_id=$1 AND category IS NOT NULL AND category <> '' ORDER BY category`, [userId]),
       db.query(`SELECT DISTINCT country_code FROM accounts WHERE user_id=$1 AND country_code IS NOT NULL AND country_code <> '' ORDER BY country_code`, [userId]),
       db.query(`SELECT id, name, proxy_type, host, port, status FROM proxies WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200`, [userId]),
+      db.query(`SELECT id, name FROM client_profiles WHERE user_id=$1 AND enabled IS TRUE ORDER BY updated_at DESC LIMIT 50`, [userId]),
       getSettings(userId)
     ]);
     res.render('accounts/index', {
@@ -930,6 +990,7 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
       proxyCategories: proxyCategories.rows.map(row => row.category),
       countries: countries.rows.map(row => row.country_code),
       proxies: proxies.rows,
+      clientProfiles: clientProfiles.rows,
       filters,
       settings,
       query: req.query,
@@ -1012,10 +1073,14 @@ app.post('/accounts/export', requireAuth, async (req, res, next) => {
     const filename = `gs-accounts-${new Date().toISOString().slice(0, 10)}.txt`;
     const postExportAction = escapeText(req.body.post_export_action || 'keep');
     if (hasLimitedAccess(req.currentUserRecord) && postExportAction !== 'keep') {
-      throw new Error('Limited access can export data, but cannot archive or delete records after export.');
+      throw new Error('Private-build access is not active for this account.');
     }
     const deleteAfterExport = req.body.delete_after_export === 'yes' || postExportAction === 'delete';
     const confirmDelete = req.body.confirm_delete_after_export === 'yes';
+    const confirmDeleteText = escapeText(req.body.confirm_delete_after_export_text || req.body.delete_confirm_text);
+    if (deleteAfterExport && (!confirmDelete || confirmDeleteText !== 'DELETE')) {
+      throw new Error('Permanent delete after export requires the checkbox and typing DELETE.');
+    }
     await recordImportExportRun(userId, 'export_accounts', exportResult.rows.length, format, {
       selected_count: selectedIds.length,
       export_action: postExportAction,
@@ -1033,7 +1098,6 @@ app.post('/accounts/export', requireAuth, async (req, res, next) => {
       await activity.log(userId, 'archive_after_export', 'account', null, `Archived ${exportResult.accountIds.length} exported account(s)`, { count: exportResult.accountIds.length });
       await auditLog(userId, userId, 'archive_after_export', 'account', null, `Archived ${exportResult.accountIds.length} exported account(s)`, { count: exportResult.accountIds.length });
     } else if (deleteAfterExport) {
-      if (!confirmDelete) throw new Error('Delete after export requires the second confirmation.');
       const deleted = await db.query(
         `DELETE FROM accounts
          WHERE user_id=$1 AND id = ANY($2)
@@ -1092,10 +1156,31 @@ app.post('/accounts/bulk', requireAuth, async (req, res, next) => {
       );
       affected = result.rowCount;
       await activity.log(userId, 'bulk_assign_category_status', 'account', null, `Updated ${affected} selected account(s)`, { count: affected, status });
+    } else if (action === 'launch_selected') {
+      const profileId = req.body.bulk_client_profile_id ? Number(req.body.bulk_client_profile_id) : null;
+      if (!profileId) throw new Error('Select a client profile before launching accounts.');
+      const profile = await loadClientProfile(userId, profileId);
+      const accounts = await db.query(
+        `SELECT id, COALESCE(assigned_http_proxy_id, proxy_id, assigned_socks5_proxy_id) proxy_id
+         FROM accounts
+         WHERE user_id=$1 AND id = ANY($2) AND archived_at IS NULL`,
+        [userId, selectedIds]
+      );
+      for (const account of accounts.rows) {
+        const payload = await clientLaunchPayload(userId, profile, { accountId: Number(account.id), proxyId: account.proxy_id ? Number(account.proxy_id) : null });
+        await db.query(
+          `INSERT INTO companion_jobs (user_id, client_profile_id, account_id, proxy_id, job_type, status, payload, safe_payload_json, updated_at)
+           VALUES ($1, $2, $3, $4, 'launch_client', 'queued', $5, $5, NOW())`,
+          [userId, profile.id, account.id, account.proxy_id || null, payload]
+        );
+        affected += 1;
+      }
+      await activity.log(userId, 'bulk_client_launch_requested', 'account', null, `Queued ${affected} client launch job(s)`, { count: affected, client_profile_id: profile.id });
     } else {
       throw new Error('Unsupported bulk action.');
     }
     await auditLog(userId, userId, action, 'account', null, `Bulk account action ${action} affected ${affected} account(s)`, { count: affected });
+    if (action === 'launch_selected') return res.redirect(`/local-jobs?queued=${affected}`);
     res.redirect(`/accounts?bulk=${encodeURIComponent(action)}&affected=${affected}`);
   } catch (err) { next(err); }
 });
@@ -1363,8 +1448,8 @@ app.post('/workflows/:id/run', requireAuth, async (req, res, next) => {
     );
     const payload = await workflowJobPayload(userId, workflow, steps.rows, { accountId, proxyId, deviceId });
     const job = await db.query(
-      `INSERT INTO companion_jobs (user_id, companion_device_id, workflow_id, workflow_run_id, account_id, proxy_id, job_type, status, payload, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'workflow_run', 'queued', $7, NOW())
+      `INSERT INTO companion_jobs (user_id, companion_device_id, workflow_id, workflow_run_id, account_id, proxy_id, job_type, status, payload, safe_payload_json, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'workflow_run', 'queued', $7, $7, NOW())
        RETURNING id`,
       [userId, deviceId, workflow.id, run.rows[0].id, accountId, proxyId, payload]
     );
@@ -1406,7 +1491,90 @@ app.post('/workflow/:id/status', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-app.get('/instances', requireAuth, (req, res) => res.redirect('/clients'));
+app.get('/instances', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const [helper, settings, devices, instances, snapshot, jobs, events, accounts, proxies, workflows, stats] = await Promise.all([
+      helperStatus(userId),
+      getSettings(userId),
+      db.query(`SELECT id, device_name, companion_version, status, allow_screenshots, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId]),
+      db.query(
+        `SELECT ci.*, cp.name profile_name, a.username account_username, a.legacy_login account_legacy_login, a.display_name account_display_name,
+                p.name proxy_name, p.host proxy_host, p.port proxy_port, p.proxy_type, p.status proxy_status, d.device_name
+         FROM client_instances ci
+         LEFT JOIN client_profiles cp ON cp.id=ci.client_profile_id AND cp.user_id=ci.user_id
+         LEFT JOIN accounts a ON a.id=ci.account_id AND a.user_id=ci.user_id
+         LEFT JOIN proxies p ON p.id=ci.proxy_id AND p.user_id=ci.user_id
+         LEFT JOIN companion_devices d ON d.id=ci.companion_device_id AND d.user_id=ci.user_id
+         WHERE ci.user_id=$1
+         ORDER BY
+           CASE WHEN ci.status IN ('pending','launching','running','scanning','detected') THEN 0 ELSE 1 END,
+           ci.last_seen_at DESC NULLS LAST,
+           ci.updated_at DESC
+         LIMIT 250`,
+        [userId]
+      ),
+      db.query(
+        `SELECT s.id, s.window_title, s.mime_type, s.content_type, COALESCE(s.file_size, s.image_size) file_size, s.created_at,
+                ci.instance_name, ci.process_name
+         FROM live_snapshots s
+         LEFT JOIN client_instances ci ON ci.id=s.client_instance_id AND ci.user_id=s.user_id
+         WHERE s.user_id=$1
+         ORDER BY s.created_at DESC
+         LIMIT 1`,
+        [userId]
+      ),
+      db.query(
+        `SELECT j.*, cp.name profile_name, ci.instance_name
+         FROM companion_jobs j
+         LEFT JOIN client_profiles cp ON cp.id=j.client_profile_id AND cp.user_id=j.user_id
+         LEFT JOIN client_instances ci ON ci.id=j.client_instance_id AND ci.user_id=j.user_id
+         WHERE j.user_id=$1 AND j.job_type IN ('launch_client','stop_client','detect_clients','request_snapshot')
+         ORDER BY j.created_at DESC
+         LIMIT 20`,
+        [userId]
+      ),
+      db.query(
+        `SELECT e.*, ci.instance_name
+         FROM client_instance_events e
+         LEFT JOIN client_instances ci ON ci.id=e.client_instance_id AND ci.user_id=e.user_id
+         WHERE e.user_id=$1
+         ORDER BY e.created_at DESC
+         LIMIT 30`,
+        [userId]
+      ),
+      db.query(`SELECT id, username, legacy_login, display_name FROM accounts WHERE user_id=$1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 200`, [userId]),
+      db.query(`SELECT id, name, proxy_type, host, port, status FROM proxies WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200`, [userId]),
+      db.query(`SELECT id, name, type, status FROM workflows WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200`, [userId]),
+      db.query(
+        `SELECT
+          (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1) total_instances,
+          (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1 AND status IN ('pending','launching','running','scanning','detected')) running_instances,
+          (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1 AND status='stopped') stopped_instances,
+          (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1 AND status='crashed') crashed_instances,
+          (SELECT COUNT(*)::int FROM companion_devices WHERE user_id=$1 AND status='connected') connected_devices,
+          (SELECT COUNT(*)::int FROM companion_jobs WHERE user_id=$1 AND job_type IN ('launch_client','stop_client','detect_clients','request_snapshot') AND status IN ('queued','accepted','running','paused','waiting_for_user')) active_jobs`,
+        [userId]
+      )
+    ]);
+    res.render('instances', {
+      title: 'Instances',
+      helper,
+      settings,
+      devices: devices.rows,
+      instances: instances.rows,
+      snapshot: snapshot.rows[0] || null,
+      jobs: jobs.rows,
+      events: events.rows,
+      accounts: accounts.rows,
+      proxies: proxies.rows,
+      workflows: workflows.rows,
+      stats: stats.rows[0],
+      query: req.query,
+      mask
+    });
+  } catch (err) { next(err); }
+});
 
 app.get('/clients', requireAuth, async (req, res, next) => {
   try {
@@ -1416,8 +1584,10 @@ app.get('/clients', requireAuth, async (req, res, next) => {
       getSettings(userId),
       db.query(`SELECT id, device_name, companion_version, status, allow_screenshots, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId]),
       db.query(
-        `SELECT cp.*, p.name default_proxy_name, p.host default_proxy_host, p.port default_proxy_port, w.name default_workflow_name
+        `SELECT cp.*, p.name default_proxy_name, p.host default_proxy_host, p.port default_proxy_port, w.name default_workflow_name,
+                a.username default_account_username, a.legacy_login default_account_legacy_login, a.display_name default_account_display_name
          FROM client_profiles cp
+         LEFT JOIN accounts a ON a.id=cp.default_account_id AND a.user_id=cp.user_id
          LEFT JOIN proxies p ON p.id=cp.default_proxy_id AND p.user_id=cp.user_id
          LEFT JOIN workflows w ON w.id=cp.default_workflow_id AND w.user_id=cp.user_id
          WHERE cp.user_id=$1
@@ -1463,14 +1633,14 @@ app.get('/clients', requireAuth, async (req, res, next) => {
       db.query(
         `SELECT
           (SELECT COUNT(*)::int FROM companion_devices WHERE user_id=$1 AND status='connected') connected_devices,
-          (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1 AND status IN ('running','launching','detected')) running_clients,
+          (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1 AND status IN ('pending','running','launching','scanning','detected')) running_clients,
           (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1 AND status IN ('stopped','crashed','unknown')) stopped_clients,
           (SELECT COUNT(*)::int FROM companion_jobs WHERE user_id=$1 AND status IN ('queued','accepted','running','paused','waiting_for_user')) active_jobs`,
         [userId]
       )
     ]);
     res.render('clients', {
-      title: 'Clients / Instances',
+      title: 'Clients',
       helper,
       settings,
       devices: devices.rows,
@@ -1493,14 +1663,15 @@ app.post('/clients/profiles', requireAuth, async (req, res, next) => {
     const userId = req.currentUserId;
     const profile = await clientProfileFromBody(userId, req.body);
     const result = await db.query(
-      `INSERT INTO client_profiles (user_id, name, client_type, launch_args_encrypted, default_proxy_id, default_workflow_id, notes, enabled, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      `INSERT INTO client_profiles (user_id, name, client_type, launch_args_encrypted, default_account_id, default_proxy_id, default_workflow_id, notes, enabled, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
        RETURNING id`,
       [
         userId,
         profile.name,
         profile.client_type,
         encrypt(profile.launch_args),
+        profile.default_account_id,
         profile.default_proxy_id,
         profile.default_workflow_id,
         profile.notes,
@@ -1520,12 +1691,13 @@ app.post('/clients/profiles/:id', requireAuth, async (req, res, next) => {
     const profile = await clientProfileFromBody(userId, req.body);
     await db.query(
       `UPDATE client_profiles
-       SET name=$1, client_type=$2, launch_args_encrypted=$3, default_proxy_id=$4, default_workflow_id=$5, notes=$6, enabled=$7, updated_at=NOW()
-       WHERE id=$8 AND user_id=$9`,
+       SET name=$1, client_type=$2, launch_args_encrypted=$3, default_account_id=$4, default_proxy_id=$5, default_workflow_id=$6, notes=$7, enabled=$8, updated_at=NOW()
+       WHERE id=$9 AND user_id=$10`,
       [
         profile.name,
         profile.client_type,
         profile.launch_args ? encrypt(profile.launch_args) : existing.launch_args_encrypted,
+        profile.default_account_id,
         profile.default_proxy_id,
         profile.default_workflow_id,
         profile.notes,
@@ -1539,12 +1711,28 @@ app.post('/clients/profiles/:id', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+app.post('/clients/profiles/:id/delete', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const result = await db.query(
+      `DELETE FROM client_profiles
+       WHERE id=$1 AND user_id=$2
+       RETURNING id, name`,
+      [req.params.id, userId]
+    );
+    if (!result.rows[0]) throw new Error('Client profile not found.');
+    await activity.log(userId, 'client_profile_deleted', 'client_profile', result.rows[0].id, `Deleted client profile ${result.rows[0].name}`);
+    await auditLog(userId, userId, 'client_profile_deleted', 'client_profile', result.rows[0].id, `Deleted client profile ${result.rows[0].name}`);
+    res.redirect('/clients');
+  } catch (err) { next(err); }
+});
+
 app.post('/clients/profiles/:id/launch', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
     const profile = await loadClientProfile(userId, req.params.id);
     const deviceId = req.body.companion_device_id ? Number(req.body.companion_device_id) : null;
-    const accountId = req.body.account_id ? Number(req.body.account_id) : null;
+    const accountId = req.body.account_id ? Number(req.body.account_id) : profile.default_account_id || null;
     let proxyId = req.body.proxy_id ? Number(req.body.proxy_id) : profile.default_proxy_id || null;
     if (deviceId) await assertDeviceOwnership(userId, deviceId);
     if (accountId) await assertAccountOwnership(userId, accountId);
@@ -1555,14 +1743,14 @@ app.post('/clients/profiles/:id/launch', requireAuth, async (req, res, next) => 
     if (proxyId) await assertProxyOwnership(userId, proxyId);
     const payload = await clientLaunchPayload(userId, profile, { accountId, proxyId });
     const job = await db.query(
-      `INSERT INTO companion_jobs (user_id, companion_device_id, client_profile_id, account_id, proxy_id, job_type, status, payload, updated_at)
-       VALUES ($1, $2, $3, $4, $5, 'launch_client', 'queued', $6, NOW())
+      `INSERT INTO companion_jobs (user_id, companion_device_id, client_profile_id, account_id, proxy_id, job_type, status, payload, safe_payload_json, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'launch_client', 'queued', $6, $6, NOW())
        RETURNING id`,
       [userId, deviceId, profile.id, accountId, proxyId, payload]
     );
     await activity.log(userId, 'client_launch_requested', 'client_profile', profile.id, `Queued launch for ${profile.name}`, { companion_job_id: job.rows[0].id });
     await auditLog(userId, userId, 'client_launch_requested', 'client_profile', profile.id, `Queued launch for ${profile.name}`, { companion_job_id: job.rows[0].id });
-    res.redirect(`/clients?launch_job=${job.rows[0].id}`);
+    res.redirect(`/local-jobs?launch_job=${job.rows[0].id}`);
   } catch (err) { next(err); }
 });
 
@@ -1580,7 +1768,7 @@ app.post('/clients/instances/:id/attach', requireAuth, async (req, res, next) =>
     );
     await insertClientInstanceEvent(userId, instance.id, 'attached_account_proxy', 'Attached account/proxy to client instance.', { account_id: accountId, proxy_id: proxyId });
     await activity.log(userId, 'client_instance_attached', 'client_instance', instance.id, 'Attached account/proxy to client instance');
-    res.redirect('/clients');
+    res.redirect('/instances');
   } catch (err) { next(err); }
 });
 
@@ -1594,7 +1782,7 @@ app.post('/clients/instances/:id/stop-tracking', requireAuth, async (req, res, n
     );
     await insertClientInstanceEvent(userId, instance.id, 'stop_tracking', 'User stopped tracking this client instance.');
     await activity.log(userId, 'client_stopped_tracking', 'client_instance', instance.id, 'Stopped tracking client instance');
-    res.redirect('/clients');
+    res.redirect('/instances');
   } catch (err) { next(err); }
 });
 
@@ -1615,14 +1803,110 @@ app.post('/clients/instances/:id/request-snapshot', requireAuth, async (req, res
       }
     };
     const job = await db.query(
-      `INSERT INTO companion_jobs (user_id, companion_device_id, client_instance_id, account_id, proxy_id, job_type, status, payload, updated_at)
-       VALUES ($1, $2, $3, $4, $5, 'request_snapshot', 'queued', $6, NOW())
+      `INSERT INTO companion_jobs (user_id, companion_device_id, client_instance_id, account_id, proxy_id, job_type, status, payload, safe_payload_json, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'request_snapshot', 'queued', $6, $6, NOW())
        RETURNING id`,
       [userId, instance.companion_device_id, instance.id, instance.account_id, instance.proxy_id, payload]
     );
     await insertClientInstanceEvent(userId, instance.id, 'snapshot_requested', 'Snapshot requested by user.', { companion_job_id: job.rows[0].id });
     await activity.log(userId, 'snapshot_requested', 'client_instance', instance.id, 'Snapshot requested for client instance');
-    res.redirect(`/clients?snapshot_job=${job.rows[0].id}`);
+    res.redirect(`/instances?snapshot_job=${job.rows[0].id}`);
+  } catch (err) { next(err); }
+});
+
+app.get('/local-jobs', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const filters = {
+      status: escapeText(req.query.status),
+      job_type: escapeText(req.query.job_type)
+    };
+    const clauses = ['j.user_id=$1'];
+    const params = [userId];
+    if (companionJobStatuses.includes(filters.status)) {
+      params.push(filters.status);
+      clauses.push(`j.status=$${params.length}`);
+    }
+    if (companionJobTypes.includes(filters.job_type)) {
+      params.push(filters.job_type);
+      clauses.push(`j.job_type=$${params.length}`);
+    }
+    const where = clauses.join(' AND ');
+    const [jobs, stats, events, devices] = await Promise.all([
+      db.query(
+        `SELECT j.*, d.device_name, w.name workflow_name, wr.status workflow_run_status,
+                cp.name profile_name, ci.instance_name, a.username account_username, a.legacy_login account_legacy_login,
+                p.name proxy_name, p.host proxy_host, p.port proxy_port
+         FROM companion_jobs j
+         LEFT JOIN companion_devices d ON d.id=j.companion_device_id AND d.user_id=j.user_id
+         LEFT JOIN workflows w ON w.id=j.workflow_id AND w.user_id=j.user_id
+         LEFT JOIN workflow_runs wr ON wr.id=j.workflow_run_id AND wr.user_id=j.user_id
+         LEFT JOIN client_profiles cp ON cp.id=j.client_profile_id AND cp.user_id=j.user_id
+         LEFT JOIN client_instances ci ON ci.id=j.client_instance_id AND ci.user_id=j.user_id
+         LEFT JOIN accounts a ON a.id=j.account_id AND a.user_id=j.user_id
+         LEFT JOIN proxies p ON p.id=j.proxy_id AND p.user_id=j.user_id
+         WHERE ${where}
+         ORDER BY j.created_at DESC
+         LIMIT 200`,
+        params
+      ),
+      db.query(
+        `SELECT
+          COUNT(*)::int total,
+          COUNT(*) FILTER (WHERE status='queued')::int queued,
+          COUNT(*) FILTER (WHERE status IN ('accepted','running','paused','waiting_for_user'))::int running,
+          COUNT(*) FILTER (WHERE status='completed')::int completed,
+          COUNT(*) FILTER (WHERE status='failed')::int failed,
+          COUNT(*) FILTER (WHERE status='cancelled')::int cancelled
+         FROM companion_jobs
+         WHERE user_id=$1`,
+        [userId]
+      ),
+      db.query(
+        `SELECT e.*, j.job_type
+         FROM companion_job_events e
+         LEFT JOIN companion_jobs j ON j.id=e.companion_job_id AND j.user_id=e.user_id
+         WHERE e.user_id=$1
+         ORDER BY e.created_at DESC
+         LIMIT 80`,
+        [userId]
+      ),
+      db.query(`SELECT id, device_name, status, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId])
+    ]);
+    res.render('local-jobs', {
+      title: 'Local Jobs',
+      jobs: jobs.rows,
+      stats: stats.rows[0],
+      events: events.rows,
+      devices: devices.rows,
+      filters,
+      companionJobStatuses,
+      companionJobTypes,
+      query: req.query,
+      mask
+    });
+  } catch (err) { next(err); }
+});
+
+app.post('/local-jobs/:id/cancel', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const result = await db.query(
+      `UPDATE companion_jobs
+       SET status='cancelled', completed_at=NOW(), updated_at=NOW(), result=jsonb_set(COALESCE(result, '{}'::jsonb), '{cancelled_by}', '"user"', true), safe_result_json=jsonb_set(COALESCE(safe_result_json, '{}'::jsonb), '{cancelled_by}', '"user"', true)
+       WHERE id=$1 AND user_id=$2 AND status IN ('queued','accepted','running','paused','waiting_for_user')
+       RETURNING id, workflow_run_id, job_type`,
+      [req.params.id, userId]
+    );
+    if (!result.rows[0]) throw new Error('Local job was not found or cannot be cancelled.');
+    const job = result.rows[0];
+    if (job.workflow_run_id) {
+      await db.query(`UPDATE workflow_runs SET status='cancelled', completed_at=NOW(), updated_at=NOW() WHERE id=$1 AND user_id=$2`, [job.workflow_run_id, userId]);
+      await insertWorkflowRunEvent(userId, job.workflow_run_id, 'cancelled', 'User cancelled the local job.');
+    }
+    await insertCompanionJobEvent(userId, job.id, job.workflow_run_id, 'cancelled', 'User cancelled the local job.');
+    await activity.log(userId, 'local_job_cancelled', 'companion_job', job.id, `Cancelled local job ${job.job_type}`);
+    res.redirect('/local-jobs');
   } catch (err) { next(err); }
 });
 
@@ -1635,6 +1919,9 @@ app.get('/proxies', requireAuth, async (req, res, next) => {
         COUNT(*)::int total,
         COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM accounts a WHERE a.user_id=p.user_id AND COALESCE(a.assigned_http_proxy_id, a.proxy_id)=p.id))::int assigned,
         COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM accounts a WHERE a.user_id=p.user_id AND COALESCE(a.assigned_http_proxy_id, a.proxy_id)=p.id))::int unassigned,
+        COUNT(*) FILTER (WHERE status IN ('working','online','works'))::int working,
+        COUNT(*) FILTER (WHERE status IN ('failed','blocked','banned'))::int failed,
+        COUNT(*) FILTER (WHERE status IN ('unchecked','untested','unknown','review'))::int unchecked,
         COUNT(*) FILTER (WHERE status IN ('online','works'))::int online,
         COUNT(*) FILTER (WHERE status='blocked')::int blocked,
         COUNT(*) FILTER (WHERE status='review')::int review
@@ -1754,6 +2041,24 @@ app.post('/proxies/auto-assign', requireAuth, async (req, res, next) => {
       assigned += 1;
     }
     await activity.log(userId, 'proxies_auto_assigned', 'proxy', null, `Assigned proxies to ${assigned} account(s)`, { assigned, max_accounts_per_proxy: max });
+    res.redirect('/proxies');
+  } catch (err) { next(err); }
+});
+
+app.post('/proxies/bulk-status', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const selected = selectedProxyIds(req.body);
+    if (!selected.length) throw new Error('Select at least one proxy.');
+    const status = oneOf(req.body.status, proxyStatuses, 'unchecked');
+    const result = await db.query(
+      `UPDATE proxies SET status=$1, updated_at=NOW()
+       WHERE user_id=$2 AND id = ANY($3)
+       RETURNING id`,
+      [status, userId, selected]
+    );
+    await activity.log(userId, `proxies_marked_${status}`, 'proxy', null, `Marked ${result.rowCount} proxy/proxies ${status}`, { count: result.rowCount, status });
+    await auditLog(userId, userId, 'proxy_bulk_status_changed', 'proxy', null, `Marked ${result.rowCount} proxy/proxies ${status}`, { count: result.rowCount, status });
     res.redirect('/proxies');
   } catch (err) { next(err); }
 });
@@ -1894,7 +2199,7 @@ app.get('/local-helper', requireAuth, async (req, res, next) => {
 app.get('/companion', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
-    const [helper, settings, devices, statuses, snapshot, jobs] = await Promise.all([
+    const [helper, settings, devices, statuses, snapshot, jobs, stats] = await Promise.all([
       helperStatus(userId),
       getSettings(userId),
       db.query(
@@ -1933,6 +2238,13 @@ app.get('/companion', requireAuth, async (req, res, next) => {
          ORDER BY j.created_at DESC
          LIMIT 20`,
         [userId]
+      ),
+      db.query(
+        `SELECT
+          (SELECT COUNT(*)::int FROM companion_devices WHERE user_id=$1 AND status='connected') connected_devices,
+          (SELECT COUNT(*)::int FROM companion_jobs WHERE user_id=$1 AND status IN ('queued','accepted','running','paused','waiting_for_user')) active_jobs,
+          (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1 AND status IN ('pending','launching','running','scanning','detected')) running_instances`,
+        [userId]
       )
     ]);
     const pairingCode = req.session.helperPairingCode || null;
@@ -1945,6 +2257,7 @@ app.get('/companion', requireAuth, async (req, res, next) => {
       clientStatuses: statuses.rows,
       snapshot: snapshot.rows[0] || null,
       jobs: jobs.rows,
+      stats: stats.rows[0],
       pairingCode,
       download: helperDownloadMetadata()
     });
@@ -2267,7 +2580,7 @@ function hasLimitedAccess(user) {
 }
 
 function canExportData(user) {
-  return hasFullAppAccess(user) || hasLimitedAccess(user);
+  return hasFullAppAccess(user);
 }
 
 function isBlockedUser(user) {
@@ -2281,12 +2594,6 @@ function requireNotBlocked(req, res, next) {
 
 function limitedAccessAllowed(req) {
   if (!hasLimitedAccess(req.currentUserRecord)) return false;
-  if (['GET', 'HEAD'].includes(req.method)) {
-    return ['/', '/accounts', '/proxies', '/logs'].includes(req.path);
-  }
-  if (req.method === 'POST') {
-    return ['/accounts/export', '/proxies/export'].includes(req.path);
-  }
   return false;
 }
 
@@ -2301,12 +2608,12 @@ function requireFullAccess(req, res, next) {
 }
 
 function limitedAccessResponse(req, res) {
-  const message = 'This account has limited access. You can view your dashboard and export your saved data, but imports, edits, uploads, settings, workflows, and companion actions require active access.';
+  const message = 'GS Account Manager is currently in private build. This account does not have active access yet.';
   const accept = typeof req.get === 'function' ? req.get('accept') || '' : '';
   if (req.path.startsWith('/api/') || accept.includes('application/json')) {
     return res.status(403).json({ error: message });
   }
-  return res.status(403).render('error', { title: 'Limited access', message });
+  return res.redirect('/locked');
 }
 
 async function userIdHasFullAccess(userId) {
@@ -2445,8 +2752,10 @@ async function companionDeviceFromRequest(req) {
 }
 
 async function clientProfileFromBody(userId, body) {
+  const defaultAccountId = body.default_account_id ? Number(body.default_account_id) : null;
   const defaultProxyId = body.default_proxy_id ? Number(body.default_proxy_id) : null;
   const defaultWorkflowId = body.default_workflow_id ? Number(body.default_workflow_id) : null;
+  if (defaultAccountId) await assertAccountOwnership(userId, defaultAccountId);
   if (defaultProxyId) await assertProxyOwnership(userId, defaultProxyId);
   if (defaultWorkflowId) await loadWorkflow(userId, defaultWorkflowId);
   const name = escapeText(body.name);
@@ -2455,6 +2764,7 @@ async function clientProfileFromBody(userId, body) {
     name,
     client_type: oneOf(body.client_type, clientTypes, 'custom'),
     launch_args: escapeText(body.launch_args),
+    default_account_id: defaultAccountId,
     default_proxy_id: defaultProxyId,
     default_workflow_id: defaultWorkflowId,
     notes: escapeText(body.notes),
@@ -2575,7 +2885,7 @@ async function upsertClientInstance(device, item) {
            proxy_id=COALESCE($4, proxy_id), instance_name=COALESCE(NULLIF($5, ''), instance_name),
            process_name=COALESCE(NULLIF($6, ''), process_name), process_id=COALESCE($7, process_id),
            window_title=COALESCE(NULLIF($8, ''), window_title), status=$9, current_activity=COALESCE(NULLIF($10, ''), current_activity),
-           last_seen_at=NOW(), started_at=CASE WHEN $9 IN ('running','launching','detected') THEN COALESCE(started_at, NOW()) ELSE started_at END,
+           last_seen_at=NOW(), started_at=CASE WHEN $9 IN ('pending','running','launching','scanning','detected') THEN COALESCE(started_at, NOW()) ELSE started_at END,
            stopped_at=CASE WHEN $9='stopped' THEN NOW() ELSE stopped_at END, error_message=NULLIF($11, ''), updated_at=NOW()
        WHERE id=$12 AND user_id=$13
        RETURNING *`,
@@ -2604,7 +2914,7 @@ async function upsertClientInstance(device, item) {
          started_at, stopped_at, error_message, updated_at
        )
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(),
-               CASE WHEN $10 IN ('running','launching','detected') THEN NOW() ELSE NULL END,
+               CASE WHEN $10 IN ('pending','running','launching','scanning','detected') THEN NOW() ELSE NULL END,
                CASE WHEN $10='stopped' THEN NOW() ELSE NULL END, NULLIF($12, ''), NOW())
        RETURNING *`,
       [
@@ -3078,7 +3388,16 @@ function accountFromBody(body, existing = {}) {
     status: oneOf(body.status, accountStatuses, 'pending'),
     credential_status: oneOf(body.credential_status, credentialStatuses, 'partial'),
     upgrade_status: oneOf(body.upgrade_status, workflowStatuses, 'pending'),
-    email_creation_status: oneOf(body.email_creation_status, workflowStatuses, 'pending')
+    email_creation_status: oneOf(body.email_creation_status, workflowStatuses, 'pending'),
+    verified: oneOf(body.verified, ['yes', 'no', 'unknown'], 'unknown'),
+    character_type: keep(body.character_type),
+    gp_amount: integerOrZero(body.gp_amount),
+    platinum_amount: integerOrZero(body.platinum_amount),
+    wealth_amount: integerOrZero(body.wealth_amount),
+    ban_status: oneOf(body.ban_status, ['none', 'temp', 'perm', 'unknown'], 'none'),
+    completed_tutorial: body.completed_tutorial === 'yes',
+    total_level: numberOrNull(body.total_level),
+    tags: keep(body.tags)
   };
 }
 
@@ -3089,7 +3408,9 @@ function accountParams(account, userId) {
     encrypt(account.recovery_email), encrypt(account.recovery_email_password), encrypt(account.target_email), encrypt(account.target_email_password), encrypt(account.email_password),
     encrypt(account.jagex_email), encrypt(account.jagex_password), account.jagex_name || null, account.first_name || null, account.last_name || null,
     account.birth_month, account.birth_day, account.birth_year, account.proxy_id, account.assigned_http_proxy_id, account.assigned_socks5_proxy_id,
-    account.status, account.credential_status, account.upgrade_status, account.email_creation_status
+    account.status, account.credential_status, account.upgrade_status, account.email_creation_status,
+    account.verified || 'unknown', account.character_type || null, account.gp_amount || 0, account.platinum_amount || 0,
+    account.wealth_amount || 0, account.ban_status || 'none', account.completed_tutorial === true, account.total_level || null, account.tags || null
   ];
 }
 
@@ -3100,7 +3421,9 @@ function accountColumns() {
     'recovery_email_encrypted', 'recovery_email_password_encrypted', 'target_email_encrypted', 'target_email_password_encrypted', 'email_password_encrypted',
     'jagex_email_encrypted', 'jagex_password_encrypted', 'jagex_name', 'first_name', 'last_name',
     'birth_month', 'birth_day', 'birth_year', 'proxy_id', 'assigned_http_proxy_id', 'assigned_socks5_proxy_id',
-    'status', 'credential_status', 'upgrade_status', 'email_creation_status'
+    'status', 'credential_status', 'upgrade_status', 'email_creation_status',
+    'verified', 'character_type', 'gp_amount', 'platinum_amount', 'wealth_amount', 'ban_status',
+    'completed_tutorial', 'total_level', 'tags'
   ];
 }
 
@@ -3204,7 +3527,16 @@ function accountFromImport(row, body) {
     status: oneOf(body.status, accountStatuses, 'pending'),
     credential_status: 'ready',
     upgrade_status: 'pending',
-    email_creation_status: 'pending'
+    email_creation_status: 'pending',
+    verified: 'unknown',
+    character_type: escapeText(body.character_type || body.category),
+    gp_amount: 0,
+    platinum_amount: 0,
+    wealth_amount: 0,
+    ban_status: 'none',
+    completed_tutorial: false,
+    total_level: null,
+    tags: ''
   };
 }
 
@@ -3445,9 +3777,18 @@ async function filteredAccountIds(userId, source) {
     account_type: escapeText(source.account_type),
     status: escapeText(source.status),
     category: escapeText(source.category),
+    character_type: escapeText(source.character_type),
     country_code: escapeText(source.country_code),
     has_proxy: escapeText(source.has_proxy),
     has_otp: escapeText(source.has_otp),
+    has_notes: escapeText(source.has_notes),
+    completed_tutorial: escapeText(source.completed_tutorial),
+    has_active_instance: escapeText(source.has_active_instance),
+    verified: escapeText(source.verified),
+    authenticator: escapeText(source.authenticator),
+    bans: escapeText(source.bans),
+    min_total_level: escapeText(source.min_total_level),
+    max_total_level: escapeText(source.max_total_level),
     archived: escapeText(source.archived),
     created_date: escapeText(source.created_date)
   };
@@ -3461,11 +3802,32 @@ async function filteredAccountIds(userId, source) {
   if (accountTypes.includes(filters.account_type)) add('account_type = ?', filters.account_type);
   if (accountStatuses.includes(filters.status)) add('status = ?', filters.status);
   if (filters.category) add('category ILIKE ?', filters.category);
+  if (filters.character_type) {
+    params.push(`%${filters.character_type}%`);
+    clauses.push(`(character_type ILIKE $${params.length} OR category ILIKE $${params.length})`);
+  }
   if (filters.country_code) add('country_code ILIKE ?', filters.country_code.toUpperCase());
   if (filters.has_proxy === 'yes') clauses.push('(assigned_http_proxy_id IS NOT NULL OR proxy_id IS NOT NULL OR assigned_socks5_proxy_id IS NOT NULL)');
   if (filters.has_proxy === 'no') clauses.push('assigned_http_proxy_id IS NULL AND proxy_id IS NULL AND assigned_socks5_proxy_id IS NULL');
   if (filters.has_otp === 'yes') clauses.push('otp_secret_encrypted IS NOT NULL');
   if (filters.has_otp === 'no') clauses.push('otp_secret_encrypted IS NULL');
+  if (filters.has_notes === 'yes') clauses.push("(COALESCE(notes, '') <> '' OR private_notes_encrypted IS NOT NULL)");
+  if (filters.has_notes === 'no') clauses.push("COALESCE(notes, '') = '' AND private_notes_encrypted IS NULL");
+  if (filters.completed_tutorial === 'yes') clauses.push('completed_tutorial IS TRUE');
+  if (filters.completed_tutorial === 'no') clauses.push('completed_tutorial IS FALSE');
+  if (filters.has_active_instance === 'yes') clauses.push("EXISTS (SELECT 1 FROM client_instances ci WHERE ci.user_id=accounts.user_id AND ci.account_id=accounts.id AND ci.status IN ('pending','launching','running','scanning','detected'))");
+  if (filters.has_active_instance === 'no') clauses.push("NOT EXISTS (SELECT 1 FROM client_instances ci WHERE ci.user_id=accounts.user_id AND ci.account_id=accounts.id AND ci.status IN ('pending','launching','running','scanning','detected'))");
+  if (['yes', 'no', 'unknown'].includes(filters.verified)) add('verified = ?', filters.verified);
+  if (filters.authenticator === 'yes') clauses.push('otp_secret_encrypted IS NOT NULL');
+  if (filters.authenticator === 'no') clauses.push('otp_secret_encrypted IS NULL');
+  if (filters.bans === 'any') clauses.push("(status IN ('banned_temp','banned_perm') OR ban_status <> 'none')");
+  if (filters.bans === 'temp') clauses.push("(status='banned_temp' OR ban_status='temp')");
+  if (filters.bans === 'perm') clauses.push("(status='banned_perm' OR ban_status='perm')");
+  if (filters.bans === 'none') clauses.push("(status NOT IN ('banned_temp','banned_perm') AND ban_status='none')");
+  const minTotalLevel = Number(filters.min_total_level);
+  const maxTotalLevel = Number(filters.max_total_level);
+  if (Number.isFinite(minTotalLevel) && minTotalLevel >= 0) add('COALESCE(total_level, 0) >= ?', minTotalLevel);
+  if (Number.isFinite(maxTotalLevel) && maxTotalLevel >= 0) add('COALESCE(total_level, 0) <= ?', maxTotalLevel);
   if (filters.archived === 'yes') clauses.push('(archived_at IS NOT NULL OR status = \'archived\')');
   if (filters.archived === 'no') clauses.push('(archived_at IS NULL AND status <> \'archived\')');
   if (filters.created_date === 'today') clauses.push(`created_at >= CURRENT_DATE`);
@@ -3504,6 +3866,12 @@ function birthParts(value) {
 function numberOrNull(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function integerOrZero(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return 0;
+  return Math.floor(number);
 }
 
 async function start() {

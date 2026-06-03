@@ -2,6 +2,7 @@ const pairOutput = document.getElementById('pairOutput');
 const logsOutput = document.getElementById('logsOutput');
 const jobOutput = document.getElementById('jobOutput');
 const clientsOutput = document.getElementById('clientsOutput');
+const instancesOutput = document.getElementById('instancesOutput');
 const profilesOutput = document.getElementById('profilesOutput');
 let currentJob = null;
 let detectedClients = [];
@@ -159,7 +160,7 @@ async function runCurrentLaunchJob() {
   const executablePath = saved(storageKeys.localExecutablePath);
   const args = saved(storageKeys.localLaunchArgs);
   if (!executablePath) {
-    log('Launch job needs a local executable path in Launch Profiles.');
+    log('Launch job needs a local executable path in Settings.');
     return;
   }
   if (!window.confirm('Run this launch job visibly on this PC now?')) {
@@ -213,7 +214,7 @@ async function sendManualClientStatus() {
         process_name: 'manual-placeholder',
         window_title: 'User-controlled status placeholder',
         running: true,
-        status: 'detected',
+        status: 'running',
         matched_account_hint: ''
       }]
     };
@@ -239,10 +240,16 @@ async function detectClients() {
     clientsOutput.textContent = detectedClients.length
       ? JSON.stringify(detectedClients, null, 2)
       : (result.warning || 'No clients detected.');
+    if (instancesOutput) {
+      instancesOutput.textContent = detectedClients.length
+        ? JSON.stringify(detectedClients, null, 2)
+        : (result.warning || 'No instances detected.');
+    }
     log(`Detected ${detectedClients.length} client window(s).`);
     if (result.warning) log(`Detection note: ${result.warning}`);
   } catch (error) {
     clientsOutput.textContent = error.message;
+    if (instancesOutput) instancesOutput.textContent = error.message;
     log(`Detection failed: ${error.message}`);
   }
 }
@@ -276,6 +283,7 @@ async function launchLocalProfile() {
       status: 'launching',
       running: true
     }];
+    if (instancesOutput) instancesOutput.textContent = JSON.stringify(detectedClients, null, 2);
     log(`Launch requested for ${result.process_name}.`);
   } catch (error) {
     log(`Launch failed: ${error.message}`);
@@ -289,6 +297,7 @@ document.getElementById('detectClientsButton').addEventListener('click', detectC
 document.getElementById('stopTrackingButton').addEventListener('click', () => {
   detectedClients = detectedClients.map(item => ({ ...item, status: 'stopped', running: false }));
   clientsOutput.textContent = JSON.stringify(detectedClients, null, 2);
+  if (instancesOutput) instancesOutput.textContent = JSON.stringify(detectedClients, null, 2);
   log('Local tracking marked stopped. Send Status Update to publish.');
 });
 document.getElementById('takeSnapshotButton').addEventListener('click', () => {

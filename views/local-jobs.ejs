@@ -1,0 +1,101 @@
+<%- include('partials/head') %>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Companion Queue</p>
+      <h2>Local Jobs</h2>
+    </div>
+    <div class="actions">
+      <a class="button" href="/companion">Companion</a>
+      <a class="button" href="/clients">Clients</a>
+      <a class="button" href="/instances">Instances</a>
+    </div>
+  </div>
+  <p class="muted">Local jobs are commands queued for a paired GS Companion device. Jobs are user-scoped, visible, pausable, and safe-logged without passwords, OTP secrets, cookies, or tokens.</p>
+</section>
+
+<section class="metric-grid dashboard-metrics">
+  <article class="metric"><span>Total Jobs</span><strong><%= stats.total || 0 %></strong></article>
+  <article class="metric"><span>Queued</span><strong><%= stats.queued || 0 %></strong></article>
+  <article class="metric"><span>Running</span><strong><%= stats.running || 0 %></strong></article>
+  <article class="metric"><span>Completed</span><strong><%= stats.completed || 0 %></strong></article>
+  <article class="metric"><span>Failed</span><strong><%= stats.failed || 0 %></strong></article>
+  <article class="metric"><span>Cancelled</span><strong><%= stats.cancelled || 0 %></strong></article>
+</section>
+
+<section class="panel">
+  <form class="filters compact" method="get">
+    <select name="status"><option value="">All Statuses</option><% companionJobStatuses.forEach(status => { %><option value="<%= status %>" <%= filters.status === status ? 'selected' : '' %>><%= status %></option><% }) %></select>
+    <select name="job_type"><option value="">All Job Types</option><% companionJobTypes.forEach(type => { %><option value="<%= type %>" <%= filters.job_type === type ? 'selected' : '' %>><%= type.replace(/_/g, ' ') %></option><% }) %></select>
+    <button class="button">Filter</button>
+  </form>
+  <div class="panel-head">
+    <h2>Jobs</h2>
+    <span class="tag"><%= jobs.length %> shown</span>
+  </div>
+  <table>
+    <thead><tr><th>Created</th><th>Type</th><th>Status</th><th>Device</th><th>Target</th><th>Completed</th><th>Actions</th></tr></thead>
+    <tbody>
+      <% jobs.forEach(job => { %>
+        <tr>
+          <td><%= new Date(job.created_at).toLocaleString() %></td>
+          <td><%= job.job_type.replace(/_/g, ' ') %></td>
+          <td><span class="status <%= job.status %>"><%= job.status %></span></td>
+          <td><%= job.device_name || (job.companion_device_id ? `Device ${job.companion_device_id}` : 'Any paired device') %></td>
+          <td>
+            <strong><%= job.workflow_name || job.profile_name || job.instance_name || job.account_legacy_login || job.account_username || 'Companion' %></strong>
+            <% if (job.proxy_host) { %><br><span class="muted">Proxy: <%= job.proxy_name || `${mask(job.proxy_host)}:${job.proxy_port}` %></span><% } %>
+          </td>
+          <td><%= job.completed_at ? new Date(job.completed_at).toLocaleString() : '' %></td>
+          <td class="actions">
+            <% if (['queued','accepted','running','paused','waiting_for_user'].includes(job.status)) { %>
+              <form method="post" action="/local-jobs/<%= job.id %>/cancel" data-confirm="Cancel this local job?">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button class="button small danger">Cancel</button>
+              </form>
+            <% } else { %>
+              <span class="tag">No action</span>
+            <% } %>
+            <% if (job.workflow_run_id) { %><a class="button small" href="/workflows/runs/<%= job.workflow_run_id %>">Run</a><% } %>
+          </td>
+        </tr>
+      <% }) %>
+      <% if (!jobs.length) { %><tr><td colspan="7"><p class="muted">No local jobs yet. Launch a client, run a workflow, or request a snapshot to queue one.</p></td></tr><% } %>
+    </tbody>
+  </table>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Recent Job Events</h2>
+      <span class="tag">safe details only</span>
+    </div>
+    <table>
+      <thead><tr><th>Time</th><th>Job</th><th>Event</th><th>Message</th></tr></thead>
+      <tbody>
+        <% events.forEach(event => { %>
+          <tr><td><%= new Date(event.created_at).toLocaleString() %></td><td><%= event.companion_job_id %> / <%= event.job_type || '' %></td><td><%= event.event_type %></td><td><%= event.message || '' %></td></tr>
+        <% }) %>
+        <% if (!events.length) { %><tr><td colspan="4"><p class="muted">No local job events yet.</p></td></tr><% } %>
+      </tbody>
+    </table>
+  </article>
+
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Paired Devices</h2>
+      <a class="button small" href="/companion">Manage</a>
+    </div>
+    <table>
+      <thead><tr><th>Device</th><th>Status</th><th>Last Seen</th></tr></thead>
+      <tbody>
+        <% devices.forEach(device => { %>
+          <tr><td><%= device.device_name || `Device ${device.id}` %></td><td><span class="status <%= device.status %>"><%= device.status %></span></td><td><%= device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : 'Never' %></td></tr>
+        <% }) %>
+        <% if (!devices.length) { %><tr><td colspan="3"><p class="muted">No paired devices.</p></td></tr><% } %>
+      </tbody>
+    </table>
+  </article>
+</section>
+<%- include('partials/foot') %>

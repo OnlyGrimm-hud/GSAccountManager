@@ -4,13 +4,10 @@
 <section class="metric-grid account-metrics">
   <% [
     ['Total Accounts', stat.total || 0],
-    ['Legacy Accounts', stat.legacy || 0],
-    ['Jagex Accounts', stat.jagex || 0],
-    ['With Proxy', stat.with_proxy || 0],
-    ['Without Proxy', stat.without_proxy || 0],
-    ['Active', stat.active || 0],
-    ['In Progress', stat.in_progress || 0],
-    ['Completed / Archived', `${stat.completed || 0} / ${stat.archived || 0}`]
+    ['Active Accounts', stat.active || 0],
+    ['Banned Accounts', stat.banned || 0],
+    ['Locked Accounts', stat.locked || 0],
+    ['Invalid Accounts', stat.invalid || 0]
   ].forEach(item => { %>
     <article class="metric"><span><%= item[0] %></span><strong><%= item[1] %></strong></article>
   <% }) %>
@@ -36,13 +33,29 @@
 
   <form class="filters account-filters" method="get">
     <input name="q" placeholder="Search" value="<%= filters.q || '' %>">
-    <select name="account_type"><option value="">Account Type</option><% accountTypes.forEach(t => { %><option value="<%= t %>" <%= filters.account_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select>
-    <select name="category"><option value="">Category</option><% categories.forEach(category => { %><option value="<%= category %>" <%= filters.category === category ? 'selected' : '' %>><%= category %></option><% }) %></select>
-    <select name="status"><option value="">Status</option><% accountStatuses.forEach(s => { %><option value="<%= s %>" <%= filters.status === s ? 'selected' : '' %>><%= s %></option><% }) %></select>
-    <select name="has_proxy"><option value="">Has Proxy</option><option value="yes" <%= filters.has_proxy === 'yes' ? 'selected' : '' %>>Yes</option><option value="no" <%= filters.has_proxy === 'no' ? 'selected' : '' %>>No</option></select>
-    <select name="has_otp"><option value="">Has OTP</option><option value="yes" <%= filters.has_otp === 'yes' ? 'selected' : '' %>>Yes</option><option value="no" <%= filters.has_otp === 'no' ? 'selected' : '' %>>No</option></select>
-    <select name="archived"><option value="">Archived</option><option value="no" <%= filters.archived === 'no' ? 'selected' : '' %>>Active list</option><option value="yes" <%= filters.archived === 'yes' ? 'selected' : '' %>>Archived</option></select>
     <select name="country_code"><option value="">Country</option><% countries.forEach(country => { %><option value="<%= country %>" <%= filters.country_code === country ? 'selected' : '' %>><%= country %></option><% }) %></select>
+    <select name="account_type"><option value="">Account Type</option><% accountTypes.forEach(t => { %><option value="<%= t %>" <%= filters.account_type === t ? 'selected' : '' %>><%= t %></option><% }) %></select>
+    <select name="character_type"><option value="">Character Type / Category</option><% categories.forEach(category => { %><option value="<%= category %>" <%= filters.character_type === category || filters.category === category ? 'selected' : '' %>><%= category %></option><% }) %></select>
+    <select name="status"><option value="">Status</option><% accountStatuses.forEach(s => { %><option value="<%= s %>" <%= filters.status === s ? 'selected' : '' %>><%= s %></option><% }) %></select>
+    <select name="has_notes"><option value="">Has Notes</option><option value="yes" <%= filters.has_notes === 'yes' ? 'selected' : '' %>>Yes</option><option value="no" <%= filters.has_notes === 'no' ? 'selected' : '' %>>No</option></select>
+    <select name="has_proxy"><option value="">Has Proxy</option><option value="yes" <%= filters.has_proxy === 'yes' ? 'selected' : '' %>>Yes</option><option value="no" <%= filters.has_proxy === 'no' ? 'selected' : '' %>>No</option></select>
+    <select name="completed_tutorial"><option value="">Has Completed Tutorial</option><option value="yes" <%= filters.completed_tutorial === 'yes' ? 'selected' : '' %>>Yes</option><option value="no" <%= filters.completed_tutorial === 'no' ? 'selected' : '' %>>No</option></select>
+    <select name="has_active_instance"><option value="">Has Active Instance</option><option value="yes" <%= filters.has_active_instance === 'yes' ? 'selected' : '' %>>Yes</option><option value="no" <%= filters.has_active_instance === 'no' ? 'selected' : '' %>>No</option></select>
+    <select name="verified"><option value="">Verified</option><option value="yes" <%= filters.verified === 'yes' ? 'selected' : '' %>>Yes</option><option value="no" <%= filters.verified === 'no' ? 'selected' : '' %>>No</option><option value="unknown" <%= filters.verified === 'unknown' ? 'selected' : '' %>>Unknown</option></select>
+    <select name="authenticator"><option value="">Authenticator</option><option value="yes" <%= filters.authenticator === 'yes' || filters.has_otp === 'yes' ? 'selected' : '' %>>Yes</option><option value="no" <%= filters.authenticator === 'no' || filters.has_otp === 'no' ? 'selected' : '' %>>No</option></select>
+    <select name="bans"><option value="">Bans</option><option value="none" <%= filters.bans === 'none' ? 'selected' : '' %>>None</option><option value="any" <%= filters.bans === 'any' ? 'selected' : '' %>>Any</option><option value="temp" <%= filters.bans === 'temp' ? 'selected' : '' %>>Temp</option><option value="perm" <%= filters.bans === 'perm' ? 'selected' : '' %>>Perm</option></select>
+    <select name="archived"><option value="">Archived</option><option value="no" <%= filters.archived === 'no' ? 'selected' : '' %>>Active list</option><option value="yes" <%= filters.archived === 'yes' ? 'selected' : '' %>>Archived</option></select>
+    <input name="min_total_level" type="number" min="0" placeholder="Min Total Level" value="<%= filters.min_total_level || '' %>">
+    <input name="max_total_level" type="number" min="0" placeholder="Max Total Level" value="<%= filters.max_total_level || '' %>">
+    <select name="sort_by">
+      <option value="updated_desc" <%= filters.sort_by === 'updated_desc' ? 'selected' : '' %>>Sort: Updated</option>
+      <option value="created_desc" <%= filters.sort_by === 'created_desc' ? 'selected' : '' %>>Created</option>
+      <option value="username_asc" <%= filters.sort_by === 'username_asc' ? 'selected' : '' %>>Username</option>
+      <option value="wealth_desc" <%= filters.sort_by === 'wealth_desc' ? 'selected' : '' %>>Wealth</option>
+      <option value="gp_desc" <%= filters.sort_by === 'gp_desc' ? 'selected' : '' %>>GP</option>
+      <option value="total_level_desc" <%= filters.sort_by === 'total_level_desc' ? 'selected' : '' %>>Total Level</option>
+      <option value="status_asc" <%= filters.sort_by === 'status_asc' ? 'selected' : '' %>>Status</option>
+    </select>
     <select name="created_date">
       <option value="">Created Date</option>
       <option value="today" <%= filters.created_date === 'today' ? 'selected' : '' %>>Today</option>
@@ -55,19 +68,24 @@
 
   <form id="account-action-form" method="post" action="/accounts/export">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-    <% ['q','account_type','category','status','has_proxy','has_otp','archived','country_code','created_date'].forEach(key => { %>
+    <% ['q','account_type','category','character_type','status','has_proxy','has_otp','has_notes','completed_tutorial','has_active_instance','verified','authenticator','bans','archived','country_code','min_total_level','max_total_level','sort_by','created_date'].forEach(key => { %>
       <input type="hidden" name="<%= key %>" value="<%= filters[key] || '' %>">
     <% }) %>
   </form>
   <% if (isLimitedAccess) { %>
-    <p class="notice">Limited access: account import, upload, edit, copy, archive, delete, settings, workflows, and companion actions are disabled. Export is available for your own saved records.</p>
+    <p class="notice">Private-build access is inactive. Account data remains locked until an admin activates access.</p>
   <% } else { %>
     <div class="bulk-bar">
       <select form="account-action-form" name="bulk_action">
+        <option value="launch_selected">Launch selected</option>
         <option value="archive">Archive selected</option>
         <option value="delete">Delete selected</option>
         <option value="assign_proxy">Assign proxy</option>
         <option value="assign_category_status">Assign category/status</option>
+      </select>
+      <select form="account-action-form" name="bulk_client_profile_id">
+        <option value="">Client profile for launch</option>
+        <% clientProfiles.forEach(profile => { %><option value="<%= profile.id %>"><%= profile.name %></option><% }) %>
       </select>
       <select form="account-action-form" name="proxy_id">
         <option value="">No proxy / unchanged</option>
@@ -77,20 +95,25 @@
       <select form="account-action-form" name="bulk_status"><% accountStatuses.forEach(status => { %><option value="<%= status %>"><%= status %></option><% }) %></select>
       <label class="check"><input form="account-action-form" type="checkbox" name="confirm_bulk_delete" value="yes"> Confirm permanent bulk delete</label>
       <button class="button" form="account-action-form" formaction="/accounts/bulk">Apply bulk action</button>
+      <button class="button" type="button" disabled>Register / Upgrade</button>
+      <button class="button" type="button" disabled>Create Account Workflow</button>
     </div>
   <% } %>
   <table>
     <thead>
       <tr>
         <th><input type="checkbox" data-select-all="[name='account_ids']"></th>
-        <th>Type</th>
-        <th>Login / Email</th>
+        <th>Proxy</th>
+        <th>Username / Login</th>
+        <th>Verified</th>
         <th>Display Name</th>
-        <th>Proxy Status</th>
-        <th>Category</th>
-        <th>Status</th>
+        <th>GP</th>
+        <th>Plat</th>
+        <th>Wealth</th>
         <th>Notes</th>
-        <th>Updated</th>
+        <th>Bans</th>
+        <th>Status</th>
+        <th>Instance</th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -98,24 +121,39 @@
       <% accounts.forEach(account => { %>
         <tr>
           <td><input form="account-action-form" type="checkbox" name="account_ids" value="<%= account.id %>"></td>
-          <td><span class="tag"><%= account.account_type %></span></td>
-          <td>
-            <strong><%= mask(account.legacy_login || account.username) %></strong>
-            <% if (account.account_type === 'jagex') { %><br><span class="muted">email login</span><% } %>
-          </td>
-          <td><%= account.display_name || '' %></td>
           <td>
             <% if (account.proxy_host) { %>
+              <strong><%= account.proxy_type || 'HTTP' %></strong><br>
               <span class="status <%= account.proxy_status || 'unknown' %>"><%= account.proxy_status || 'assigned' %></span>
-              <br><span class="muted"><%= account.proxy_type || 'HTTP' %></span>
             <% } else { %>
               <span class="tag">No proxy</span>
             <% } %>
           </td>
-          <td><%= account.category || '' %></td>
-          <td><span class="status <%= account.status %>"><%= account.status %></span></td>
+          <td>
+            <strong><%= mask(account.legacy_login || account.username) %></strong>
+            <br><span class="tag"><%= account.account_type %></span>
+            <% if (account.account_type === 'jagex') { %><br><span class="muted">email login</span><% } %>
+          </td>
+          <td><span class="status <%= account.verified || 'unknown' %>"><%= account.verified || 'unknown' %></span></td>
+          <td><%= account.display_name || '' %></td>
+          <td><%= Number(account.gp_amount || 0).toLocaleString() %></td>
+          <td><%= Number(account.platinum_amount || 0).toLocaleString() %></td>
+          <td><%= Number(account.wealth_amount || 0).toLocaleString() %></td>
           <td><%= account.notes ? account.notes.slice(0, 80) : '' %></td>
-          <td><%= new Date(account.updated_at).toLocaleDateString() %></td>
+          <td>
+            <% if (account.status === 'banned_temp' || account.ban_status === 'temp') { %><span class="status banned_temp">Temp</span>
+            <% } else if (account.status === 'banned_perm' || account.ban_status === 'perm') { %><span class="status banned_perm">Perm</span>
+            <% } else { %><span class="tag">None</span><% } %>
+          </td>
+          <td><span class="status <%= account.status %>"><%= account.status %></span></td>
+          <td>
+            <% if (account.active_instance_id) { %>
+              <a class="status <%= account.active_instance_status %>" href="/instances"><%= account.active_instance_status %></a>
+              <% if (account.active_instance_window) { %><br><span class="muted"><%= account.active_instance_window.slice(0, 40) %></span><% } %>
+            <% } else { %>
+              <span class="tag">None</span>
+            <% } %>
+          </td>
           <td class="actions">
             <% if (isLimitedAccess) { %>
               <span class="tag">Export only</span>
@@ -126,6 +164,13 @@
               <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_password">Copy pass</button>
               <% if (account.otp_secret_encrypted) { %><button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP</button><% } %>
               <a class="button small" href="/workflows?account_id=<%= account.id %>">Start Workflow</a>
+              <form method="post" action="/accounts/bulk">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <input type="hidden" name="bulk_action" value="launch_selected">
+                <input type="hidden" name="account_ids" value="<%= account.id %>">
+                <input type="hidden" name="bulk_client_profile_id" value="<%= clientProfiles[0] ? clientProfiles[0].id : '' %>">
+                <button class="button small" <%= clientProfiles.length ? '' : 'disabled' %>>Launch Client</button>
+              </form>
               <form method="post" action="/accounts/<%= account.id %>/archive">
                 <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <button class="button small">Archive</button>
@@ -139,7 +184,7 @@
         </tr>
       <% }) %>
       <% if (!accounts.length) { %>
-        <tr><td colspan="10"><p class="muted">Import accounts to begin.</p></td></tr>
+        <tr><td colspan="13"><p class="muted">Import accounts to begin.</p></td></tr>
       <% } %>
     </tbody>
   </table>
@@ -233,13 +278,14 @@
       </div>
       <% if (isLimitedAccess) { %>
         <input form="account-action-form" type="hidden" name="post_export_action" value="keep">
-        <p class="notice">Limited access exports do not archive or delete records.</p>
+        <p class="notice">Private-build locked users cannot export account data.</p>
       <% } else { %>
         <label>After export<select form="account-action-form" name="post_export_action" data-post-export-action><option value="keep">No, keep them</option><option value="archive">Archive them</option><option value="delete">Delete them permanently</option></select></label>
         <label class="check"><input form="account-action-form" type="checkbox" name="delete_after_export" value="yes" data-delete-after-export> Enable delete-after-export confirmation</label>
         <div class="notice danger delete-confirm-block" hidden>
           <p>This will permanently delete the selected accounts from your account list after export. This cannot be recovered.</p>
           <label class="check"><input form="account-action-form" type="checkbox" name="confirm_delete_after_export" value="yes"> I understand this permanently deletes these accounts and cannot be recovered.</label>
+          <label>Type DELETE to confirm<input form="account-action-form" name="confirm_delete_after_export_text" placeholder="DELETE" autocomplete="off"></label>
         </div>
       <% } %>
       <button class="button primary" form="account-action-form" formaction="/accounts/export">Download TXT</button>

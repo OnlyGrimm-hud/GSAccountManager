@@ -1,0 +1,115 @@
+<%- include('partials/head') %>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Live Status</p>
+      <h2>Instances</h2>
+    </div>
+    <div class="actions">
+      <a class="button" href="/clients">Clients</a>
+      <a class="button" href="/local-jobs">Local Jobs</a>
+      <a class="button" href="/companion">Companion</a>
+    </div>
+  </div>
+  <% if (query.snapshot_job) { %><p class="notice">Snapshot job queued: <%= query.snapshot_job %>. Screenshots require opt-in on the website and Companion.</p><% } %>
+  <% if (!helper.connected) { %><p class="notice">Connect GS Companion to detect local client windows or report running instances.</p><% } %>
+  <p class="muted">Instances are user-reported local client sessions. GS Account Manager does not inject into clients, read memory, run gameplay scripts, or bypass security checks.</p>
+</section>
+
+<section class="metric-grid dashboard-metrics">
+  <article class="metric"><span>Total Instances</span><strong><%= stats.total_instances || 0 %></strong></article>
+  <article class="metric"><span>Running / Pending</span><strong><%= stats.running_instances || 0 %></strong></article>
+  <article class="metric"><span>Stopped</span><strong><%= stats.stopped_instances || 0 %></strong></article>
+  <article class="metric"><span>Crashed</span><strong><%= stats.crashed_instances || 0 %></strong></article>
+  <article class="metric"><span>Connected Companions</span><strong><%= stats.connected_devices || 0 %></strong></article>
+  <article class="metric"><span>Active Local Jobs</span><strong><%= stats.active_jobs || 0 %></strong></article>
+  <article class="metric"><span>Snapshots</span><strong><%= settings.allow_companion_snapshots === 'true' ? 'Enabled' : 'Off' %></strong></article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Sessions</p>
+      <h2>Tracked Client Instances</h2>
+    </div>
+    <span class="tag"><%= instances.length %> instance(s)</span>
+  </div>
+  <table>
+    <thead><tr><th>Client / Profile</th><th>Account</th><th>Proxy</th><th>Companion</th><th>Status</th><th>Window</th><th>Last Update</th><th>Actions</th></tr></thead>
+    <tbody>
+      <% instances.forEach(instance => { %>
+        <tr>
+          <td><strong><%= instance.instance_name || instance.profile_name || instance.process_name || 'Client Instance' %></strong><br><span class="muted"><%= instance.process_name || '' %> <%= instance.process_id ? `PID ${instance.process_id}` : '' %></span></td>
+          <td><%= instance.account_display_name || instance.account_legacy_login || instance.account_username || 'Unassigned' %></td>
+          <td>
+            <% if (instance.proxy_host) { %>
+              <%= instance.proxy_name || `${mask(instance.proxy_host)}:${instance.proxy_port}` %><br>
+              <span class="status <%= instance.proxy_status || 'unknown' %>"><%= instance.proxy_type || 'HTTP' %> / <%= instance.proxy_status || 'unknown' %></span>
+            <% } else { %>
+              <span class="tag">No proxy</span>
+            <% } %>
+          </td>
+          <td><%= instance.device_name || 'Companion' %></td>
+          <td><span class="status <%= instance.status %>"><%= instance.status %></span><br><span class="muted"><%= instance.current_activity || '' %></span></td>
+          <td><%= instance.window_title || '' %></td>
+          <td><%= instance.last_seen_at ? new Date(instance.last_seen_at).toLocaleString() : new Date(instance.updated_at).toLocaleString() %></td>
+          <td class="actions">
+            <form method="post" action="/clients/instances/<%= instance.id %>/attach">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <select name="account_id"><option value="">No account</option><% accounts.forEach(account => { %><option value="<%= account.id %>" <%= Number(instance.account_id) === Number(account.id) ? 'selected' : '' %>><%= account.display_name || account.legacy_login || account.username %></option><% }) %></select>
+              <select name="proxy_id"><option value="">No proxy</option><% proxies.forEach(proxy => { %><option value="<%= proxy.id %>" <%= Number(instance.proxy_id) === Number(proxy.id) ? 'selected' : '' %>><%= proxy.name || `${proxy.host}:${proxy.port}` %></option><% }) %></select>
+              <button class="button small">Attach</button>
+            </form>
+            <form method="post" action="/clients/instances/<%= instance.id %>/request-snapshot">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small" <%= settings.allow_companion_snapshots === 'true' ? '' : 'disabled' %>>Request Snapshot</button>
+            </form>
+            <a class="button small" href="/workflows?account_id=<%= instance.account_id || '' %>">Open Workflow</a>
+            <form method="post" action="/clients/instances/<%= instance.id %>/stop-tracking" data-confirm="Stop tracking this local client instance?">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small danger">Mark Stopped</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+      <% if (!instances.length) { %><tr><td colspan="8"><p class="muted">No instances yet. Pair GS Companion and use Detect Local Clients or launch a client profile.</p></td></tr><% } %>
+    </tbody>
+  </table>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Latest Snapshot</p>
+        <h2>Opt-in Preview</h2>
+      </div>
+      <span class="tag"><%= settings.allow_companion_snapshots === 'true' ? 'Enabled' : 'Disabled' %></span>
+    </div>
+    <% if (snapshot) { %>
+      <p class="row-line"><span>Created</span><strong><%= new Date(snapshot.created_at).toLocaleString() %></strong></p>
+      <p class="row-line"><span>Window</span><strong><%= snapshot.window_title || snapshot.instance_name || snapshot.process_name || 'Selected window' %></strong></p>
+      <p class="row-line"><span>Size</span><strong><%= snapshot.file_size || 0 %> bytes</strong></p>
+    <% } else { %>
+      <p class="muted">No snapshots yet.</p>
+    <% } %>
+    <p class="muted">Snapshots are disabled by default, user-owned, and intended for selected-window status only.</p>
+  </article>
+
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Recent Instance Events</h2>
+      <a class="button small" href="/logs">Logs</a>
+    </div>
+    <table>
+      <thead><tr><th>Time</th><th>Instance</th><th>Event</th><th>Message</th></tr></thead>
+      <tbody>
+        <% events.forEach(event => { %>
+          <tr><td><%= new Date(event.created_at).toLocaleString() %></td><td><%= event.instance_name || event.client_instance_id %></td><td><%= event.event_type %></td><td><%= event.message || '' %></td></tr>
+        <% }) %>
+        <% if (!events.length) { %><tr><td colspan="4"><p class="muted">No instance events yet.</p></td></tr><% } %>
+      </tbody>
+    </table>
+  </article>
+</section>
+<%- include('partials/foot') %>

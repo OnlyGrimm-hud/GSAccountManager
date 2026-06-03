@@ -18,7 +18,9 @@
       <a class="<%= path.startsWith('/proxies') ? 'active' : '' %>" href="/proxies">Proxies</a>
       <% if (hasFullAccess) { %>
         <a class="<%= path.startsWith('/workflow') ? 'active' : '' %>" href="/workflows">Workflows</a>
-        <a class="<%= path.startsWith('/clients') || path.startsWith('/instances') ? 'active' : '' %>" href="/clients">Clients / Instances</a>
+        <a class="<%= path.startsWith('/clients') ? 'active' : '' %>" href="/clients">Clients</a>
+        <a class="<%= path.startsWith('/instances') ? 'active' : '' %>" href="/instances">Instances</a>
+        <a class="<%= path.startsWith('/local-jobs') ? 'active' : '' %>" href="/local-jobs">Local Jobs</a>
         <a class="<%= path.startsWith('/companion') || path.startsWith('/local-helper') ? 'active' : '' %>" href="/companion">Companion</a>
         <a class="<%= path.startsWith('/downloads') ? 'active' : '' %>" href="/downloads">Downloads</a>
       <% } %>

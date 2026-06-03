@@ -65,7 +65,7 @@ ipcMain.handle('companion:detect-clients', async (event, processNames = []) => {
         process_name: item.ProcessName || '',
         process_id: item.Id || null,
         window_title: item.MainWindowTitle || '',
-        status: 'detected',
+        status: 'running',
         running: true
       }));
       const filtered = names.length

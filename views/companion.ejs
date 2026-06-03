@@ -12,6 +12,9 @@
       <p class="row-line"><span>Primary device</span><strong><%= helper.device && helper.device.device_name ? helper.device.device_name : 'Not connected' %></strong></p>
       <p class="row-line"><span>Last seen</span><strong><%= helper.lastHeartbeat ? new Date(helper.lastHeartbeat).toLocaleString() : 'Never' %></strong></p>
       <p class="row-line"><span>Version</span><strong><%= helper.helperVersion %></strong></p>
+      <p class="row-line"><span>Active jobs</span><strong><%= stats.active_jobs || 0 %></strong></p>
+      <p class="row-line"><span>Running instances</span><strong><%= stats.running_instances || 0 %></strong></p>
+      <p class="row-line"><span>Safe host/IP label</span><strong>Not collected</strong></p>
       <p class="row-line"><span>Token storage</span><strong><%= helper.tokenStatus %></strong></p>
     </div>
     <form method="post" action="/companion/pairing-code">
@@ -35,10 +38,18 @@
     <p class="muted">The companion connects only after you create a pairing code and enter it locally. It stores a device token locally and sends heartbeat/status placeholders.</p>
     <div class="actions">
       <a class="button" href="/downloads">Open Downloads</a>
-      <a class="button" href="/clients">Clients / Instances</a>
+      <a class="button" href="/clients">Clients</a>
+      <a class="button" href="/instances">Instances</a>
+      <a class="button" href="/local-jobs">Local Jobs</a>
       <span class="tag"><%= download.available ? `v${download.version}` : 'Coming soon' %></span>
     </div>
   </article>
+</section>
+
+<section class="metric-grid dashboard-metrics">
+  <article class="metric"><span>Connected Devices</span><strong><%= stats.connected_devices || 0 %></strong></article>
+  <article class="metric"><span>Active Jobs</span><strong><%= stats.active_jobs || 0 %></strong></article>
+  <article class="metric"><span>Running Instances</span><strong><%= stats.running_instances || 0 %></strong></article>
 </section>
 
 <section class="panel">
@@ -79,8 +90,8 @@
 
 <section class="panel">
   <div class="panel-head">
-    <h2>Workflow Jobs</h2>
-    <a class="button small" href="/workflows">Open Workflows</a>
+    <h2>Local Jobs</h2>
+    <a class="button small" href="/local-jobs">Open Local Jobs</a>
   </div>
   <table>
     <thead><tr><th>Created</th><th>Workflow</th><th>Status</th><th>Device</th><th>Run</th></tr></thead>
@@ -119,9 +130,9 @@
         </tbody>
       </table>
     <% } else { %>
-      <p class="muted">No client status reported yet. Open Clients / Instances after pairing GS Companion.</p>
+      <p class="muted">No client status reported yet. Open Instances after pairing GS Companion.</p>
     <% } %>
-    <div class="actions"><a class="button small" href="/clients">Open Clients / Instances</a></div>
+    <div class="actions"><a class="button small" href="/instances">Open Instances</a></div>
   </article>
 
   <article class="panel">

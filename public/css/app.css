@@ -215,6 +215,9 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
 .status.online, .status.exported, .status.connected, .status.running, .status.detected { color: var(--ok); border-color: rgba(68, 209, 157, .35); }
 .status.blocked, .status.crashed, .status.failed, .status.banned { color: var(--danger); border-color: rgba(255, 107, 122, .35); }
 .status.needs_review, .status.review, .status.archived, .status.launching, .status.queued, .status.accepted, .status.paused, .status.waiting_for_user { color: var(--gold); border-color: rgba(214, 168, 79, .35); }
+.status.pending, .status.scanning, .status.cancelled, .status.unchecked, .status.untested, .status.unknown { color: var(--gold); border-color: rgba(214, 168, 79, .35); }
+.status.working { color: var(--ok); border-color: rgba(68, 209, 157, .35); }
+.status.locked, .status.invalid, .status.banned_temp, .status.banned_perm { color: var(--danger); border-color: rgba(255, 107, 122, .35); }
 .status.ready, .status.review { text-transform: uppercase; font-size: 12px; }
 .notice {
   padding: 12px;
@@ -285,11 +288,11 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
   grid-template-columns: repeat(9, minmax(110px, 1fr));
 }
 .dashboard-metrics {
-  grid-template-columns: repeat(7, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 .bulk-bar {
   display: grid;
-  grid-template-columns: minmax(150px, 220px) minmax(180px, 1fr) minmax(140px, 180px) minmax(140px, 180px) minmax(180px, auto) auto;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   align-items: center;
   margin: 14px 0;

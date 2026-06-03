@@ -149,13 +149,13 @@ If old rows have no `user_id`, they are assigned to the first admin user when on
 
 - New Discord users default to `role=user` and `subscription_status=inactive`.
 - Discord IDs listed in `ADMIN_DISCORD_IDS` are automatically set to admin and active on login.
-- Inactive or expired users can view Dashboard, Accounts, Proxies, and Logs in export-only mode.
-- Banned or disabled users see the locked access page.
+- Inactive or expired users see the private-build/subscription locked page and cannot view account, proxy, client, or log data.
+- Banned or disabled users also see the locked access page.
 - Active and trial users can access the dashboard.
 - Admin users bypass subscription gating.
 - Admins manage users at `/admin/users`.
 - Admin management pages live under `/admin`, `/admin/users`, `/admin/logs`, `/admin/system`, and `/admin/subscriptions`.
-- Admins still have their own personal workspace at Dashboard, Accounts, Proxies, Workflows, Clients / Instances, Companion, Downloads, Logs, and Settings.
+- Admins still have their own personal workspace at Dashboard, Accounts, Proxies, Clients, Instances, Workflows, Local Jobs, Companion, Downloads, Logs, and Settings.
 - Admins can set role and subscription status, including `banned` to disable a user.
 - To make a Discord account admin directly in PostgreSQL:
 
@@ -189,7 +189,7 @@ The Accounts page import modal shows valid rows, duplicate rows, and invalid row
 - `full account export`
 - `custom` field order
 
-Selected accounts can be exported from the Accounts page. After export, accounts can be kept, archived, or permanently deleted only when the user selects delete and confirms the irreversible-delete checkbox.
+Selected accounts can be exported from the Accounts page. After export, accounts can be kept, archived, or permanently deleted only when the user selects delete, confirms the irreversible-delete checkbox, and types `DELETE`.
 
 ## GS Account Manager Companion
 
@@ -198,7 +198,9 @@ GS Account Manager is a hosted web app, so it cannot directly launch a user's lo
 Current web-side support:
 
 - Companion page at `/companion` with `/local-helper` kept as a compatibility redirect target
-- Clients / Instances page at `/clients` for user-scoped client profiles, reported instances, launch jobs, and latest snapshot metadata
+- Clients page at `/clients` for user-scoped client launch profiles
+- Instances page at `/instances` for user-scoped reported local sessions and latest snapshot metadata
+- Local Jobs page at `/local-jobs` for queued/running/completed companion jobs and safe job events
 - Downloads page at `/downloads`
 - Windows download placeholder at `/downloads/helper/windows`
 - user-scoped companion device/session/status/snapshot tables
@@ -212,7 +214,7 @@ Current web-side support:
 - masked proxy-mode summaries on Dashboard and Workflow
 - Electron companion skeleton in `companion/`
 - token-authenticated companion APIs for pairing, heartbeat, job polling, job status, client instance status, and opt-in snapshots
-- local Companion tabs for Pair Device, Status, Clients, Launch Profiles, Browser Assist, Settings, and Logs
+- local Companion tabs for Pair Device, Status, Clients, Instances, Jobs, Controlled Browser, Settings, and Logs
 - Windows process/window detection using normal OS APIs only
 - local-only executable path storage and visible user-triggered launch support
 
@@ -255,6 +257,6 @@ The helper will not bypass CAPTCHA, Cloudflare, robot checks, phone verification
 - Admins can view high-level logs across users; regular users only see their own logs.
 - `.env` is ignored and must not be committed.
 
-## Browser Assist Placeholder
+## Controlled Browser Foundation
 
 `src/browser-assist.js` is a disabled scaffold for future user-triggered form fill helpers. It does not automate website login, submit forms, create external accounts, bypass CAPTCHA, bypass Cloudflare, bypass security checks, or bypass 2FA.

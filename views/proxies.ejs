@@ -1,6 +1,6 @@
 <%- include('partials/head') %>
 <section class="metric-grid proxy-metrics">
-  <% [['total','Total'],['assigned','Assigned'],['unassigned','Unassigned'],['online','Online'],['blocked','Blocked'],['review','Review']].forEach(item => { %>
+  <% [['total','Total Proxies'],['working','Working'],['failed','Failed'],['unchecked','Unchecked'],['assigned','Assigned'],['unassigned','Unassigned']].forEach(item => { %>
     <article class="metric"><span><%= item[1] %></span><strong><%= counts[item[0]] || 0 %></strong></article>
   <% }) %>
 </section>
@@ -24,7 +24,7 @@
   </div>
   <% if (query && query.imported) { %><p class="notice">Imported <%= Number(query.imported || 0) %> proxy line(s). Invalid <%= Number(query.invalid || 0) %>.</p><% } %>
   <p class="muted">Default proxy type is HTTP. Proxy credentials stay encrypted and hidden in tables.</p>
-  <% if (isLimitedAccess) { %><p class="notice">Limited access: proxy import, upload, edit, delete, and testing actions are disabled. Export is available for your own saved records.</p><% } %>
+  <% if (isLimitedAccess) { %><p class="notice">Private-build access is inactive. Proxy data remains locked until an admin activates access.</p><% } %>
 </section>
 
 <% if (!isLimitedAccess) { %>
@@ -64,6 +64,15 @@
     <h2>Saved Proxies</h2>
     <span class="tag">Max <%= settings.max_accounts_per_proxy || 5 %> accounts per proxy</span>
   </div>
+  <% if (!isLimitedAccess) { %>
+    <div class="bulk-bar proxy-bulk-bar">
+      <button class="button" form="proxy-export-form" formaction="/proxies/bulk-status" name="status" value="working">Mark Working</button>
+      <button class="button" form="proxy-export-form" formaction="/proxies/bulk-status" name="status" value="failed">Mark Failed</button>
+      <button class="button" form="proxy-export-form" formaction="/proxies/bulk-status" name="status" value="unchecked">Mark Unchecked</button>
+      <button class="button" type="button" disabled>Assign to Accounts</button>
+      <button class="button" type="button" disabled>Test Proxy</button>
+    </div>
+  <% } %>
   <table>
     <thead><tr><th><input type="checkbox" data-select-all="[name='proxy_ids']"></th><th>Name</th><th>Host</th><th>Port</th><th>Type</th><th>Category</th><th>Country</th><th>Status</th><th>Assigned</th><th>Max</th><th>Notes</th><th>Credentials</th><th>Actions</th></tr></thead>
     <tbody>

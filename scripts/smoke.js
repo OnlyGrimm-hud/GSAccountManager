@@ -134,6 +134,8 @@ async function main() {
     assert(serverSource.includes("app.get('/accounts'"));
     assert(serverSource.includes("app.get('/proxies'"));
     assert(serverSource.includes("app.get('/clients'"));
+    assert(serverSource.includes("app.get('/instances'"));
+    assert(serverSource.includes("app.get('/local-jobs'"));
     assert(serverSource.includes("app.get('/settings'"));
     assert(serverSource.includes("app.get('/logs'"));
     assert(serverSource.includes("app.get('/downloads'"));
@@ -144,6 +146,9 @@ async function main() {
     assert(serverSource.includes("app.post('/accounts/bulk'"));
     assert(serverSource.includes("app.post('/proxies/import'"));
     assert(serverSource.includes("app.post('/proxies/export'"));
+    assert(serverSource.includes("app.post('/proxies/bulk-status'"));
+    assert(serverSource.includes("app.post('/clients/profiles/:id/delete'"));
+    assert(serverSource.includes("app.post('/local-jobs/:id/cancel'"));
     assert(serverSource.includes("app.post('/api/companion/pair/complete'"));
     assert(serverSource.includes("app.post('/api/companion/heartbeat'"));
     assert(serverSource.includes("app.post('/api/companion/clients/status'"));
@@ -178,6 +183,7 @@ async function main() {
   assert(routeExists('get', '/companion'));
   assert(routeExists('get', '/clients'));
   assert(routeExists('get', '/instances'));
+  assert(routeExists('get', '/local-jobs'));
   assert(routeExists('get', '/workflows'));
   assert(routeExists('get', '/admin'));
   assert(routeExists('get', '/admin/users'));
@@ -189,6 +195,9 @@ async function main() {
   assert(routeExists('post', '/accounts/bulk'));
   assert(routeExists('post', '/proxies/import'));
   assert(routeExists('post', '/proxies/export'));
+  assert(routeExists('post', '/proxies/bulk-status'));
+  assert(routeExists('post', '/clients/profiles/:id/delete'));
+  assert(routeExists('post', '/local-jobs/:id/cancel'));
   assert(routeExists('post', '/api/companion/pair/complete'));
   assert(routeExists('post', '/api/companion/heartbeat'));
   assert(routeExists('post', '/api/companion/clients/status'));
@@ -211,42 +220,42 @@ async function main() {
     path: '/',
     currentUserRecord: { role: 'user', subscription_status: 'inactive' }
   });
-  assert.strictEqual(inactiveHome.nextCalled, true);
+  assert.strictEqual(inactiveHome.res.redirected, '/locked');
 
   const inactiveExport = invokeMiddleware(testInternals.restrictLimitedUsers, {
     method: 'POST',
     path: '/accounts/export',
     currentUserRecord: { role: 'user', subscription_status: 'inactive' }
   });
-  assert.strictEqual(inactiveExport.nextCalled, true);
+  assert.strictEqual(inactiveExport.res.redirected, '/locked');
 
   const inactiveImport = invokeMiddleware(testInternals.restrictLimitedUsers, {
     method: 'POST',
     path: '/accounts/import',
     currentUserRecord: { role: 'user', subscription_status: 'inactive' }
   });
-  assert.strictEqual(inactiveImport.res.statusCode, 403);
+  assert.strictEqual(inactiveImport.res.redirected, '/locked');
 
   const inactiveSettings = invokeMiddleware(testInternals.restrictLimitedUsers, {
     method: 'GET',
     path: '/settings',
     currentUserRecord: { role: 'user', subscription_status: 'inactive' }
   });
-  assert.strictEqual(inactiveSettings.res.statusCode, 403);
+  assert.strictEqual(inactiveSettings.res.redirected, '/locked');
 
   const inactiveClients = invokeMiddleware(testInternals.restrictLimitedUsers, {
     method: 'GET',
     path: '/clients',
     currentUserRecord: { role: 'user', subscription_status: 'inactive' }
   });
-  assert.strictEqual(inactiveClients.res.statusCode, 403);
+  assert.strictEqual(inactiveClients.res.redirected, '/locked');
 
   const inactiveFullAccess = invokeMiddleware(testInternals.requireFullAccess, {
     method: 'GET',
     path: '/workflows',
     currentUserRecord: { role: 'user', subscription_status: 'inactive' }
   });
-  assert.strictEqual(inactiveFullAccess.res.statusCode, 403);
+  assert.strictEqual(inactiveFullAccess.res.redirected, '/locked');
 
   const bannedCheck = invokeMiddleware(testInternals.requireNotBlocked, {
     currentUserRecord: { role: 'user', subscription_status: 'banned' }

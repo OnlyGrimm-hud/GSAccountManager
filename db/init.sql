@@ -120,6 +120,13 @@ ALTER TABLE accounts ADD COLUMN IF NOT EXISTS verified TEXT NOT NULL DEFAULT 'un
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS membership_status TEXT NOT NULL DEFAULT 'unknown';
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS tags TEXT;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS private_notes_encrypted TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS character_type TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS gp_amount BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS platinum_amount BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS wealth_amount BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS ban_status TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS completed_tutorial BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS total_level INTEGER;
 
 UPDATE accounts SET legacy_login = username WHERE legacy_login IS NULL;
 UPDATE accounts SET legacy_password_encrypted = password_encrypted WHERE legacy_password_encrypted IS NULL;
@@ -430,6 +437,7 @@ CREATE TABLE IF NOT EXISTS client_profiles (
   client_type TEXT NOT NULL DEFAULT 'custom',
   executable_path_encrypted TEXT,
   launch_args_encrypted TEXT,
+  default_account_id BIGINT,
   default_proxy_id BIGINT,
   default_workflow_id BIGINT,
   notes TEXT,
@@ -479,6 +487,8 @@ ALTER TABLE live_snapshots ADD COLUMN IF NOT EXISTS file_size INTEGER;
 ALTER TABLE live_snapshots ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 UPDATE live_snapshots SET mime_type = content_type WHERE mime_type IS NULL AND content_type IS NOT NULL;
 UPDATE live_snapshots SET file_size = image_size WHERE file_size IS NULL AND image_size IS NOT NULL;
+
+ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS default_account_id BIGINT;
 
 CREATE TABLE IF NOT EXISTS workflows (
   id BIGSERIAL PRIMARY KEY,
@@ -551,6 +561,10 @@ CREATE TABLE IF NOT EXISTS companion_jobs (
 
 ALTER TABLE companion_jobs ADD COLUMN IF NOT EXISTS client_profile_id BIGINT;
 ALTER TABLE companion_jobs ADD COLUMN IF NOT EXISTS client_instance_id BIGINT;
+ALTER TABLE companion_jobs ADD COLUMN IF NOT EXISTS safe_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE companion_jobs ADD COLUMN IF NOT EXISTS safe_result_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+UPDATE companion_jobs SET safe_payload_json = payload WHERE safe_payload_json = '{}'::jsonb AND payload <> '{}'::jsonb;
+UPDATE companion_jobs SET safe_result_json = result WHERE safe_result_json = '{}'::jsonb AND result <> '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS companion_job_events (
   id BIGSERIAL PRIMARY KEY,
@@ -586,6 +600,15 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'settings_pkey') THEN
     ALTER TABLE settings DROP CONSTRAINT settings_pkey;
   END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instances_status_check') THEN
+    ALTER TABLE client_instances DROP CONSTRAINT client_instances_status_check;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_status_check') THEN
+    ALTER TABLE companion_jobs DROP CONSTRAINT companion_jobs_status_check;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_job_type_check') THEN
+    ALTER TABLE companion_jobs DROP CONSTRAINT companion_jobs_job_type_check;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check') THEN
     ALTER TABLE users
       ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'staff', 'admin'));
@@ -601,6 +624,18 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'settings_user_key_unique') THEN
     ALTER TABLE settings
       ADD CONSTRAINT settings_user_key_unique UNIQUE (user_id, key);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instances_status_check') THEN
+    ALTER TABLE client_instances
+      ADD CONSTRAINT client_instances_status_check CHECK (status IN ('pending', 'detected', 'launching', 'running', 'scanning', 'stopped', 'crashed', 'unknown'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_status_check') THEN
+    ALTER TABLE companion_jobs
+      ADD CONSTRAINT companion_jobs_status_check CHECK (status IN ('queued', 'accepted', 'running', 'paused', 'waiting_for_user', 'completed', 'failed', 'cancelled'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_job_type_check') THEN
+    ALTER TABLE companion_jobs
+      ADD CONSTRAINT companion_jobs_job_type_check CHECK (job_type IN ('workflow_run', 'run_workflow', 'launch_client', 'stop_client', 'detect_clients', 'request_snapshot', 'open_browser', 'fill_visible_fields', 'pause_workflow', 'resume_workflow', 'cancel_workflow'));
   END IF;
 END $$;
 
@@ -663,6 +698,9 @@ CREATE INDEX IF NOT EXISTS idx_accounts_http_proxy ON accounts(assigned_http_pro
 CREATE INDEX IF NOT EXISTS idx_accounts_upgrade_status ON accounts(upgrade_status);
 CREATE INDEX IF NOT EXISTS idx_accounts_exported_at ON accounts(exported_at);
 CREATE INDEX IF NOT EXISTS idx_accounts_archived_at ON accounts(archived_at);
+CREATE INDEX IF NOT EXISTS idx_accounts_character_type ON accounts(character_type);
+CREATE INDEX IF NOT EXISTS idx_accounts_total_level ON accounts(user_id, total_level);
+CREATE INDEX IF NOT EXISTS idx_accounts_completed_tutorial ON accounts(user_id, completed_tutorial);
 CREATE INDEX IF NOT EXISTS idx_proxies_user ON proxies(user_id);
 CREATE INDEX IF NOT EXISTS idx_proxies_status ON proxies(status);
 CREATE INDEX IF NOT EXISTS idx_proxies_category ON proxies(category);
@@ -684,6 +722,7 @@ CREATE INDEX IF NOT EXISTS idx_live_snapshots_user ON live_snapshots(user_id);
 CREATE INDEX IF NOT EXISTS idx_live_snapshots_instance ON live_snapshots(client_instance_id);
 CREATE INDEX IF NOT EXISTS idx_client_profiles_user ON client_profiles(user_id);
 CREATE INDEX IF NOT EXISTS idx_client_profiles_enabled ON client_profiles(user_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_client_profiles_default_account ON client_profiles(default_account_id);
 CREATE INDEX IF NOT EXISTS idx_client_instances_user ON client_instances(user_id);
 CREATE INDEX IF NOT EXISTS idx_client_instances_device ON client_instances(companion_device_id);
 CREATE INDEX IF NOT EXISTS idx_client_instances_status ON client_instances(user_id, status);
@@ -840,6 +879,11 @@ BEGIN
     ALTER TABLE client_profiles
       ADD CONSTRAINT client_profiles_proxy_id_fkey
       FOREIGN KEY (default_proxy_id) REFERENCES proxies(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_profiles_default_account_id_fkey') THEN
+    ALTER TABLE client_profiles
+      ADD CONSTRAINT client_profiles_default_account_id_fkey
+      FOREIGN KEY (default_account_id) REFERENCES accounts(id) ON DELETE SET NULL;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_profiles_workflow_id_fkey') THEN
     ALTER TABLE client_profiles

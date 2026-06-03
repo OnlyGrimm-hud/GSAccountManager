@@ -29,11 +29,11 @@ const workflowStepTypes = [
 ];
 const companionJobStatuses = ['queued', 'accepted', 'running', 'paused', 'waiting_for_user', 'completed', 'failed', 'cancelled'];
 const companionJobTypes = [
-  'workflow_run', 'launch_client', 'stop_client', 'detect_clients', 'request_snapshot',
+  'workflow_run', 'run_workflow', 'launch_client', 'stop_client', 'detect_clients', 'request_snapshot',
   'open_browser', 'fill_visible_fields', 'pause_workflow', 'resume_workflow', 'cancel_workflow'
 ];
 const clientTypes = ['runelite', 'jagex_launcher', 'official_client', 'dreambot', 'custom'];
-const clientInstanceStatuses = ['detected', 'launching', 'running', 'stopped', 'crashed', 'unknown'];
+const clientInstanceStatuses = ['pending', 'detected', 'launching', 'running', 'scanning', 'stopped', 'crashed', 'unknown'];
 const paymentMethods = ['LTC', 'BTC', 'ETH', 'manual_admin_activation'];
 
 module.exports = {
