@@ -132,12 +132,12 @@
       <a class="button" target="_blank" rel="noopener" href="<%= settings.account_settings_url || 'https://account.jagex.com/' %>">Open account settings page</a>
       <a class="button" target="_blank" rel="noopener" href="<%= settings.upgrade_url || 'https://account.jagex.com/' %>">Open upgrade page</a>
     </div>
-    <p class="muted">Buttons only open pages. The app never types, submits, creates accounts, or bypasses checks.</p>
+    <p class="muted">Browser Automator can fill the selected account's stored login fields after you start a visible local job. Submits, CAPTCHA, 2FA, email/phone verification, and security checks stay manual.</p>
     <% if (selected) { %>
       <div class="assist-panel">
         <p class="eyebrow">Coming Soon</p>
         <h3>User-triggered browser fill</h3>
-        <p class="muted">The foundation is queued through GS Browser Automator, but direct fill controls stay hidden until the local app flow is production-ready.</p>
+        <p class="muted">GS Browser Automator can type user-owned saved credentials into visible forms from queued jobs. It does not log the values or bypass manual checks.</p>
         <div class="actions">
           <span class="tag">Visible browser only</span>
           <span class="tag">Requires your click</span>

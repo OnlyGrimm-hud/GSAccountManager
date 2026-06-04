@@ -378,6 +378,61 @@ th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
   padding-top: 0;
   background: rgba(255, 255, 255, .02);
 }
+.account-detail-row td {
+  padding-bottom: 18px;
+}
+.account-detail-panel {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0d0c14;
+}
+.account-detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+}
+.credential-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 10px;
+}
+.secret-line {
+  display: grid;
+  grid-template-columns: minmax(120px, .7fr) minmax(180px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .02);
+}
+.secret-line > span,
+.secret-value {
+  color: var(--muted);
+}
+.secret-value {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  white-space: normal;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+.secret-value.revealed {
+  color: var(--text);
+}
+.full-value {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.row-line.wide {
+  grid-column: 1 / -1;
+}
 .step { position: relative; }
 .step-num {
   width: 34px;
@@ -601,5 +656,7 @@ tr.invalid td {
   .metric-grid, .steps, .step-grid, .filters, .filters.compact, .copy-grid, .proxy-metrics, .account-metrics, .dashboard-metrics, .account-filters, .bulk-bar, .log-filters, .import-stats { grid-template-columns: 1fr; }
   .workflow-hero, .topbar, .panel-head { align-items: flex-start; flex-direction: column; }
   .user-menu { flex-wrap: wrap; }
+  .account-detail-head { align-items: flex-start; flex-direction: column; }
+  .secret-line { grid-template-columns: 1fr; }
   table { display: block; overflow-x: auto; }
 }

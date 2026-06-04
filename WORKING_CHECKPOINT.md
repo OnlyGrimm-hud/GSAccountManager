@@ -168,7 +168,7 @@ If old records have no `user_id`, they are assigned to the first admin user when
 ## Current Working Pages
 
 - Dashboard: account metrics, empty state, progress cards, quick copy actions, safe open-page links.
-- Accounts: list, filters, add/edit account page, masked secrets with reveal/copy controls.
+- Accounts: list, filters, add/edit account page, full owner-visible non-secret account labels, and encrypted secrets with reveal/copy controls.
 - Accounts Import / Export: built into the Accounts page.
 - Proxies: proxy storage, proxy import/export, assignment counts, auto-assign request, private proxy credentials.
 - Browser Automator: automation definitions, run history, local app job handoff, and visible Playwright execution through GS Browser Automator.
@@ -193,7 +193,7 @@ If old records have no `user_id`, they are assigned to the first admin user when
 - Logged-in UI flows still need manual browser testing with real admin credentials after each deploy.
 - No automated end-to-end browser test suite exists yet.
 - Emergency admin fallback is optional and creates its own isolated workspace.
-- Browser Automator job records, GS Agent handoff, visible Chromium execution, field fill, safe clicks, screenshots, and manual pauses are implemented in GS Browser Automator.
+- Browser Automator job records, GS Agent handoff, visible Chromium execution, owner credential field fill, safe clicks, screenshots, and manual pauses are implemented in GS Browser Automator.
 - Windows GS Agent packaging is scaffolded but not built yet.
 - GS Agent one-time pairing is implemented with a stable local install ID. Re-pairing the same install refreshes the same device slot; a different install/computer counts against the user's subscription device limit.
 - Live snapshots are opt-in and Browser Automator screenshot steps require local user confirmation before upload.
@@ -214,7 +214,7 @@ Allowed:
 - copy fields only when the user clicks a button
 - open configured external pages in a new tab
 - queue visible local browser automation jobs through GS Browser Automator
-- fill visible browser fields only after user action through GS Browser Automator
+- fill visible browser fields, including the owner's saved login/email/password fields, only after user action through GS Browser Automator
 - pause for CAPTCHA, 2FA, email verification, phone verification, Cloudflare, and security checks
 - launch configured local clients through user-triggered GS Agent jobs
 - detect local windows/process names without injection or memory reads

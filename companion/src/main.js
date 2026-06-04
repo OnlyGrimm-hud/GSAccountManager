@@ -33,7 +33,8 @@ app.on('activate', () => {
 });
 
 ipcMain.handle('companion:safety-summary', () => ({
-  automationMode: 'user-triggered-fill-only',
+  automationMode: 'user-triggered-owner-credential-fill',
+  canFillUserOwnedSensitiveFields: true,
   noCaptchaBypass: true,
   noSecurityBypass: true,
   noAutoSubmit: true,

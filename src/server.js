@@ -3304,7 +3304,7 @@ function setupStepsForWorkspace(counts = {}, helper = {}, access = {}) {
       title: 'Add accounts and proxies',
       status: Number(counts.accounts || 0) > 0 ? 'complete' : 'current',
       label: `${Number(counts.accounts || 0)} accounts / ${Number(counts.proxies || 0)} proxies`,
-      description: 'Import or add account and proxy records. Sensitive values stay encrypted and masked by default.',
+      description: 'Import or add account and proxy records. Sensitive values stay encrypted and can be revealed or copied by the logged-in owner.',
       href: '/accounts',
       secondaryHref: '/proxies',
       action: 'Open Accounts'
@@ -3454,7 +3454,7 @@ function setupGuideSections() {
     {
       title: '3. Import account and proxy data',
       status: 'Working',
-      body: 'Use Accounts and Proxies pages for import/export. Passwords, OTP secrets, recovery passwords, and proxy passwords are encrypted at rest and masked in list views.'
+      body: 'Use Accounts and Proxies pages for import/export. Passwords, OTP secrets, recovery passwords, and proxy passwords are encrypted at rest and can be revealed or copied only by the logged-in owner.'
     },
     {
       title: '4. Configure launch profiles',
@@ -3464,7 +3464,7 @@ function setupGuideSections() {
     {
       title: '5. Run Browser Automator jobs',
       status: 'Scaffolded',
-      body: 'Browser Automator jobs are meant to run in a visible local browser. They may fill visible fields after user action, but must pause for CAPTCHA, 2FA, email verification, phone verification, and security checks.'
+      body: 'Browser Automator jobs run in a visible local browser. They may fill the owner’s saved login/email/password fields after a user-started job, but must pause for CAPTCHA, 2FA, email verification, phone verification, and security checks.'
     },
     {
       title: '6. Watch Local Jobs and Live Sessions',

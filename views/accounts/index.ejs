@@ -36,6 +36,7 @@
   <% if (query && query.stats_sync) { %>
     <p class="notice">Stats sync <%= query.stats_sync %><%= query.stats_error ? `: ${query.stats_error}` : '' %>.</p>
   <% } %>
+  <p class="notice">Account details are owner-only. Full usernames display directly; passwords, OTP secrets, recovery credentials, and email passwords stay encrypted until you click Reveal or Copy.</p>
 
   <form class="filters account-filters" method="get">
     <input name="q" placeholder="Search" value="<%= filters.q || '' %>">
@@ -140,7 +141,7 @@
             <% } %>
           </td>
           <td>
-            <strong><%= mask(account.legacy_login || account.username) %></strong>
+            <strong class="full-value"><%= account.legacy_login || account.username || 'No login saved' %></strong>
             <br><span class="tag"><%= account.account_type %></span>
             <% if (account.account_type === 'jagex') { %><br><span class="muted">email login</span><% } %>
           </td>
@@ -165,7 +166,7 @@
               <span class="tag">Unknown</span>
             <% } %>
           </td>
-          <td><%= account.notes ? account.notes.slice(0, 80) : '' %></td>
+          <td><span class="full-value"><%= account.notes || '' %></span></td>
           <td>
             <% if (account.status === 'banned_temp' || account.ban_status === 'temp') { %><span class="status banned_temp">Temp</span>
             <% } else if (account.status === 'banned_perm' || account.ban_status === 'perm') { %><span class="status banned_perm">Perm</span>
@@ -175,7 +176,7 @@
           <td>
             <% if (account.active_instance_id) { %>
               <a class="status <%= clientStateClass(rowClientState) %>" href="/instances/<%= account.active_instance_id %>"><%= clientStateLabel(rowClientState) %></a>
-              <% if (account.active_instance_window) { %><br><span class="muted"><%= account.active_instance_window.slice(0, 40) %></span><% } %>
+              <% if (account.active_instance_window) { %><br><span class="muted full-value"><%= account.active_instance_window %></span><% } %>
             <% } else { %>
               <span class="tag">None</span>
             <% } %>
@@ -210,6 +211,90 @@
                 <button class="button small danger">Delete</button>
               </form>
             <% } %>
+          </td>
+        </tr>
+        <tr class="detail-row account-detail-row">
+          <td></td>
+          <td colspan="14">
+            <div class="account-detail-panel">
+              <div class="account-detail-head">
+                <div>
+                  <p class="eyebrow">Owner Account Details</p>
+                  <h2><%= account.display_name || account.legacy_login || account.username || `Account ${account.id}` %></h2>
+                </div>
+                <a class="button small" href="/accounts/<%= account.id %>">Open Full Record</a>
+              </div>
+              <div class="credential-detail-grid">
+                <p class="row-line"><span>Account ID</span><strong><%= account.id %></strong></p>
+                <p class="row-line"><span>Login / Username</span><strong class="full-value"><%= account.legacy_login || account.username || 'Not saved' %></strong></p>
+                <p class="row-line"><span>Display Name</span><strong class="full-value"><%= account.display_name || 'Not saved' %></strong></p>
+                <p class="row-line"><span>Type / Category</span><strong><%= account.account_type %><%= account.category ? ` / ${account.category}` : '' %></strong></p>
+                <p class="row-line"><span>Status</span><strong><%= account.status %></strong></p>
+                <p class="row-line"><span>Country</span><strong><%= account.country_code || 'Not set' %></strong></p>
+
+                <div class="secret-line">
+                  <span>Login Password</span>
+                  <code id="account-<%= account.id %>-legacy-password" class="secret-value">Hidden until Reveal</code>
+                  <button type="button" class="button small reveal-api" data-url="/accounts/<%= account.id %>/reveal/legacy_password" data-target="#account-<%= account.id %>-legacy-password">Reveal</button>
+                  <button type="button" class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_password">Copy</button>
+                </div>
+                <div class="secret-line">
+                  <span>Email / Jagex Email</span>
+                  <code id="account-<%= account.id %>-jagex-email" class="secret-value">Hidden until Reveal</code>
+                  <button type="button" class="button small reveal-api" data-url="/accounts/<%= account.id %>/reveal/jagex_email" data-target="#account-<%= account.id %>-jagex-email">Reveal</button>
+                  <button type="button" class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/jagex_email">Copy</button>
+                </div>
+                <div class="secret-line">
+                  <span>Target Email</span>
+                  <code id="account-<%= account.id %>-target-email" class="secret-value">Hidden until Reveal</code>
+                  <button type="button" class="button small reveal-api" data-url="/accounts/<%= account.id %>/reveal/target_email" data-target="#account-<%= account.id %>-target-email">Reveal</button>
+                  <button type="button" class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/target_email">Copy</button>
+                </div>
+                <div class="secret-line">
+                  <span>Email Password</span>
+                  <code id="account-<%= account.id %>-email-password" class="secret-value">Hidden until Reveal</code>
+                  <button type="button" class="button small reveal-api" data-url="/accounts/<%= account.id %>/reveal/email_password" data-target="#account-<%= account.id %>-email-password">Reveal</button>
+                  <button type="button" class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/email_password">Copy</button>
+                </div>
+                <div class="secret-line">
+                  <span>Jagex Password</span>
+                  <code id="account-<%= account.id %>-jagex-password" class="secret-value">Hidden until Reveal</code>
+                  <button type="button" class="button small reveal-api" data-url="/accounts/<%= account.id %>/reveal/jagex_password" data-target="#account-<%= account.id %>-jagex-password">Reveal</button>
+                  <button type="button" class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/jagex_password">Copy</button>
+                </div>
+                <div class="secret-line">
+                  <span>Recovery Email</span>
+                  <code id="account-<%= account.id %>-recovery-email" class="secret-value">Hidden until Reveal</code>
+                  <button type="button" class="button small reveal-api" data-url="/accounts/<%= account.id %>/reveal/recovery_email" data-target="#account-<%= account.id %>-recovery-email">Reveal</button>
+                  <button type="button" class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/recovery_email">Copy</button>
+                </div>
+                <div class="secret-line">
+                  <span>Recovery Email Password</span>
+                  <code id="account-<%= account.id %>-recovery-email-password" class="secret-value">Hidden until Reveal</code>
+                  <button type="button" class="button small reveal-api" data-url="/accounts/<%= account.id %>/reveal/recovery_email_password" data-target="#account-<%= account.id %>-recovery-email-password">Reveal</button>
+                  <button type="button" class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/recovery_email_password">Copy</button>
+                </div>
+                <div class="secret-line">
+                  <span>Bank PIN</span>
+                  <code id="account-<%= account.id %>-bank-pin" class="secret-value">Hidden until Reveal</code>
+                  <button type="button" class="button small reveal-api" data-url="/accounts/<%= account.id %>/reveal/bank_pin" data-target="#account-<%= account.id %>-bank-pin">Reveal</button>
+                  <button type="button" class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/bank_pin">Copy</button>
+                </div>
+                <div class="secret-line">
+                  <span>OTP Secret</span>
+                  <code id="account-<%= account.id %>-otp-secret" class="secret-value">Hidden until Reveal</code>
+                  <button type="button" class="button small reveal-api" data-url="/accounts/<%= account.id %>/reveal/otp_secret" data-target="#account-<%= account.id %>-otp-secret">Reveal</button>
+                  <button type="button" class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_secret">Copy</button>
+                </div>
+                <div class="secret-line">
+                  <span>OTP Code</span>
+                  <code id="account-<%= account.id %>-otp-code" class="secret-value">Hidden until Reveal</code>
+                  <button type="button" class="button small reveal-api" data-url="/accounts/<%= account.id %>/reveal/otp_code" data-target="#account-<%= account.id %>-otp-code">Reveal</button>
+                  <button type="button" class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy</button>
+                </div>
+                <p class="row-line wide"><span>Notes</span><strong class="full-value"><%= account.notes || 'No notes' %></strong></p>
+              </div>
+            </div>
           </td>
         </tr>
       <% }) %>

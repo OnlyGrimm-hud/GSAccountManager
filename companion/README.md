@@ -36,6 +36,7 @@ Current local-only automation behavior:
 - Browser Automator opens a visible Chromium window
 - isolated local profile
 - account fields are fetched only during a user-approved job step
+- user-owned login, email, password, and OTP-code fields can be filled into visible browser forms when the user starts/approves the job
 - passwords, OTP codes, and other sensitive values are not written to logs
 - OTP code fill requires explicit user confirmation
 - screenshot steps require local opt-in and a user confirmation

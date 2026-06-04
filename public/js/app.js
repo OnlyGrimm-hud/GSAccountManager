@@ -57,21 +57,38 @@ document.addEventListener('click', async event => {
   const button = event.target.closest('.reveal-api');
   if (!button) return;
   event.preventDefault();
+  const target = button.dataset.target ? document.querySelector(button.dataset.target) : null;
   const input = button.parentElement.querySelector('input');
-  if (!input || !button.dataset.url) return;
+  if ((!input && !target) || !button.dataset.url) return;
   const original = button.textContent;
+  if (button.dataset.revealed === 'true') {
+    if (input) {
+      input.type = 'password';
+      input.value = '';
+    }
+    if (target) {
+      target.textContent = target.dataset.hiddenLabel || 'Hidden until Reveal';
+      target.classList.remove('revealed');
+    }
+    button.dataset.revealed = 'false';
+    button.textContent = 'Reveal';
+    return;
+  }
   try {
     const response = await fetch(button.dataset.url, { credentials: 'same-origin' });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Reveal failed');
-    input.value = data.value || '';
-    input.type = 'text';
+    if (input) {
+      input.value = data.value || '';
+      input.type = 'text';
+    }
+    if (target) {
+      target.dataset.hiddenLabel ||= target.textContent || 'Hidden until Reveal';
+      target.textContent = data.value || 'No value saved';
+      target.classList.add('revealed');
+    }
+    button.dataset.revealed = 'true';
     button.textContent = 'Hide';
-    window.setTimeout(() => {
-      input.type = 'password';
-      input.value = '';
-      button.textContent = original;
-    }, 12000);
   } catch (error) {
     button.textContent = 'Reveal failed';
     window.setTimeout(() => { button.textContent = original; }, 1400);

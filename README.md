@@ -2,7 +2,7 @@
 
 GS Account Manager is a Render-ready Node/Express app for Discord-authenticated account storage, proxy storage, admin management, subscription gating, and a safe GS Agent foundation.
 
-The product is intentionally manual-workflow-only. It does not solve or bypass CAPTCHA, 2FA, email verification, phone verification, security checks, Cloudflare checks, or account creation protections. Browser and local app work must stay visible, user-triggered, and safe.
+The product is intentionally manual-workflow-only. It can fill the logged-in owner's stored login, email, and password fields into visible browser jobs when the user starts that job, but it does not solve or bypass CAPTCHA, 2FA, email verification, phone verification, security checks, Cloudflare checks, or account creation protections. Browser and local app work must stay visible, user-triggered, and safe.
 
 ## Current Project Structure
 
@@ -71,11 +71,11 @@ Discord redirect URLs:
 - Account import/export on the Accounts page.
 - Proxy import/export on the Proxies page.
 - Encrypted sensitive account and proxy fields.
-- Masked sensitive values in list views.
-- Copy endpoints that return sensitive fields only on user action.
+- Owner-only reveal and copy controls for sensitive account values on list/detail views.
+- Copy/reveal endpoints that return sensitive fields only on user action and only for the logged-in record owner.
 - `/healthz` public health check.
 - Browser Automator definitions, job records, job events, local job queue foundation, and visible Playwright execution in GS Browser Automator.
-- Browser Automator supports `open_url`, `wait_for_selector`, `fill_field`, `click`, `screenshot`, `pause_for_user`, `wait_for_user_continue`, `mark_complete`, `fail`, and `note` steps.
+- Browser Automator supports `open_url`, `wait_for_selector`, owner credential `fill_field`, `click`, `screenshot`, `pause_for_user`, `wait_for_user_continue`, `mark_complete`, `fail`, and `note` steps.
 - GS Browser Automator uses Playwright Chromium when installed and falls back to system Microsoft Edge or Chrome when the Playwright browser runtime is not installed yet.
 - Automation-first setup wizard at `/setup`.
 - Local automation setup guide at `/setup-guide`.
