@@ -1868,6 +1868,7 @@ app.post('/workflows/:id/run', requireAuth, async (req, res, next) => {
     if (deviceId) await assertDeviceOwnership(userId, deviceId);
     const steps = await db.query(`SELECT * FROM workflow_steps WHERE user_id=$1 AND workflow_id=$2 ORDER BY step_order`, [userId, workflow.id]);
     if (!steps.rows.length) throw new Error('Automation has no steps.');
+    await validateWorkflowRunPreflight(userId, steps.rows, { accountId });
     const run = await db.query(
       `INSERT INTO workflow_runs (user_id, workflow_id, account_id, proxy_id, companion_device_id, status, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, 'queued', NOW(), NOW())
@@ -4319,6 +4320,52 @@ function safeWorkflowStepConfig(configObject) {
   return clean;
 }
 
+async function validateWorkflowRunPreflight(userId, steps, options = {}) {
+  const refsByStep = steps
+    .map(step => ({ step, refs: accountValueRefsFromConfig(step.config || {}) }))
+    .filter(item => item.refs.length);
+  if (!refsByStep.length) return;
+  if (!options.accountId) {
+    throw new Error('Select an account before running this automation. This workflow uses saved account fields.');
+  }
+  const { account, decrypted } = await loadAccount(userId, options.accountId);
+  for (const item of refsByStep) {
+    let hasValue = false;
+    for (const ref of item.refs) {
+      const field = ref.replace(/^account\./, '');
+      if (field === 'otp_secret') {
+        throw new Error('Raw OTP secrets cannot be filled by Browser Automator. Use account.otp_code and confirm it manually during the visible run.');
+      }
+      const value = accountFieldForCompanion(account, decrypted, field);
+      if (value !== undefined && value !== null && value !== '') {
+        hasValue = true;
+        break;
+      }
+    }
+    if (!hasValue) {
+      const label = item.step.label || item.step.step_type || 'configured step';
+      throw new Error(`Selected account is missing ${item.refs.map(readableAccountRef).join(' or ')} for "${label}". Add the value on the account first, then queue the job again.`);
+    }
+  }
+}
+
+function accountValueRefsFromConfig(config = {}) {
+  const refs = [];
+  if (Array.isArray(config.value_refs)) refs.push(...config.value_refs);
+  if (config.value_ref) refs.push(config.value_ref);
+  return refs
+    .map(ref => String(ref || '').trim())
+    .filter(ref => {
+      if (!ref) return false;
+      if (!ref.startsWith('account.')) throw new Error(`Unsupported workflow value reference: ${ref}`);
+      return true;
+    });
+}
+
+function readableAccountRef(ref) {
+  return String(ref || '').replace(/^account\./, '').replace(/_/g, ' ');
+}
+
 async function replaceWorkflowSteps(userId, workflowId, steps) {
   await db.query('DELETE FROM workflow_steps WHERE user_id=$1 AND workflow_id=$2', [userId, workflowId]);
   const normalized = Array.isArray(steps) ? steps : workflowTemplateSteps('custom');
@@ -5148,6 +5195,8 @@ module.exports = {
     workflowTemplateName,
     workflowTemplateDescription,
     workflowTemplateSteps,
+    accountValueRefsFromConfig,
+    readableAccountRef,
     setupStepsForWorkspace,
     automationCompatibilityMatrix
   }
