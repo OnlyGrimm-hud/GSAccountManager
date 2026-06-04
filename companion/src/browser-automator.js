@@ -122,23 +122,26 @@ async function waitForConfiguredElement(ctx, page, config) {
 
 async function fillConfiguredField(ctx, page, config) {
   const locator = await locatorFromConfig(page, config);
-  const valueRef = String(config.value_ref || '').trim();
-  if (/otp_secret/i.test(valueRef)) {
+  const valueRefs = configuredValueRefs(config);
+  const valueRefLabel = configuredValueLabel(valueRefs);
+  if (valueRefs.some(valueRef => /otp_secret/i.test(valueRef))) {
     throw new Error('Filling raw OTP secrets is not allowed. Use account.otp_code with explicit user confirmation.');
   }
   const value = await resolveStepValue(ctx, config);
   if (value === undefined || value === null || value === '') {
-    throw new Error(`No value available for ${valueRef || 'configured field'}.`);
+    throw new Error(`No value available for ${valueRefLabel || 'configured field'}.`);
   }
-  if (isSensitiveReference(valueRef) || config.sensitive === true) {
-    await confirmSensitiveFill(ctx, valueRef || 'sensitive field');
+  const sensitive = valueRefs.some(value => isSensitiveReference(value)) || config.sensitive === true;
+  if (sensitive) {
+    await confirmSensitiveFill(ctx, valueRefLabel || 'sensitive field');
   }
   await locator.waitFor({ state: 'visible', timeout: safeTimeout(config.timeout, 30000) });
   await locator.fill(String(value), { timeout: safeTimeout(config.timeout, 30000) });
   await postJobEvent(ctx, 'fill_field', 'Filled visible field.', {
-    value_ref: valueRef || null,
+    value_ref: valueRefs.length === 1 ? valueRefs[0] : null,
+    value_refs: valueRefs.length > 1 ? valueRefs : null,
     matcher: safeMatcherLabel(config),
-    sensitive: isSensitiveReference(valueRef) || config.sensitive === true
+    sensitive
   });
 }
 
@@ -334,14 +337,28 @@ function fieldSelectorForTerm(term) {
 
 async function resolveStepValue(ctx, config) {
   if (config.static_text !== undefined && config.static_text !== null) return String(config.static_text);
-  const valueRef = String(config.value_ref || '').trim();
-  if (!valueRef) return '';
-  if (!valueRef.startsWith('account.')) throw new Error(`Unsupported value reference: ${valueRef}`);
+  const valueRefs = configuredValueRefs(config);
+  if (!valueRefs.length) return '';
   if (!ctx.payload.account || !ctx.payload.account.field_values_url) throw new Error('This job does not include an account field endpoint.');
-  const field = valueRef.replace(/^account\./, '');
-  const path = ctx.payload.account.field_values_url.replace(':field', encodeURIComponent(field));
-  const data = await apiFetch(ctx, path, { method: 'GET' });
-  return data.value || '';
+  for (const valueRef of valueRefs) {
+    if (!valueRef.startsWith('account.')) throw new Error(`Unsupported value reference: ${valueRef}`);
+    const field = valueRef.replace(/^account\./, '');
+    const path = ctx.payload.account.field_values_url.replace(':field', encodeURIComponent(field));
+    const data = await apiFetch(ctx, path, { method: 'GET' });
+    if (data.value !== undefined && data.value !== null && data.value !== '') return data.value;
+  }
+  return '';
+}
+
+function configuredValueRefs(config = {}) {
+  const refs = [];
+  if (Array.isArray(config.value_refs)) refs.push(...config.value_refs);
+  if (config.value_ref) refs.push(config.value_ref);
+  return refs.map(item => String(item || '').trim()).filter(Boolean);
+}
+
+function configuredValueLabel(valueRefs) {
+  return valueRefs.length > 1 ? valueRefs.join(' or ') : valueRefs[0] || '';
 }
 
 async function detectManualCheck(page) {

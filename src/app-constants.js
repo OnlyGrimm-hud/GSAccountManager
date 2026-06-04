@@ -20,7 +20,7 @@ const exportFormats = [
   'legacy_to_jagex', 'full', 'custom'
 ];
 const workflowModes = ['manual'];
-const workflowTypes = ['login_fill', 'account_creation_fill', 'generic_form_fill', 'custom'];
+const workflowTypes = ['login_fill', 'email_upgrade', 'account_creation_fill', 'generic_form_fill', 'custom'];
 const workflowDefinitionStatuses = ['draft', 'active', 'archived'];
 const workflowRunStatuses = ['queued', 'running', 'paused', 'waiting_for_user', 'completed', 'failed', 'cancelled'];
 const workflowStepTypes = [

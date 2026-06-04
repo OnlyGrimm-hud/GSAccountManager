@@ -14,6 +14,12 @@
     </div>
   </div>
   <p class="muted">Local jobs are commands queued for a paired GS Agent device. Jobs are user-scoped, visible, pausable, and safe-logged without passwords, OTP secrets, cookies, or tokens.</p>
+  <% if (query.launch_job) { %>
+    <p class="notice">Launch job <%= query.launch_job %> is queued. Open GS Agent, go to Jobs, click Fetch Next Job, then click Run Current Launch Job.</p>
+  <% } %>
+  <% if (query.workflow_job) { %>
+    <p class="notice">Browser Automator job <%= query.workflow_job %> is queued. Open GS Agent, go to Jobs or GS Browser Automator, fetch the job, then run it visibly.</p>
+  <% } %>
 </section>
 
 <section class="panel">

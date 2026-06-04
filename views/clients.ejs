@@ -63,6 +63,24 @@
       <p class="row-line"><span>Proxy launch</span><strong>GS Agent placeholder</strong></p>
     </div>
   </article>
+
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Ready Test Loop</p>
+        <h2>Launch A Client</h2>
+      </div>
+      <a class="button small" href="/local-jobs">Local Jobs</a>
+    </div>
+    <p class="muted">For the first real launch test, pair GS Agent, save the local executable path in GS Agent Settings, create a matching launch profile here, then queue a launch job.</p>
+    <div class="checklist-grid">
+      <p class="row-line"><span>1. Pair once</span><strong><%= helper.connected ? 'Connected' : 'Needed' %></strong></p>
+      <p class="row-line"><span>2. Save local path</span><strong>In GS Agent</strong></p>
+      <p class="row-line"><span>3. Queue launch</span><strong>This page</strong></p>
+      <p class="row-line"><span>4. Run job</span><strong>GS Agent Jobs tab</strong></p>
+    </div>
+    <p class="notice">The website never stores your local executable path. The launch happens visibly on your PC after you click Run Current Launch Job in GS Agent.</p>
+  </article>
 </section>
 
 <section class="panel">

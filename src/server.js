@@ -4223,9 +4223,10 @@ async function loadWorkflowRun(userId, runId) {
 }
 
 async function ensureStarterWorkflows(userId) {
-  const existing = await db.query('SELECT COUNT(*)::int count FROM workflows WHERE user_id=$1', [userId]);
-  if (existing.rows[0].count > 0) return;
-  for (const type of ['login_fill', 'account_creation_fill', 'generic_form_fill']) {
+  const existing = await db.query('SELECT type FROM workflows WHERE user_id=$1', [userId]);
+  const existingTypes = new Set(existing.rows.map(row => row.type));
+  for (const type of ['login_fill', 'email_upgrade', 'account_creation_fill', 'generic_form_fill']) {
+    if (existingTypes.has(type)) continue;
     const workflow = await db.query(
       `INSERT INTO workflows (user_id, name, description, type, status, updated_at)
        VALUES ($1, $2, $3, $4, 'active', NOW())
@@ -4239,6 +4240,7 @@ async function ensureStarterWorkflows(userId) {
 function workflowTemplateName(type) {
   return {
     login_fill: 'Login form fill',
+    email_upgrade: 'Email upgrade / change email',
     account_creation_fill: 'Account creation form fill',
     generic_form_fill: 'Generic multi-field form fill',
     custom: 'Custom automation'
@@ -4248,6 +4250,7 @@ function workflowTemplateName(type) {
 function workflowTemplateDescription(type) {
   return {
     login_fill: 'Open a login page and fill visible login fields after a user-started run.',
+    email_upgrade: 'Open the account portal, fill owned login details, pause for manual checks, then fill the target email for user review.',
     account_creation_fill: 'Open a signup page and fill selected visible fields, then pause for manual checks.',
     generic_form_fill: 'Fill a generic form from selected account field references.',
     custom: 'User-controlled visible browser automation.'
@@ -4261,6 +4264,14 @@ function workflowTemplateSteps(type) {
       { step_type: 'fill_field', label: 'Fill login/email', config: { selector: '', matcher: 'email, username, login', value_ref: 'account.login_email' } },
       { step_type: 'fill_field', label: 'Fill password', config: { selector: '', matcher: 'password', value_ref: 'account.login_password', sensitive: true } },
       { step_type: 'pause_for_user', label: 'Manual verification', manual_pause: true, config: { message: 'Complete CAPTCHA, 2FA, email, phone, or security checks manually. Click Continue when ready.' } }
+    ],
+    email_upgrade: [
+      { step_type: 'open_url', label: 'Open account portal', config: { url: 'https://account.jagex.com/', visible_browser: true } },
+      { step_type: 'fill_field', label: 'Fill current login/email', config: { selector: '', matcher: 'email, username, login', value_ref: 'account.login_email' } },
+      { step_type: 'fill_field', label: 'Fill current password', config: { selector: '', matcher: 'password', value_ref: 'account.login_password', sensitive: true } },
+      { step_type: 'pause_for_user', label: 'Sign in and open email change screen', manual_pause: true, config: { message: 'Sign in manually, complete any CAPTCHA, 2FA, email, phone, or security checks, then open the email upgrade/change email screen before continuing.' } },
+      { step_type: 'fill_field', label: 'Fill target/Jagex email', config: { selector: '', matcher: 'new email, target email, jagex email, email address', value_refs: ['account.target_email', 'account.jagex_email'] } },
+      { step_type: 'pause_for_user', label: 'Review and submit manually', manual_pause: true, config: { message: 'Review the visible page. Submit manually, complete email verification manually, and finish any account-security steps manually.' } }
     ],
     account_creation_fill: [
       { step_type: 'open_url', label: 'Open signup page', config: { url: '', visible_browser: true } },
@@ -4476,6 +4487,8 @@ function accountFieldForCompanion(account, decrypted, field) {
     target_email: decrypted.target_email || decrypted.jagex_email,
     jagex_email: decrypted.jagex_email || decrypted.target_email,
     jagex_password: decrypted.jagex_password,
+    email_password: decrypted.email_password || decrypted.target_email_password,
+    target_email_password: decrypted.target_email_password || decrypted.email_password,
     recovery_email: decrypted.recovery_email,
     recovery_email_password: decrypted.recovery_email_password,
     display_name: account.display_name || '',
@@ -5132,6 +5145,9 @@ module.exports = {
     canRunBrowserTask,
     isBrowserTaskJob,
     jobTypeLabel,
+    workflowTemplateName,
+    workflowTemplateDescription,
+    workflowTemplateSteps,
     setupStepsForWorkspace,
     automationCompatibilityMatrix
   }

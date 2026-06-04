@@ -194,6 +194,7 @@
                 <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <button class="button small">Refresh Stats</button>
               </form>
+              <a class="button small" href="/workflows?account_id=<%= account.id %>&template=email_upgrade">Email Upgrade</a>
               <a class="button small" href="/workflows?account_id=<%= account.id %>">Start Automation</a>
               <form method="post" action="/accounts/bulk">
                 <input type="hidden" name="_csrf" value="<%= csrfToken %>">

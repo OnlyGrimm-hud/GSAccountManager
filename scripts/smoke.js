@@ -19,6 +19,7 @@ assert(browserAutomatorSource.includes('runBrowserAutomationJob'));
 assert(browserAutomatorSource.includes('manualCheckPatterns'));
 assert(browserAutomatorSource.includes('click_skipped_for_manual_submit'));
 assert(browserAutomatorSource.includes('bypass CAPTCHA, 2FA, email verification, phone verification, or security checks'));
+assert(browserAutomatorSource.includes('configuredValueRefs'));
 
 let requireAuth;
 let db;
@@ -202,6 +203,8 @@ async function main() {
     assert(serverSource.includes("app.get('/downloads'"));
     assert(serverSource.includes("app.get('/companion'"));
     assert(serverSource.includes("app.get('/workflows'"));
+    assert(serverSource.includes('email_upgrade'));
+    assert(serverSource.includes('Email upgrade / change email'));
     assert(serverSource.includes("app.post('/accounts/import'"));
     assert(serverSource.includes("app.post('/accounts/export'"));
     assert(serverSource.includes("app.post('/accounts/:id/refresh-stats'"));
@@ -336,6 +339,10 @@ async function main() {
   assert.strictEqual(testInternals.isBrowserTaskJob('workflow_run'), true);
   assert.strictEqual(testInternals.isBrowserTaskJob('launch_client'), false);
   assert.strictEqual(testInternals.jobTypeLabel('workflow_run'), 'Browser Automator');
+  assert.strictEqual(testInternals.workflowTemplateName('email_upgrade'), 'Email upgrade / change email');
+  const emailUpgradeSteps = testInternals.workflowTemplateSteps('email_upgrade');
+  assert(emailUpgradeSteps.some(step => step.step_type === 'fill_field' && Array.isArray(step.config.value_refs)));
+  assert(emailUpgradeSteps.some(step => step.step_type === 'pause_for_user' && /email verification/i.test(step.config.message)));
   assert(testInternals.automationCompatibilityMatrix().some(item => item.name === 'GS Agent'));
   const setupSteps = testInternals.setupStepsForWorkspace({ accounts: 1, devices: 1, connected_devices: 1, launch_profiles: 0 }, { connected: true }, { gates: { browserAutomator: true } });
   assert(setupSteps.some(step => step.title === 'Build automation jobs'));

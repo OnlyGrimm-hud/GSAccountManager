@@ -1,5 +1,6 @@
 <%- include('../partials/head') %>
 <% const countMap = Object.fromEntries(counts.map(row => [row.status, row.count])); %>
+<% const selectedTemplate = query && query.template ? query.template : 'email_upgrade'; %>
 <section class="metric-grid">
   <% ['queued','running','paused','waiting_for_user','completed','failed'].forEach(status => { %>
     <article class="metric"><span><%= status.replace(/_/g, ' ') %></span><strong><%= countMap[status] || 0 %></strong></article>
@@ -16,12 +17,13 @@
     </div>
     <form method="post" action="/workflows" class="form-grid">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <label>Name<input name="name" placeholder="Login form fill"></label>
+      <label>Name<input name="name" placeholder="Email upgrade / change email"></label>
       <label>Template<select name="template">
-        <option value="login_fill">Login form fill</option>
-        <option value="account_creation_fill">Account creation form fill</option>
-        <option value="generic_form_fill">Generic multi-field form fill</option>
-        <option value="custom">Custom</option>
+        <option value="email_upgrade" <%= selectedTemplate === 'email_upgrade' ? 'selected' : '' %>>Email upgrade / change email</option>
+        <option value="login_fill" <%= selectedTemplate === 'login_fill' ? 'selected' : '' %>>Login form fill</option>
+        <option value="account_creation_fill" <%= selectedTemplate === 'account_creation_fill' ? 'selected' : '' %>>Account creation form fill</option>
+        <option value="generic_form_fill" <%= selectedTemplate === 'generic_form_fill' ? 'selected' : '' %>>Generic multi-field form fill</option>
+        <option value="custom" <%= selectedTemplate === 'custom' ? 'selected' : '' %>>Custom</option>
       </select></label>
       <label>Description<textarea name="description" rows="3"></textarea></label>
       <button class="button primary" <%= access.gates.browserAutomator ? '' : 'disabled' %>>Create Automation</button>
@@ -41,6 +43,22 @@
     <% if (!helper.connected) { %><p class="notice">Browser Automator requires GS Agent.</p><% } %>
     <% if (!access.gates.browserAutomator) { %><p class="notice">Browser Automator is not available on your current tier.</p><% } %>
     <% if (!access.gates.runBrowserTask) { %><p class="notice">Daily browser task limit reached for your tier.</p><% } %>
+  </article>
+
+  <article class="panel">
+    <p class="eyebrow">Ready Test Loop</p>
+    <h2>Email Upgrade Job Test</h2>
+    <p class="muted">Use the Email upgrade / change email automation with a selected account. GS Browser Automator fills owner-stored fields in a visible browser, then pauses so you manually handle CAPTCHA, 2FA, email verification, and final submit.</p>
+    <div class="checklist-grid">
+      <p class="row-line"><span>1. Queue</span><strong>Select account + device</strong></p>
+      <p class="row-line"><span>2. GS Agent</span><strong>Fetch Next Job</strong></p>
+      <p class="row-line"><span>3. Browser</span><strong>Run Browser Automator Job</strong></p>
+      <p class="row-line"><span>4. Manual</span><strong>Continue after checks</strong></p>
+    </div>
+    <div class="actions">
+      <a class="button small" href="/downloads">Download GS Agent</a>
+      <a class="button small" href="/local-jobs">Open Local Jobs</a>
+    </div>
   </article>
 </section>
 
@@ -63,7 +81,7 @@
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <select name="account_id">
                 <option value="">No account</option>
-                <% accounts.forEach(account => { %><option value="<%= account.id %>" <%= String(account.id) === String(query && query.account_id || '') ? 'selected' : '' %>><%= mask(account.display_name || account.legacy_login || account.username) %></option><% }) %>
+                <% accounts.forEach(account => { %><option value="<%= account.id %>" <%= String(account.id) === String(query && query.account_id || '') ? 'selected' : '' %>><%= account.display_name || account.legacy_login || account.username %></option><% }) %>
               </select>
               <select name="proxy_id">
                 <option value="">Account/default proxy</option>

@@ -276,7 +276,8 @@ async function runCurrentLaunchJob() {
     return;
   }
   const executablePath = saved(storageKeys.localExecutablePath);
-  const args = saved(storageKeys.localLaunchArgs);
+  const jobProfile = currentJob.payload && currentJob.payload.client_profile ? currentJob.payload.client_profile : {};
+  const args = saved(storageKeys.localLaunchArgs) || jobProfile.launch_args_template || '';
   if (!executablePath) {
     log('Launch job needs a local executable path in Settings.');
     return;
@@ -293,10 +294,10 @@ async function runCurrentLaunchJob() {
       client_profile_id: currentJob.client_profile_id,
       account_id: currentJob.account_id,
       proxy_id: currentJob.proxy_id,
-      instance_name: currentJob.payload && currentJob.payload.client_profile ? currentJob.payload.client_profile.name : saved(storageKeys.localProfileName),
+      instance_name: jobProfile.name || saved(storageKeys.localProfileName),
       process_name: launch.process_name,
       process_id: launch.process_id,
-      window_title: saved(storageKeys.localProfileName, launch.process_name),
+      window_title: saved(storageKeys.localProfileName, jobProfile.name || launch.process_name),
       detected_at: now,
       last_seen_at: now,
       linked_account_label: currentJob.payload && currentJob.payload.account ? currentJob.payload.account.label : '',
