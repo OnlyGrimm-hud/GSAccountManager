@@ -1,28 +1,51 @@
 <%- include('partials/head') %>
+<% const canRequestSnapshots = settings.allow_companion_snapshots === 'true' && access && access.gates && access.gates.snapshots; %>
 <section class="panel">
   <div class="panel-head">
     <div>
       <p class="eyebrow">Live Status</p>
-      <h2>Instances</h2>
+      <h2>Live Sessions</h2>
     </div>
     <div class="actions">
-      <a class="button" href="/clients">Clients</a>
+      <a class="button" href="/setup">Setup</a>
+      <a class="button" href="/clients">Launch Profiles</a>
       <a class="button" href="/local-jobs">Local Jobs</a>
-      <a class="button" href="/companion">Companion</a>
+      <a class="button" href="/companion">Client Monitor</a>
     </div>
   </div>
-  <% if (query.snapshot_job) { %><p class="notice">Snapshot job queued: <%= query.snapshot_job %>. Screenshots require opt-in on the website and Companion.</p><% } %>
-  <% if (!helper.connected) { %><p class="notice">Connect GS Companion to detect local client windows or report running instances.</p><% } %>
-  <p class="muted">Instances are user-reported local client sessions. GS Account Manager does not inject into clients, read memory, run gameplay scripts, or bypass security checks.</p>
+  <% if (query.snapshot_job) { %><p class="notice">Snapshot job queued: <%= query.snapshot_job %>. Screenshots require opt-in on the website and GS Local App.</p><% } %>
+  <% if (query.stats_sync) { %><p class="notice">Stats sync <%= query.stats_sync %>.</p><% } %>
+  <% if (!helper.connected) { %><p class="notice">Connect GS Local App to detect local client windows or report live sessions.</p><% } %>
+  <% if (settings.enable_local_client_detection !== 'true') { %><p class="notice">Local client detection is off. Enable it in Settings before publishing detected windows from GS Local App.</p><% } %>
+  <% if (settings.allow_companion_snapshots === 'true' && !(access && access.gates && access.gates.snapshots)) { %><p class="notice">Live session snapshots are not available on your current tier.</p><% } %>
+  <p class="muted">Live Sessions are user-reported local client sessions. GS Account Manager does not inject into clients, read memory, run gameplay scripts, or bypass security checks.</p>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Status Rules</p>
+      <h2>How live sessions are labeled</h2>
+    </div>
+    <a class="button small" href="/compatibility">Compatibility Matrix</a>
+  </div>
+  <div class="status-lane">
+    <span><strong class="status active">Active</strong><br><small>In-game or running state reported by Local App</small></span>
+    <span><strong class="status idle">Idle</strong><br><small>Login screen, waiting screen, or manual state</small></span>
+    <span><strong class="status unknown">Unknown</strong><br><small>Process detected but state is not known</small></span>
+    <span><strong class="status offline">Offline</strong><br><small>Client closed or heartbeat is stale</small></span>
+  </div>
 </section>
 
 <section class="metric-grid dashboard-metrics">
-  <article class="metric"><span>Total Instances</span><strong><%= stats.total_instances || 0 %></strong></article>
+  <article class="metric"><span>Total Sessions</span><strong><%= stats.total_instances || 0 %></strong></article>
   <article class="metric"><span>Running / Pending</span><strong><%= stats.running_instances || 0 %></strong></article>
   <article class="metric"><span>Stopped</span><strong><%= stats.stopped_instances || 0 %></strong></article>
   <article class="metric"><span>Crashed</span><strong><%= stats.crashed_instances || 0 %></strong></article>
-  <article class="metric"><span>Connected Companions</span><strong><%= stats.connected_devices || 0 %></strong></article>
+  <article class="metric"><span>Connected Devices</span><strong><%= stats.connected_devices || 0 %></strong></article>
   <article class="metric"><span>Active Local Jobs</span><strong><%= stats.active_jobs || 0 %></strong></article>
+  <article class="metric"><span>Client Detection</span><strong><%= settings.enable_local_client_detection === 'true' ? 'On' : 'Off' %></strong></article>
+  <article class="metric"><span>Auto Stats Sync</span><strong><%= settings.auto_sync_stats_on_client_detected === 'true' ? 'On' : 'Off' %></strong></article>
   <article class="metric"><span>Snapshots</span><strong><%= settings.allow_companion_snapshots === 'true' ? 'Enabled' : 'Off' %></strong></article>
 </section>
 
@@ -30,17 +53,28 @@
   <div class="panel-head">
     <div>
       <p class="eyebrow">Sessions</p>
-      <h2>Tracked Client Instances</h2>
+      <h2>Tracked Live Sessions</h2>
     </div>
-    <span class="tag"><%= instances.length %> instance(s)</span>
+    <span class="tag"><%= instances.length %> session(s)</span>
   </div>
   <table>
-    <thead><tr><th>Client / Profile</th><th>Account</th><th>Proxy</th><th>Companion</th><th>Status</th><th>Window</th><th>Last Update</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Client / Profile</th><th>Matched Account</th><th>Suggested Match</th><th>Proxy</th><th>Local App</th><th>Client State</th><th>Window</th><th>Stats</th><th>Wealth</th><th>Last Update</th><th>Actions</th></tr></thead>
     <tbody>
       <% instances.forEach(instance => { %>
+        <% const rowClientState = clientStateFromRow(instance); %>
+        <% const rowWealthSource = instance.wealth_source && instance.wealth_source !== 'unknown' ? instance.wealth_source : instance.account_wealth_source; %>
         <tr>
-          <td><strong><%= instance.instance_name || instance.profile_name || instance.process_name || 'Client Instance' %></strong><br><span class="muted"><%= instance.process_name || '' %> <%= instance.process_id ? `PID ${instance.process_id}` : '' %></span></td>
+          <td><strong><%= instance.instance_name || instance.profile_name || instance.process_name || 'Live Session' %></strong><br><span class="muted"><%= instance.process_name || '' %> <%= instance.process_id ? `PID ${instance.process_id}` : '' %></span></td>
           <td><%= instance.account_display_name || instance.account_legacy_login || instance.account_username || 'Unassigned' %></td>
+          <td>
+            <% if (instance.suggested_account_id) { %>
+              <strong><%= instance.suggested_account_display_name || instance.suggested_account_legacy_login || instance.suggested_account_username %></strong><br>
+              <span class="tag"><%= instance.match_confidence || 'suggested' %></span>
+              <% if (instance.match_reason) { %><br><span class="muted"><%= instance.match_reason %></span><% } %>
+            <% } else { %>
+              <span class="tag">None</span>
+            <% } %>
+          </td>
           <td>
             <% if (instance.proxy_host) { %>
               <%= instance.proxy_name || `${mask(instance.proxy_host)}:${instance.proxy_port}` %><br>
@@ -49,30 +83,65 @@
               <span class="tag">No proxy</span>
             <% } %>
           </td>
-          <td><%= instance.device_name || 'Companion' %></td>
-          <td><span class="status <%= instance.status %>"><%= instance.status %></span><br><span class="muted"><%= instance.current_activity || '' %></span></td>
+          <td><%= instance.device_name || 'Local App' %></td>
+          <td>
+            <span class="status <%= clientStateClass(rowClientState) %>"><%= clientStateLabel(rowClientState) %></span><br>
+            <span class="muted"><%= instance.current_activity || 'Detected / Unknown State' %></span>
+          </td>
           <td><%= instance.window_title || '' %></td>
+          <td>
+            <% if (instance.account_id) { %>
+              <strong><%= instance.stats_total_level || '-' %></strong> total / <strong><%= instance.stats_combat_level || '-' %></strong> combat<br>
+              <span class="status <%= instance.stats_status || 'never' %>"><%= instance.stats_status || 'never' %></span>
+              <% if (instance.stats_fetched_at) { %><br><span class="muted"><%= new Date(instance.stats_fetched_at).toLocaleString() %></span><% } %>
+            <% } else { %>
+              <span class="tag">Match first</span>
+            <% } %>
+          </td>
+          <td>
+            <% if (instance.reported_display_name) { %><span class="muted">Display: <%= instance.reported_display_name %></span><br><% } %>
+            <strong>GP:</strong> <%= formatWealthValue(instance.reported_gp_amount ?? instance.gp_amount, rowWealthSource) %><br>
+            <strong>Bank:</strong> <%= formatWealthValue(instance.reported_bank_value ?? instance.bank_value, rowWealthSource) %><br>
+            <strong>Wealth:</strong> <%= formatWealthValue(instance.reported_wealth_value ?? instance.wealth_value ?? instance.wealth_amount, rowWealthSource) %>
+          </td>
           <td><%= instance.last_seen_at ? new Date(instance.last_seen_at).toLocaleString() : new Date(instance.updated_at).toLocaleString() %></td>
           <td class="actions">
-            <form method="post" action="/clients/instances/<%= instance.id %>/attach">
+            <a class="button small" href="/instances/<%= instance.id %>">View</a>
+            <form method="post" action="/instances/<%= instance.id %>/match">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-              <select name="account_id"><option value="">No account</option><% accounts.forEach(account => { %><option value="<%= account.id %>" <%= Number(instance.account_id) === Number(account.id) ? 'selected' : '' %>><%= account.display_name || account.legacy_login || account.username %></option><% }) %></select>
+              <select name="account_id"><option value="">No account</option><% accounts.forEach(account => { %><option value="<%= account.id %>" <%= Number(instance.account_id || instance.suggested_account_id) === Number(account.id) ? 'selected' : '' %>><%= account.display_name || account.legacy_login || account.username %></option><% }) %></select>
               <select name="proxy_id"><option value="">No proxy</option><% proxies.forEach(proxy => { %><option value="<%= proxy.id %>" <%= Number(instance.proxy_id) === Number(proxy.id) ? 'selected' : '' %>><%= proxy.name || `${proxy.host}:${proxy.port}` %></option><% }) %></select>
-              <button class="button small">Attach</button>
+              <button class="button small">Match</button>
+            </form>
+            <form method="post" action="/instances/<%= instance.id %>/unmatch">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small">Unmatch</button>
+            </form>
+            <form method="post" action="/instances/<%= instance.id %>/refresh-stats">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small" <%= instance.account_id ? '' : 'disabled' %>>Refresh Stats</button>
             </form>
             <form method="post" action="/clients/instances/<%= instance.id %>/request-snapshot">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-              <button class="button small" <%= settings.allow_companion_snapshots === 'true' ? '' : 'disabled' %>>Request Snapshot</button>
+              <button class="button small" <%= canRequestSnapshots ? '' : 'disabled' %>>Request Snapshot</button>
             </form>
-            <a class="button small" href="/workflows?account_id=<%= instance.account_id || '' %>">Open Workflow</a>
-            <form method="post" action="/clients/instances/<%= instance.id %>/stop-tracking" data-confirm="Stop tracking this local client instance?">
+            <a class="button small" href="/workflows?account_id=<%= instance.account_id || '' %>">Open Automator</a>
+            <form method="post" action="/clients/instances/<%= instance.id %>/stop-tracking" data-confirm="Stop tracking this live session?">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button class="button small danger">Mark Stopped</button>
             </form>
           </td>
         </tr>
       <% }) %>
-      <% if (!instances.length) { %><tr><td colspan="8"><p class="muted">No instances yet. Pair GS Companion and use Detect Local Clients or launch a client profile.</p></td></tr><% } %>
+      <% if (!instances.length) { %><tr><td colspan="11">
+        <p class="muted">No live sessions yet. Pair GS Local App, enable local detection if needed, then launch a profile or run Detect Local Clients.</p>
+        <div class="actions">
+          <a class="button small" href="/downloads">Download Local App</a>
+          <a class="button small" href="/companion">Pair Device</a>
+          <a class="button small" href="/clients">Launch Profiles</a>
+          <a class="button small" href="/setup-guide">Setup Guide</a>
+        </div>
+      </td></tr><% } %>
     </tbody>
   </table>
 </section>
@@ -98,16 +167,16 @@
 
   <article class="panel">
     <div class="panel-head">
-      <h2>Recent Instance Events</h2>
+      <h2>Recent Session Events</h2>
       <a class="button small" href="/logs">Logs</a>
     </div>
     <table>
-      <thead><tr><th>Time</th><th>Instance</th><th>Event</th><th>Message</th></tr></thead>
+      <thead><tr><th>Time</th><th>Live Session</th><th>Event</th><th>Message</th></tr></thead>
       <tbody>
         <% events.forEach(event => { %>
           <tr><td><%= new Date(event.created_at).toLocaleString() %></td><td><%= event.instance_name || event.client_instance_id %></td><td><%= event.event_type %></td><td><%= event.message || '' %></td></tr>
         <% }) %>
-        <% if (!events.length) { %><tr><td colspan="4"><p class="muted">No instance events yet.</p></td></tr><% } %>
+        <% if (!events.length) { %><tr><td colspan="4"><p class="muted">No live session events yet.</p></td></tr><% } %>
       </tbody>
     </table>
   </article>

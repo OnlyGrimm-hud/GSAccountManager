@@ -34,7 +34,11 @@ const companionJobTypes = [
 ];
 const clientTypes = ['runelite', 'jagex_launcher', 'official_client', 'dreambot', 'custom'];
 const clientInstanceStatuses = ['pending', 'detected', 'launching', 'running', 'scanning', 'stopped', 'crashed', 'unknown'];
+const clientStates = ['active', 'idle', 'offline', 'unknown', 'error'];
+const wealthSources = ['manual', 'companion_reported', 'client_reported', 'unknown'];
 const paymentMethods = ['LTC', 'BTC', 'ETH', 'manual_admin_activation'];
+const downloadStatuses = ['coming_soon', 'available', 'hidden'];
+const downloadCategories = ['local_app', 'browser_runtime', 'client_tool', 'guide'];
 
 module.exports = {
   accountTypes,
@@ -56,5 +60,9 @@ module.exports = {
   companionJobTypes,
   clientTypes,
   clientInstanceStatuses,
-  paymentMethods
+  clientStates,
+  wealthSources,
+  paymentMethods,
+  downloadStatuses,
+  downloadCategories
 };

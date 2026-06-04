@@ -1,0 +1,100 @@
+<%- include('partials/head') %>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Setup Docs</p>
+      <h2>GS Local App and Automation Setup</h2>
+    </div>
+    <div class="actions">
+      <a class="button" href="/setup">Setup Wizard</a>
+      <a class="button" href="/downloads">Downloads</a>
+      <a class="button" href="/compatibility">Compatibility</a>
+    </div>
+  </div>
+  <p class="muted">Use this guide to prepare a workspace for paid automation. The website stores user-owned data and queues jobs. GS Local App runs the visible local work and reports safe status back to the website.</p>
+</section>
+
+<section class="content-grid">
+  <% docs.forEach(section => { %>
+    <article class="panel">
+      <div class="panel-head">
+        <h2><%= section.title %></h2>
+        <span class="status <%= section.status === 'Working' ? 'ready' : section.status === 'Scaffolded' ? 'needs_review' : 'working' %>"><%= section.status %></span>
+      </div>
+      <p class="muted"><%= section.body %></p>
+    </article>
+  <% }) %>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Installation Flow</p>
+      <h2>Recommended local setup order</h2>
+    </div>
+    <span class="tag"><%= download.available ? `Installer v${download.version}` : 'Installer coming soon' %></span>
+  </div>
+  <div class="setup-timeline">
+    <article>
+      <strong>Download GS Local App</strong>
+      <p class="muted">Use the Downloads page. If no packaged installer exists yet, run the Electron app from the companion folder for development testing.</p>
+    </article>
+    <article>
+      <strong>Create a pairing code</strong>
+      <p class="muted">Open Client Monitor, click Pair Local App Device, then enter the short-lived code in the Local App.</p>
+    </article>
+    <article>
+      <strong>Confirm heartbeat</strong>
+      <p class="muted">The connected device should show a recent Last Seen value. Jobs will queue only for your own Discord user workspace.</p>
+    </article>
+    <article>
+      <strong>Enable local monitoring if needed</strong>
+      <p class="muted">Client detection and snapshots are opt-in settings. Snapshots should target selected windows and avoid secrets.</p>
+    </article>
+    <article>
+      <strong>Run a controlled job</strong>
+      <p class="muted">Start with a simple Browser Automator job or launch profile. Watch Local Jobs for queued, running, waiting-for-user, completed, or failed status.</p>
+    </article>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Safety Requirements</p>
+      <h2>Automation rules that cannot be removed</h2>
+    </div>
+    <span class="tag">Production boundary</span>
+  </div>
+  <div class="checklist-grid">
+    <p class="row-line"><span>CAPTCHA, Cloudflare, 2FA, phone, and email verification</span><strong>Pause for user</strong></p>
+    <p class="row-line"><span>Browser windows</span><strong>Visible</strong></p>
+    <p class="row-line"><span>Automation start</span><strong>User-triggered</strong></p>
+    <p class="row-line"><span>Client monitoring</span><strong>Opt-in status detection only</strong></p>
+    <p class="row-line"><span>Game client injection, memory reads, scripts, session/cookie theft</span><strong>Not supported</strong></p>
+    <p class="row-line"><span>Logs</span><strong>No passwords, OTP secrets, tokens, cookies, or raw encrypted values</strong></p>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Quick Compatibility</p>
+      <h2>What to configure first</h2>
+    </div>
+    <a class="button small" href="/compatibility">Full Matrix</a>
+  </div>
+  <table>
+    <thead><tr><th>Item</th><th>Best first action</th><th>Status</th></tr></thead>
+    <tbody>
+      <% matrix.forEach(item => { %>
+        <tr>
+          <td><strong><%= item.name %></strong><br><span class="muted"><%= item.type %></span></td>
+          <td><%= item.notes %></td>
+          <td><span class="status <%= item.status %>"><%= item.status %></span></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+<%- include('partials/foot') %>

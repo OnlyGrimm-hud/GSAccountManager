@@ -30,6 +30,12 @@
   <% if (noticeImported !== null) { %>
     <p class="notice">Imported <%= noticeImported %> account line(s). Skipped <%= Number(query.skipped || 0) %>.</p>
   <% } %>
+  <% if (query && query.import_export_moved) { %>
+    <p class="notice">Account import and export now live here on the Accounts page.</p>
+  <% } %>
+  <% if (query && query.stats_sync) { %>
+    <p class="notice">Stats sync <%= query.stats_sync %><%= query.stats_error ? `: ${query.stats_error}` : '' %>.</p>
+  <% } %>
 
   <form class="filters account-filters" method="get">
     <input name="q" placeholder="Search" value="<%= filters.q || '' %>">
@@ -84,7 +90,7 @@
         <option value="assign_category_status">Assign category/status</option>
       </select>
       <select form="account-action-form" name="bulk_client_profile_id">
-        <option value="">Client profile for launch</option>
+        <option value="">Launch profile</option>
         <% clientProfiles.forEach(profile => { %><option value="<%= profile.id %>"><%= profile.name %></option><% }) %>
       </select>
       <select form="account-action-form" name="proxy_id">
@@ -95,8 +101,9 @@
       <select form="account-action-form" name="bulk_status"><% accountStatuses.forEach(status => { %><option value="<%= status %>"><%= status %></option><% }) %></select>
       <label class="check"><input form="account-action-form" type="checkbox" name="confirm_bulk_delete" value="yes"> Confirm permanent bulk delete</label>
       <button class="button" form="account-action-form" formaction="/accounts/bulk">Apply bulk action</button>
-      <button class="button" type="button" disabled>Register / Upgrade</button>
-      <button class="button" type="button" disabled>Create Account Workflow</button>
+      <% if (!(isAdmin || (access && access.tier && access.tier.client_launcher_enabled))) { %><span class="tag">Client launcher requires a higher tier</span><% } %>
+      <span class="tag">Future: register / upgrade automations</span>
+      <span class="tag">Browser Automator available under My Workspace</span>
     </div>
   <% } %>
   <table>
@@ -107,18 +114,21 @@
         <th>Username / Login</th>
         <th>Verified</th>
         <th>Display Name</th>
-        <th>GP</th>
-        <th>Plat</th>
-        <th>Wealth</th>
+        <th>Client Status</th>
+        <th>Total Level</th>
+        <th>Combat Level</th>
+        <th>GP / Wealth</th>
+        <th>Last Seen</th>
         <th>Notes</th>
         <th>Bans</th>
         <th>Status</th>
-        <th>Instance</th>
+        <th>Running Session</th>
         <th>Actions</th>
       </tr>
     </thead>
     <tbody>
       <% accounts.forEach(account => { %>
+        <% const rowClientState = clientStateFromRow(account); %>
         <tr>
           <td><input form="account-action-form" type="checkbox" name="account_ids" value="<%= account.id %>"></td>
           <td>
@@ -136,9 +146,25 @@
           </td>
           <td><span class="status <%= account.verified || 'unknown' %>"><%= account.verified || 'unknown' %></span></td>
           <td><%= account.display_name || '' %></td>
-          <td><%= Number(account.gp_amount || 0).toLocaleString() %></td>
-          <td><%= Number(account.platinum_amount || 0).toLocaleString() %></td>
-          <td><%= Number(account.wealth_amount || 0).toLocaleString() %></td>
+          <td>
+            <span class="status <%= clientStateClass(rowClientState) %>"><%= clientStateLabel(rowClientState) %></span>
+            <% if (account.active_instance_activity) { %><br><span class="muted"><%= account.active_instance_activity %></span><% } %>
+          </td>
+          <td><%= account.stats_total_level || account.total_level || '-' %></td>
+          <td><%= account.stats_combat_level || account.combat_level || '-' %></td>
+          <td>
+            <strong>GP:</strong> <%= formatWealthValue(account.gp_amount, account.wealth_source) %><br>
+            <strong>Bank:</strong> <%= formatWealthValue(account.bank_value, account.wealth_source) %><br>
+            <strong>Wealth:</strong> <%= formatWealthValue(account.wealth_value ?? account.wealth_amount, account.wealth_source) %>
+            <% if (account.wealth_source && account.wealth_source !== 'unknown') { %><br><span class="tag"><%= account.wealth_source.replace(/_/g, ' ') %></span><% } %>
+          </td>
+          <td>
+            <% if (account.active_instance_last_seen_at || account.client_last_seen_at) { %>
+              <%= new Date(account.active_instance_last_seen_at || account.client_last_seen_at).toLocaleString() %>
+            <% } else { %>
+              <span class="tag">Unknown</span>
+            <% } %>
+          </td>
           <td><%= account.notes ? account.notes.slice(0, 80) : '' %></td>
           <td>
             <% if (account.status === 'banned_temp' || account.ban_status === 'temp') { %><span class="status banned_temp">Temp</span>
@@ -148,7 +174,7 @@
           <td><span class="status <%= account.status %>"><%= account.status %></span></td>
           <td>
             <% if (account.active_instance_id) { %>
-              <a class="status <%= account.active_instance_status %>" href="/instances"><%= account.active_instance_status %></a>
+              <a class="status <%= clientStateClass(rowClientState) %>" href="/instances/<%= account.active_instance_id %>"><%= clientStateLabel(rowClientState) %></a>
               <% if (account.active_instance_window) { %><br><span class="muted"><%= account.active_instance_window.slice(0, 40) %></span><% } %>
             <% } else { %>
               <span class="tag">None</span>
@@ -163,13 +189,17 @@
               <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_login">Copy login</button>
               <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_password">Copy pass</button>
               <% if (account.otp_secret_encrypted) { %><button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP</button><% } %>
-              <a class="button small" href="/workflows?account_id=<%= account.id %>">Start Workflow</a>
+              <form method="post" action="/accounts/<%= account.id %>/refresh-stats">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button class="button small">Refresh Stats</button>
+              </form>
+              <a class="button small" href="/workflows?account_id=<%= account.id %>">Start Automation</a>
               <form method="post" action="/accounts/bulk">
                 <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <input type="hidden" name="bulk_action" value="launch_selected">
                 <input type="hidden" name="account_ids" value="<%= account.id %>">
                 <input type="hidden" name="bulk_client_profile_id" value="<%= clientProfiles[0] ? clientProfiles[0].id : '' %>">
-                <button class="button small" <%= clientProfiles.length ? '' : 'disabled' %>>Launch Client</button>
+                <button class="button small" <%= clientProfiles.length && (isAdmin || (access && access.tier && access.tier.client_launcher_enabled)) ? '' : 'disabled' %>>Launch Client</button>
               </form>
               <form method="post" action="/accounts/<%= account.id %>/archive">
                 <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -184,7 +214,7 @@
         </tr>
       <% }) %>
       <% if (!accounts.length) { %>
-        <tr><td colspan="13"><p class="muted">Import accounts to begin.</p></td></tr>
+        <tr><td colspan="15"><p class="muted">Import accounts to begin.</p></td></tr>
       <% } %>
     </tbody>
   </table>

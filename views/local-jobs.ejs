@@ -2,16 +2,34 @@
 <section class="panel">
   <div class="panel-head">
     <div>
-      <p class="eyebrow">Companion Queue</p>
+      <p class="eyebrow">Local App Queue</p>
       <h2>Local Jobs</h2>
     </div>
     <div class="actions">
-      <a class="button" href="/companion">Companion</a>
-      <a class="button" href="/clients">Clients</a>
-      <a class="button" href="/instances">Instances</a>
+      <a class="button" href="/setup">Setup</a>
+      <a class="button" href="/companion">Client Monitor</a>
+      <a class="button primary" href="/workflows">Browser Automator</a>
+      <a class="button" href="/clients">Launch Profiles</a>
+      <a class="button" href="/instances">Live Sessions</a>
     </div>
   </div>
-  <p class="muted">Local jobs are commands queued for a paired GS Companion device. Jobs are user-scoped, visible, pausable, and safe-logged without passwords, OTP secrets, cookies, or tokens.</p>
+  <p class="muted">Local jobs are commands queued for a paired GS Local App device. Jobs are user-scoped, visible, pausable, and safe-logged without passwords, OTP secrets, cookies, or tokens.</p>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Automation Pipeline</p>
+      <h2>Local job lifecycle</h2>
+    </div>
+    <span class="tag">Visible local automation</span>
+  </div>
+  <div class="status-lane">
+    <span><strong>Queued</strong><br><small>Waiting for an eligible Local App device</small></span>
+    <span><strong>Accepted / Running</strong><br><small>Local App is processing the job visibly</small></span>
+    <span><strong>Waiting for User</strong><br><small>Manual verification or review is required</small></span>
+    <span><strong>Completed / Failed</strong><br><small>Safe result details are logged</small></span>
+  </div>
 </section>
 
 <section class="metric-grid dashboard-metrics">
@@ -26,7 +44,7 @@
 <section class="panel">
   <form class="filters compact" method="get">
     <select name="status"><option value="">All Statuses</option><% companionJobStatuses.forEach(status => { %><option value="<%= status %>" <%= filters.status === status ? 'selected' : '' %>><%= status %></option><% }) %></select>
-    <select name="job_type"><option value="">All Job Types</option><% companionJobTypes.forEach(type => { %><option value="<%= type %>" <%= filters.job_type === type ? 'selected' : '' %>><%= type.replace(/_/g, ' ') %></option><% }) %></select>
+    <select name="job_type"><option value="">All Job Types</option><% companionJobTypes.forEach(type => { %><option value="<%= type %>" <%= filters.job_type === type ? 'selected' : '' %>><%= jobTypeLabel(type) %></option><% }) %></select>
     <button class="button">Filter</button>
   </form>
   <div class="panel-head">
@@ -39,11 +57,11 @@
       <% jobs.forEach(job => { %>
         <tr>
           <td><%= new Date(job.created_at).toLocaleString() %></td>
-          <td><%= job.job_type.replace(/_/g, ' ') %></td>
+          <td><strong><%= jobTypeLabel(job.job_type) %></strong><br><span class="muted"><%= job.job_type %></span></td>
           <td><span class="status <%= job.status %>"><%= job.status %></span></td>
           <td><%= job.device_name || (job.companion_device_id ? `Device ${job.companion_device_id}` : 'Any paired device') %></td>
           <td>
-            <strong><%= job.workflow_name || job.profile_name || job.instance_name || job.account_legacy_login || job.account_username || 'Companion' %></strong>
+            <strong><%= job.workflow_name || job.profile_name || job.instance_name || job.account_legacy_login || job.account_username || 'Local App' %></strong>
             <% if (job.proxy_host) { %><br><span class="muted">Proxy: <%= job.proxy_name || `${mask(job.proxy_host)}:${job.proxy_port}` %></span><% } %>
           </td>
           <td><%= job.completed_at ? new Date(job.completed_at).toLocaleString() : '' %></td>
@@ -56,13 +74,38 @@
             <% } else { %>
               <span class="tag">No action</span>
             <% } %>
-            <% if (job.workflow_run_id) { %><a class="button small" href="/workflows/runs/<%= job.workflow_run_id %>">Run</a><% } %>
+            <% if (job.workflow_run_id) { %><a class="button small" href="/workflows/runs/<%= job.workflow_run_id %>">Live Status</a><% } %>
           </td>
         </tr>
       <% }) %>
-      <% if (!jobs.length) { %><tr><td colspan="7"><p class="muted">No local jobs yet. Launch a client, run a workflow, or request a snapshot to queue one.</p></td></tr><% } %>
+      <% if (!jobs.length) { %><tr><td colspan="7"><p class="muted">No local jobs yet. Launch a client, run an automation, or request a snapshot to queue one.</p></td></tr><% } %>
     </tbody>
   </table>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Browser Automator Jobs</h2>
+      <span class="status working">Core focus</span>
+    </div>
+    <p class="muted">These jobs are the main paid automation path. They run through GS Local App in a visible browser and pause for manual verification.</p>
+    <div class="actions">
+      <a class="button small" href="/workflows">Open Browser Automator</a>
+      <a class="button small" href="/setup-guide">Read Setup Guide</a>
+    </div>
+  </article>
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Launch and Detection Jobs</h2>
+      <span class="status partial">Local App</span>
+    </div>
+    <p class="muted">Launch profiles and client detection jobs help organize local sessions. GS does not inject into clients, read memory, or control gameplay.</p>
+    <div class="actions">
+      <a class="button small" href="/clients">Launch Profiles</a>
+      <a class="button small" href="/instances">Live Sessions</a>
+    </div>
+  </article>
 </section>
 
 <section class="content-grid">

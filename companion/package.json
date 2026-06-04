@@ -2,7 +2,7 @@
   "name": "gs-account-manager-companion",
   "version": "0.1.0",
   "private": true,
-  "description": "GS Account Manager Companion for user-controlled local workflow assistance.",
+  "description": "GS Local App for user-controlled local monitoring and automation jobs.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -11,18 +11,19 @@
     "package:win": "electron-builder --win"
   },
   "dependencies": {
-    "electron": "^31.7.0",
     "playwright": "^1.49.1"
   },
   "devDependencies": {
-    "electron-builder": "^25.1.8"
+    "electron": "^42.3.3",
+    "electron-builder": "^26.8.1"
   },
   "build": {
     "appId": "com.gsaccountmanager.companion",
-    "productName": "GS Account Manager Companion",
-    "artifactName": "GS Account Manager Companion Setup.${ext}",
+    "productName": "GS Local App",
+    "artifactName": "GS Local App Setup.${ext}",
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "signAndEditExecutable": false
     }
   }
 }

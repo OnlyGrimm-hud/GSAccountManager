@@ -6,7 +6,6 @@ const session = require('express-session');
 const PgSession = require('connect-pg-simple')(session);
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const multer = require('multer');
 const config = require('./config');
 const db = require('./db');
 const { encrypt, decrypt, mask } = require('./crypto-fields');
@@ -15,6 +14,7 @@ const { csrf, requireAuth, escapeText, oneOf, verifyAdminPassword } = require('.
 const activity = require('./activity');
 const discordAuth = require('./discord-auth');
 const { generatePassword } = require('./generators');
+const osrsStats = require('./osrs-stats');
 const { parseAccountImport, parseProxyImport } = require('./parsers');
 const {
   accountTypes,
@@ -36,11 +36,14 @@ const {
   companionJobTypes,
   clientTypes,
   clientInstanceStatuses,
-  paymentMethods
+  clientStates,
+  wealthSources,
+  paymentMethods,
+  downloadStatuses,
+  downloadCategories
 } = require('./app-constants');
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1024 * 1024 } });
 const sensitiveFields = [
   'password', 'legacy_password', 'bank_pin', 'otp_secret', 'recovery_email', 'recovery_email_password',
   'target_email', 'target_email_password', 'email_password', 'jagex_email', 'jagex_password'
@@ -110,7 +113,7 @@ const companionLimiter = rateLimit({
   limit: 120,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many companion API requests.' }
+  message: { error: 'Too many Local App API requests.' }
 });
 
 app.get('/login', (req, res) => {
@@ -164,7 +167,7 @@ app.post('/login', loginLimiter, async (req, res, next) => {
 app.post('/api/companion/pair/complete', companionLimiter, async (req, res, next) => {
   try {
     const code = escapeText(req.body.code).toUpperCase();
-    const deviceName = escapeText(req.body.device_name || req.body.deviceName || 'GS Account Manager Companion');
+    const deviceName = escapeText(req.body.device_name || req.body.deviceName || 'GS Local App');
     if (!code) return res.status(400).json({ error: 'Pairing code is required.' });
     const codeHash = hashPairingCode(code);
     const pair = await db.query(
@@ -177,7 +180,12 @@ app.post('/api/companion/pair/complete', companionLimiter, async (req, res, next
     );
     if (!pair.rows[0]) return res.status(404).json({ error: 'Pairing code is invalid or expired.' });
     if (!await userIdHasFullAccess(pair.rows[0].user_id)) {
-      return res.status(403).json({ error: 'Companion pairing requires active access.' });
+      return res.status(403).json({ error: 'Local App pairing requires active access.' });
+    }
+    const owner = await db.query('SELECT * FROM users WHERE id=$1', [pair.rows[0].user_id]);
+    const ownerAccess = await accessSummaryForUser(owner.rows[0]);
+    if (!ownerAccess.gates.addDevice) {
+      return res.status(403).json({ error: 'Connected device limit reached for this subscription tier.' });
     }
     const token = crypto.randomBytes(32).toString('base64url');
     const tokenHash = hashDeviceToken(token);
@@ -188,8 +196,8 @@ app.post('/api/companion/pair/complete', companionLimiter, async (req, res, next
       [pair.rows[0].user_id, deviceName, tokenHash, escapeText(req.body.companion_version || req.body.version)]
     );
     await db.query('UPDATE helper_pairing_codes SET used_at=NOW() WHERE id=$1', [pair.rows[0].id]);
-    await activity.log(pair.rows[0].user_id, 'companion_pair', 'companion_device', result.rows[0].id, `Companion device connected: ${deviceName}`);
-    await auditLog(null, pair.rows[0].user_id, 'companion_pair', 'companion_device', result.rows[0].id, 'Companion device connected');
+    await activity.log(pair.rows[0].user_id, 'companion_pair', 'companion_device', result.rows[0].id, `Local App device connected: ${deviceName}`);
+    await auditLog(null, pair.rows[0].user_id, 'companion_pair', 'companion_device', result.rows[0].id, 'Local App device connected');
     res.json({ device: result.rows[0], token });
   } catch (err) { next(err); }
 });
@@ -197,7 +205,7 @@ app.post('/api/companion/pair/complete', companionLimiter, async (req, res, next
 app.post('/api/companion/heartbeat', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
+    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
     await db.query(
       `UPDATE companion_devices
        SET status='connected', companion_version=COALESCE($1, companion_version), last_seen_at=NOW(), updated_at=NOW()
@@ -211,15 +219,22 @@ app.post('/api/companion/heartbeat', companionLimiter, async (req, res, next) =>
 app.post('/api/companion/clients/status', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion client status requires active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App client status requires active access.' });
+    const settings = await getSettings(device.user_id);
+    if (settings.enable_local_client_detection !== 'true') {
+      return res.status(403).json({ error: 'Local client detection is disabled in Settings.' });
+    }
     const instances = normalizeClientStatusPayload(req.body);
     const saved = [];
     for (const item of instances) {
-      saved.push(await upsertClientInstance(device, item));
+      const prepared = await prepareDetectedClientInstance(device.user_id, item);
+      const instance = await upsertClientInstance(device, prepared);
+      saved.push(instance);
+      await maybeAutoRefreshStats(device.user_id, instance.account_id, settings);
     }
-    await activity.log(device.user_id, 'companion_client_status_received', 'client_instance', null, `Companion reported ${saved.length} client instance(s)`, { count: saved.length });
-    await auditLog(device.user_id, device.user_id, 'companion_client_status_received', 'client_instance', null, `Companion reported ${saved.length} client instance(s)`, { count: saved.length });
+    await activity.log(device.user_id, 'companion_client_status_received', 'client_instance', null, `Local App reported ${saved.length} live session(s)`, { count: saved.length });
+    await auditLog(device.user_id, device.user_id, 'companion_client_status_received', 'client_instance', null, `Local App reported ${saved.length} live session(s)`, { count: saved.length });
     res.json({ ok: true, count: saved.length, instances: saved });
   } catch (err) { next(err); }
 });
@@ -227,10 +242,16 @@ app.post('/api/companion/clients/status', companionLimiter, async (req, res, nex
 app.post('/api/companion/clients/instance', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion client status requires active access.' });
-    const instance = await upsertClientInstance(device, normalizeClientInstance(req.body));
-    await activity.log(device.user_id, 'companion_client_instance_updated', 'client_instance', instance.id, `Client instance ${instance.status}`);
+    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App client status requires active access.' });
+    const settings = await getSettings(device.user_id);
+    if (settings.enable_local_client_detection !== 'true') {
+      return res.status(403).json({ error: 'Local client detection is disabled in Settings.' });
+    }
+    const prepared = await prepareDetectedClientInstance(device.user_id, normalizeClientInstance(req.body));
+    const instance = await upsertClientInstance(device, prepared);
+    await maybeAutoRefreshStats(device.user_id, instance.account_id, settings);
+    await activity.log(device.user_id, 'companion_client_instance_updated', 'client_instance', instance.id, `Live session ${instance.status}`);
     res.json({ ok: true, instance });
   } catch (err) { next(err); }
 });
@@ -238,8 +259,8 @@ app.post('/api/companion/clients/instance', companionLimiter, async (req, res, n
 app.post('/api/companion/browser/session', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion browser actions require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App browser actions require active access.' });
     const accountId = req.body.selected_account_id ? Number(req.body.selected_account_id) : null;
     const proxyId = req.body.selected_proxy_id ? Number(req.body.selected_proxy_id) : null;
     if (accountId) await assertAccountOwnership(device.user_id, accountId);
@@ -265,11 +286,11 @@ app.post('/api/companion/browser/session', companionLimiter, async (req, res, ne
 app.post('/api/companion/browser/fill', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion fill actions require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App fill actions require active access.' });
     const accountId = req.body.account_id ? Number(req.body.account_id) : null;
     if (accountId) await assertAccountOwnership(device.user_id, accountId);
-    await auditLog(device.user_id, device.user_id, 'companion_fill_event', 'account', accountId, 'Companion fill event recorded', {
+    await auditLog(device.user_id, device.user_id, 'companion_fill_event', 'account', accountId, 'Local App fill event recorded', {
       field: escapeText(req.body.field),
       mode: 'user_triggered_fill_only'
     });
@@ -280,8 +301,12 @@ app.post('/api/companion/browser/fill', companionLimiter, async (req, res, next)
 app.post('/api/companion/status', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion status uploads require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App status uploads require active access.' });
+    const settings = await getSettings(device.user_id);
+    if (settings.enable_local_client_detection !== 'true') {
+      return res.status(403).json({ error: 'Local client detection is disabled in Settings.' });
+    }
     const windows = normalizeClientStatusPayload(req.body);
     for (const item of windows) {
       await db.query(
@@ -292,11 +317,13 @@ app.post('/api/companion/status', companionLimiter, async (req, res, next) => {
           device.id,
           escapeText(item.process_name || item.processName),
           escapeText(item.window_title || item.windowTitle),
-          item.running !== false,
-          { source: 'companion', matched_account_hint: escapeText(item.matched_account_hint || item.matchedAccountHint) }
+          item.status !== 'stopped',
+          { source: 'companion', client_state: item.client_state, matched_account_hint: item.match_hint }
         ]
       );
-      await upsertClientInstance(device, item);
+      const prepared = await prepareDetectedClientInstance(device.user_id, item);
+      const instance = await upsertClientInstance(device, prepared);
+      await maybeAutoRefreshStats(device.user_id, instance.account_id, settings);
     }
     res.json({ ok: true, count: windows.length });
   } catch (err) { next(err); }
@@ -308,8 +335,8 @@ app.post('/api/companion/snapshots', companionLimiter, handleCompanionSnapshot);
 async function handleCompanionSnapshot(req, res, next) {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion snapshots require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App snapshots require active access.' });
     if (!device.allow_screenshots) return res.status(403).json({ error: 'Snapshots are disabled for this device.' });
     const settings = await getSettings(device.user_id);
     if (settings.allow_companion_snapshots !== 'true') return res.status(403).json({ error: 'Snapshots are disabled in user settings.' });
@@ -344,8 +371,8 @@ async function handleCompanionSnapshot(req, res, next) {
         retentionHours
       ]
     );
-    await activity.log(device.user_id, 'companion_screenshot_received', 'live_snapshot', result.rows[0].id, 'Companion snapshot received', { image_size: image.length });
-    await auditLog(device.user_id, device.user_id, 'companion_screenshot_received', 'live_snapshot', result.rows[0].id, 'Companion snapshot received', { image_size: image.length });
+    await activity.log(device.user_id, 'companion_screenshot_received', 'live_snapshot', result.rows[0].id, 'Local App snapshot received', { image_size: image.length });
+    await auditLog(device.user_id, device.user_id, 'companion_screenshot_received', 'live_snapshot', result.rows[0].id, 'Local App snapshot received', { image_size: image.length });
     res.json({ snapshot: result.rows[0] });
   } catch (err) { next(err); }
 }
@@ -353,8 +380,8 @@ async function handleCompanionSnapshot(req, res, next) {
 app.get('/api/companion/jobs/next', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion jobs require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App jobs require active access.' });
     const result = await db.query(
       `UPDATE companion_jobs
        SET status='accepted',
@@ -382,9 +409,9 @@ app.get('/api/companion/jobs/next', companionLimiter, async (req, res, next) => 
          WHERE id=$2 AND user_id=$3 AND status IN ('queued','paused','waiting_for_user')`,
         [device.id, job.workflow_run_id, device.user_id]
       );
-      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, 'accepted_by_companion', 'Companion accepted workflow job.', { companion_job_id: job.id });
+      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, 'accepted_by_companion', 'Local App accepted automation job.', { companion_job_id: job.id });
     }
-    await insertCompanionJobEvent(device.user_id, job.id, job.workflow_run_id, 'accepted', 'Companion accepted job.');
+    await insertCompanionJobEvent(device.user_id, job.id, job.workflow_run_id, 'accepted', 'Local App accepted job.');
     res.json({ job: safeCompanionJob(job) });
   } catch (err) { next(err); }
 });
@@ -392,8 +419,8 @@ app.get('/api/companion/jobs/next', companionLimiter, async (req, res, next) => 
 app.get('/api/companion/jobs/poll', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion jobs require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App jobs require active access.' });
     const result = await db.query(
       `UPDATE companion_jobs
        SET status='accepted',
@@ -421,7 +448,7 @@ app.get('/api/companion/jobs/poll', companionLimiter, async (req, res, next) => 
          WHERE id=$2 AND user_id=$3 AND status IN ('queued','paused','waiting_for_user')`,
         [device.id, job.workflow_run_id, device.user_id]
       );
-      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, 'accepted_by_companion', 'Companion accepted workflow job.', { companion_job_id: job.id });
+      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, 'accepted_by_companion', 'Local App accepted automation job.', { companion_job_id: job.id });
     }
     if (job.client_instance_id) {
       await db.query(
@@ -430,9 +457,9 @@ app.get('/api/companion/jobs/poll', companionLimiter, async (req, res, next) => 
          WHERE id=$2 AND user_id=$3`,
         [device.id, job.client_instance_id, device.user_id]
       );
-      await insertClientInstanceEvent(device.user_id, job.client_instance_id, 'accepted_by_companion', 'Companion accepted client job.', { companion_job_id: job.id });
+      await insertClientInstanceEvent(device.user_id, job.client_instance_id, 'accepted_by_companion', 'Local App accepted client job.', { companion_job_id: job.id });
     }
-    await insertCompanionJobEvent(device.user_id, job.id, job.workflow_run_id, 'accepted', 'Companion accepted job.');
+    await insertCompanionJobEvent(device.user_id, job.id, job.workflow_run_id, 'accepted', 'Local App accepted job.');
     res.json({ job: safeCompanionJob(job) });
   } catch (err) { next(err); }
 });
@@ -440,8 +467,8 @@ app.get('/api/companion/jobs/poll', companionLimiter, async (req, res, next) => 
 app.post('/api/companion/jobs/:id/status', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion jobs require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App jobs require active access.' });
     const status = oneOf(req.body.status, companionJobStatuses, 'running');
     const message = escapeText(req.body.message);
     const job = await loadCompanionJobForDevice(device, req.params.id);
@@ -467,18 +494,21 @@ app.post('/api/companion/jobs/:id/status', companionLimiter, async (req, res, ne
         clientInstanceId = instance.id;
         await db.query('UPDATE companion_jobs SET client_instance_id=$1 WHERE id=$2 AND user_id=$3', [clientInstanceId, job.id, device.user_id]);
       } else if (clientInstanceId) {
+        const nextClientState = clientStateFromJobStatus(status);
         await db.query(
           `UPDATE client_instances
            SET status=$1,
+               client_state=$2,
+               current_activity=$3,
                stopped_at=CASE WHEN $1='stopped' THEN NOW() ELSE stopped_at END,
-               error_message=CASE WHEN $1='crashed' THEN $2 ELSE error_message END,
+               error_message=CASE WHEN $1='crashed' THEN $6 ELSE error_message END,
                last_seen_at=NOW(),
                updated_at=NOW()
-           WHERE id=$3 AND user_id=$4`,
-          [statusToClientInstanceStatus(status), message || null, clientInstanceId, device.user_id]
+           WHERE id=$4 AND user_id=$5`,
+          [statusToClientInstanceStatus(status), nextClientState, activityForClientState(nextClientState), clientInstanceId, device.user_id, message || null]
         );
       }
-      if (clientInstanceId) await insertClientInstanceEvent(device.user_id, clientInstanceId, status, message || `Companion client job ${status}.`, { companion_job_id: job.id, job_type: job.job_type });
+      if (clientInstanceId) await insertClientInstanceEvent(device.user_id, clientInstanceId, status, message || `Local App client job ${status}.`, { companion_job_id: job.id, job_type: job.job_type });
       if (status === 'completed') await activity.log(device.user_id, 'client_job_completed', 'client_instance', clientInstanceId, `Client job completed: ${job.job_type}`);
       if (status === 'failed') await activity.log(device.user_id, 'client_job_failed', 'client_instance', clientInstanceId, `Client job failed: ${job.job_type}`);
     }
@@ -489,11 +519,15 @@ app.post('/api/companion/jobs/:id/status', companionLimiter, async (req, res, ne
          WHERE id=$3 AND user_id=$4`,
         [runStatus, completed, job.workflow_run_id, device.user_id]
       );
-      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, status, message || `Companion job ${status}.`, { companion_job_id: job.id });
+      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, status, message || `Local App job ${status}.`, { companion_job_id: job.id });
     }
     await insertCompanionJobEvent(device.user_id, job.id, job.workflow_run_id, status, message || `Job ${status}.`, req.body.metadata || {});
-    if (status === 'completed') await activity.log(device.user_id, 'workflow_completed', 'workflow_run', job.workflow_run_id, 'Workflow completed by companion');
-    if (status === 'failed') await activity.log(device.user_id, 'workflow_failed', 'workflow_run', job.workflow_run_id, 'Workflow failed in companion');
+    if (job.status !== status && isBrowserTaskJob(job.job_type)) {
+      if (status === 'completed') await recordBrowserTaskUsage(device.user_id, 'successful');
+      if (status === 'failed') await recordBrowserTaskUsage(device.user_id, 'failed');
+    }
+    if (status === 'completed') await activity.log(device.user_id, 'workflow_completed', 'workflow_run', job.workflow_run_id, 'Automation completed by Local App');
+    if (status === 'failed') await activity.log(device.user_id, 'workflow_failed', 'workflow_run', job.workflow_run_id, 'Automation failed in Local App');
     res.json({ ok: true, status });
   } catch (err) { next(err); }
 });
@@ -501,8 +535,8 @@ app.post('/api/companion/jobs/:id/status', companionLimiter, async (req, res, ne
 app.post('/api/companion/jobs/:id/events', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion jobs require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App jobs require active access.' });
     const job = await loadCompanionJobForDevice(device, req.params.id);
     const eventType = escapeText(req.body.event_type || req.body.type || 'status');
     const message = escapeText(req.body.message);
@@ -515,13 +549,13 @@ app.post('/api/companion/jobs/:id/events', companionLimiter, async (req, res, ne
 app.get('/api/companion/accounts/:id/field/:field', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid companion token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Companion account fields require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App account fields require active access.' });
     const { account, decrypted } = await loadAccount(device.user_id, req.params.id);
     const field = escapeText(req.params.field);
     const value = accountFieldForCompanion(account, decrypted, field);
-    await activity.log(device.user_id, 'companion_field_requested', 'account', account.id, `Companion requested ${field}`, { field });
-    await auditLog(device.user_id, device.user_id, 'companion_field_requested', 'account', account.id, `Companion requested ${field}`, { field });
+    await activity.log(device.user_id, 'companion_field_requested', 'account', account.id, `Local App requested ${field}`, { field });
+    await auditLog(device.user_id, device.user_id, 'companion_field_requested', 'account', account.id, `Local App requested ${field}`, { field });
     res.json({ field, value });
   } catch (err) { next(err); }
 });
@@ -548,6 +582,10 @@ app.use(restrictLimitedUsers);
 app.post('/api/companion/pair/start', companionLimiter, requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
+    const access = await accessSummaryForUser(req.currentUserRecord);
+    if (!access.gates.addDevice) {
+      return res.status(403).json({ error: 'Connected device limit reached for this subscription tier.' });
+    }
     const code = generatePairingCode();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await db.query(
@@ -561,7 +599,7 @@ app.post('/api/companion/pair/start', companionLimiter, requireAuth, async (req,
        VALUES ($1, $2, $3)`,
       [userId, hashPairingCode(code), expiresAt]
     );
-    await activity.log(userId, 'companion_pairing_started', 'companion', null, 'Generated companion pairing code');
+    await activity.log(userId, 'companion_pairing_started', 'companion', null, 'Generated Local App pairing code');
     res.json({ code, expires_at: expiresAt.toISOString() });
   } catch (err) { next(err); }
 });
@@ -588,9 +626,9 @@ app.post('/api/companion/devices/:id/revoke', requireAuth, async (req, res, next
        RETURNING id, device_name`,
       [req.params.id, req.currentUserId]
     );
-    if (!result.rows[0]) return res.status(404).json({ error: 'Companion device not found.' });
-    await activity.log(req.currentUserId, 'companion_revoke', 'companion_device', result.rows[0].id, `Revoked companion device ${result.rows[0].device_name || result.rows[0].id}`);
-    await auditLog(req.currentUserId, req.currentUserId, 'companion_revoke', 'companion_device', result.rows[0].id, 'Revoked companion device');
+    if (!result.rows[0]) return res.status(404).json({ error: 'Local App device not found.' });
+    await activity.log(req.currentUserId, 'companion_revoke', 'companion_device', result.rows[0].id, `Revoked Local App device ${result.rows[0].device_name || result.rows[0].id}`);
+    await auditLog(req.currentUserId, req.currentUserId, 'companion_revoke', 'companion_device', result.rows[0].id, 'Revoked Local App device');
     res.json({ ok: true, device: result.rows[0] });
   } catch (err) { next(err); }
 });
@@ -798,11 +836,306 @@ app.get('/admin/system', requireAuth, requireAdmin, async (req, res, next) => {
 
 app.get('/admin/subscriptions', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    const counts = await db.query(`SELECT subscription_status, COUNT(*)::int count FROM users GROUP BY subscription_status ORDER BY subscription_status`);
+    const [counts, tiers, users, usage, paymentSettings] = await Promise.all([
+      db.query(`SELECT subscription_status, COUNT(*)::int count FROM users GROUP BY subscription_status ORDER BY subscription_status`),
+      db.query(`SELECT * FROM subscription_tiers ORDER BY sort_order, id`),
+      db.query(
+        `SELECT u.id, u.discord_id, u.username, u.global_name, u.discord_username, u.discord_email,
+                u.role, u.subscription_status, u.subscription_tier_id, u.subscription_started_at,
+                u.subscription_expires_at, u.manually_paid_at, u.payment_method, u.payment_note,
+                u.created_at, u.last_login_at, t.name tier_name, t.slug tier_slug
+         FROM users u
+         LEFT JOIN subscription_tiers t ON t.id=u.subscription_tier_id
+         ORDER BY u.created_at DESC, u.id DESC`
+      ),
+      db.query(
+        `SELECT user_id, successful_count, failed_count
+         FROM browser_task_usage
+         WHERE date=CURRENT_DATE`
+      ),
+      db.query(`SELECT * FROM payment_settings ORDER BY method`)
+    ]);
+    const usageByUser = Object.fromEntries(usage.rows.map(row => [row.user_id, row]));
     res.render('admin/subscriptions', {
       title: 'Subscription Controls',
       counts: counts.rows,
+      tiers: tiers.rows,
+      users: users.rows,
+      usageByUser,
+      paymentSettings: paymentSettings.rows,
       paymentMethods
+    });
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/subscriptions/users/:id', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const targetId = Number(req.params.id);
+    const tierId = req.body.subscription_tier_id ? Number(req.body.subscription_tier_id) : null;
+    const subscriptionStatus = oneOf(req.body.subscription_status, subscriptionStatuses, 'inactive');
+    const expiresAt = escapeText(req.body.subscription_expires_at) || null;
+    const startedAt = escapeText(req.body.subscription_started_at) || null;
+    const paymentMethod = oneOf(req.body.payment_method, paymentMethods, 'manual_admin_activation');
+    const manuallyPaidAt = req.body.manually_paid === 'yes' ? new Date() : null;
+    const paymentNote = escapeText(req.body.payment_note);
+    const disabledAtSql = subscriptionStatus === 'banned' ? 'NOW()' : 'NULL';
+    const disabledBySql = subscriptionStatus === 'banned' ? '$9' : 'NULL';
+    const params = [
+      tierId,
+      subscriptionStatus,
+      startedAt,
+      expiresAt,
+      manuallyPaidAt,
+      paymentMethod,
+      paymentNote,
+      targetId
+    ];
+    if (subscriptionStatus === 'banned') params.push(req.currentUserId);
+    const result = await db.query(
+      `UPDATE users
+       SET subscription_tier_id=$1,
+           subscription_status=$2,
+           subscription_started_at=COALESCE($3::timestamptz, subscription_started_at),
+           subscription_expires_at=$4::timestamptz,
+           manually_paid_at=COALESCE($5::timestamptz, manually_paid_at),
+           payment_method=$6,
+           payment_note=$7,
+           disabled_at=${disabledAtSql},
+           disabled_by_user_id=${disabledBySql},
+           updated_at=NOW()
+       WHERE id=$8
+       RETURNING id, subscription_status`,
+      params
+    );
+    if (!result.rows[0]) throw new Error('User not found.');
+    await auditLog(req.currentUserId, targetId, 'admin_subscription_updated', 'user', targetId, 'Admin updated subscription tier/status', {
+      subscription_status: subscriptionStatus,
+      subscription_tier_id: tierId,
+      payment_method: paymentMethod
+    });
+    res.redirect('/admin/subscriptions');
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/subscriptions/tiers/:id', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const tierId = Number(req.params.id);
+    await db.query(
+      `UPDATE subscription_tiers
+       SET name=$1,
+           description=$2,
+           max_devices=$3,
+           daily_successful_browser_task_limit=$4,
+           max_accounts=$5,
+           max_proxies=$6,
+           snapshots_enabled=$7,
+           client_launcher_enabled=$8,
+           browser_automator_enabled=$9,
+           price_label=$10,
+           payment_notes=$11,
+           active=$12,
+           sort_order=$13,
+           updated_at=NOW()
+       WHERE id=$14`,
+      [
+        escapeText(req.body.name),
+        escapeText(req.body.description),
+        optionalInteger(req.body.max_devices),
+        optionalInteger(req.body.daily_successful_browser_task_limit),
+        optionalInteger(req.body.max_accounts),
+        optionalInteger(req.body.max_proxies),
+        req.body.snapshots_enabled === 'yes',
+        req.body.client_launcher_enabled === 'yes',
+        req.body.browser_automator_enabled === 'yes',
+        escapeText(req.body.price_label),
+        escapeText(req.body.payment_notes),
+        req.body.active === 'yes',
+        numberOrNull(req.body.sort_order) || 0,
+        tierId
+      ]
+    );
+    await auditLog(req.currentUserId, null, 'admin_subscription_tier_updated', 'subscription_tier', tierId, 'Admin updated subscription tier');
+    res.redirect('/admin/subscriptions');
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/subscriptions/payment-settings/:id', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const paymentId = Number(req.params.id);
+    const address = escapeText(req.body.address || '');
+    await db.query(
+      `UPDATE payment_settings
+       SET enabled=$1,
+           public_label=$2,
+           instructions=$3,
+           address_encrypted=CASE WHEN $4='' THEN address_encrypted ELSE $5 END,
+           updated_at=NOW()
+       WHERE id=$6`,
+      [
+        req.body.enabled === 'yes',
+        escapeText(req.body.public_label),
+        escapeText(req.body.instructions),
+        address,
+        encrypt(address),
+        paymentId
+      ]
+    );
+    await auditLog(req.currentUserId, null, 'admin_payment_settings_updated', 'payment_settings', paymentId, 'Admin updated payment settings placeholder');
+    res.redirect('/admin/subscriptions');
+  } catch (err) { next(err); }
+});
+
+app.get('/admin/downloads', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const items = await db.query(`SELECT * FROM download_items ORDER BY sort_order, category, title`);
+    res.render('admin/downloads', {
+      title: 'Downloads Manager',
+      items: items.rows,
+      downloadStatuses,
+      downloadCategories
+    });
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/downloads', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const title = escapeText(req.body.title);
+    if (!title) throw new Error('Download title is required.');
+    const slug = escapeText(req.body.slug) || slugify(title);
+    const category = oneOf(req.body.category, downloadCategories, 'client_tool');
+    const status = oneOf(req.body.status, downloadStatuses, 'coming_soon');
+    const result = await db.query(
+      `INSERT INTO download_items (title, slug, category, description, version, download_url, status, public_notes, admin_notes, sort_order, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+       ON CONFLICT (slug) DO UPDATE SET
+         title=EXCLUDED.title,
+         category=EXCLUDED.category,
+         description=EXCLUDED.description,
+         version=EXCLUDED.version,
+         download_url=EXCLUDED.download_url,
+         status=EXCLUDED.status,
+         public_notes=EXCLUDED.public_notes,
+         admin_notes=EXCLUDED.admin_notes,
+         sort_order=EXCLUDED.sort_order,
+         updated_at=NOW()
+       RETURNING id`,
+      [
+        title,
+        slug,
+        category,
+        escapeText(req.body.description),
+        escapeText(req.body.version),
+        escapeText(req.body.download_url),
+        status,
+        escapeText(req.body.public_notes),
+        escapeText(req.body.admin_notes),
+        numberOrNull(req.body.sort_order) || 0
+      ]
+    );
+    await auditLog(req.currentUserId, null, 'admin_download_item_saved', 'download_item', result.rows[0].id, 'Admin saved download item');
+    res.redirect('/admin/downloads');
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/downloads/:id', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const itemId = Number(req.params.id);
+    const status = oneOf(req.body.status, downloadStatuses, 'coming_soon');
+    const category = oneOf(req.body.category, downloadCategories, 'client_tool');
+    const result = await db.query(
+      `UPDATE download_items
+       SET title=$1,
+           slug=$2,
+           category=$3,
+           description=$4,
+           version=$5,
+           download_url=$6,
+           status=$7,
+           public_notes=$8,
+           admin_notes=$9,
+           sort_order=$10,
+           updated_at=NOW()
+       WHERE id=$11
+       RETURNING id`,
+      [
+        escapeText(req.body.title),
+        escapeText(req.body.slug) || slugify(req.body.title),
+        category,
+        escapeText(req.body.description),
+        escapeText(req.body.version),
+        escapeText(req.body.download_url),
+        status,
+        escapeText(req.body.public_notes),
+        escapeText(req.body.admin_notes),
+        numberOrNull(req.body.sort_order) || 0,
+        itemId
+      ]
+    );
+    if (!result.rows[0]) throw new Error('Download item not found.');
+    await auditLog(req.currentUserId, null, 'admin_download_item_updated', 'download_item', itemId, 'Admin updated download item');
+    res.redirect('/admin/downloads');
+  } catch (err) { next(err); }
+});
+
+app.get('/setup', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const [counts, helper, settings, access] = await Promise.all([
+      db.query(
+        `SELECT
+          (SELECT COUNT(*)::int FROM accounts WHERE user_id=$1 AND archived_at IS NULL) accounts,
+          (SELECT COUNT(*)::int FROM proxies WHERE user_id=$1) proxies,
+          (SELECT COUNT(*)::int FROM companion_devices WHERE user_id=$1 AND status <> 'revoked') devices,
+          (SELECT COUNT(*)::int FROM companion_devices WHERE user_id=$1 AND status='connected') connected_devices,
+          (SELECT COUNT(*)::int FROM client_profiles WHERE user_id=$1) launch_profiles,
+          (SELECT COUNT(*)::int FROM workflows WHERE user_id=$1) automations,
+          (SELECT COUNT(*)::int FROM workflow_runs WHERE user_id=$1) automation_runs,
+          (SELECT COUNT(*)::int FROM companion_jobs WHERE user_id=$1) local_jobs,
+          (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1) live_sessions,
+          (SELECT COUNT(*)::int FROM live_snapshots WHERE user_id=$1) snapshots`,
+        [userId]
+      ),
+      helperStatus(userId),
+      getSettings(userId),
+      accessSummaryForUser(req.currentUserRecord)
+    ]);
+    const setupCounts = counts.rows[0] || {};
+    res.render('setup', {
+      title: 'Setup Wizard',
+      counts: setupCounts,
+      helper,
+      settings,
+      access,
+      download: helperDownloadMetadata(),
+      steps: setupStepsForWorkspace(setupCounts, helper, access),
+      matrix: automationCompatibilityMatrix()
+    });
+  } catch (err) { next(err); }
+});
+
+app.get('/setup-guide', requireAuth, (req, res) => {
+  res.render('setup-guide', {
+    title: 'Setup Guide',
+    download: helperDownloadMetadata(),
+    docs: setupGuideSections(),
+    matrix: automationCompatibilityMatrix()
+  });
+});
+
+app.get('/compatibility', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const [helper, settings, access] = await Promise.all([
+      helperStatus(userId),
+      getSettings(userId),
+      accessSummaryForUser(req.currentUserRecord)
+    ]);
+    res.render('compatibility', {
+      title: 'Compatibility',
+      helper,
+      settings,
+      access,
+      matrix: automationCompatibilityMatrix()
     });
   } catch (err) { next(err); }
 });
@@ -870,6 +1203,7 @@ app.get('/', requireAuth, async (req, res, next) => {
 app.get('/accounts', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
+    await markStaleClientInstancesOffline(userId);
     const filters = {
       q: escapeText(req.query.q),
       account_type: escapeText(req.query.account_type),
@@ -944,15 +1278,19 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
       status_asc: 'a.status ASC, a.updated_at DESC'
     };
     const orderBy = accountSorts[filters.sort_by] || accountSorts.updated_desc;
-    const [rows, stats, categories, proxyCategories, countries, proxies, clientProfiles, settings] = await Promise.all([
+    const [rows, stats, categories, proxyCategories, countries, proxies, clientProfiles, settings, access] = await Promise.all([
       db.query(
         `SELECT a.*, p.host proxy_host, p.port proxy_port, p.status proxy_status, p.proxy_type,
-                ci.id active_instance_id, ci.status active_instance_status, ci.window_title active_instance_window
+                ci.id active_instance_id, ci.status active_instance_status, ci.window_title active_instance_window,
+                ci.client_state active_instance_client_state, ci.current_activity active_instance_activity, ci.last_seen_at active_instance_last_seen_at,
+                ast.total_level stats_total_level, ast.combat_level stats_combat_level, ast.fetched_at stats_fetched_at,
+                ast.status stats_status, ast.error_message stats_error_message
          FROM accounts a LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id) AND p.user_id = a.user_id
+         LEFT JOIN account_stats ast ON ast.account_id=a.id AND ast.user_id=a.user_id
          LEFT JOIN LATERAL (
-           SELECT id, status, window_title
+           SELECT id, status, window_title, client_state, current_activity, last_seen_at
            FROM client_instances
-           WHERE user_id=a.user_id AND account_id=a.id AND status IN ('pending','launching','running','scanning','detected')
+           WHERE user_id=a.user_id AND account_id=a.id AND status IN ('pending','launching','running','scanning','detected','stopped','crashed','unknown')
            ORDER BY last_seen_at DESC NULLS LAST, updated_at DESC
            LIMIT 1
          ) ci ON TRUE
@@ -980,7 +1318,8 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
       db.query(`SELECT DISTINCT country_code FROM accounts WHERE user_id=$1 AND country_code IS NOT NULL AND country_code <> '' ORDER BY country_code`, [userId]),
       db.query(`SELECT id, name, proxy_type, host, port, status FROM proxies WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200`, [userId]),
       db.query(`SELECT id, name FROM client_profiles WHERE user_id=$1 AND enabled IS TRUE ORDER BY updated_at DESC LIMIT 50`, [userId]),
-      getSettings(userId)
+      getSettings(userId),
+      accessSummaryForUser(req.currentUserRecord)
     ]);
     res.render('accounts/index', {
       title: 'Accounts',
@@ -993,6 +1332,7 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
       clientProfiles: clientProfiles.rows,
       filters,
       settings,
+      access,
       query: req.query,
       mask
     });
@@ -1157,8 +1497,12 @@ app.post('/accounts/bulk', requireAuth, async (req, res, next) => {
       affected = result.rowCount;
       await activity.log(userId, 'bulk_assign_category_status', 'account', null, `Updated ${affected} selected account(s)`, { count: affected, status });
     } else if (action === 'launch_selected') {
+      const access = await accessSummaryForUser(req.currentUserRecord);
+      if (!isAdminUser(req.currentUserRecord) && !(access.tier && access.tier.client_launcher_enabled)) {
+        throw new Error('Client launcher is not available for your subscription tier.');
+      }
       const profileId = req.body.bulk_client_profile_id ? Number(req.body.bulk_client_profile_id) : null;
-      if (!profileId) throw new Error('Select a client profile before launching accounts.');
+      if (!profileId) throw new Error('Select a launch profile before launching accounts.');
       const profile = await loadClientProfile(userId, profileId);
       const accounts = await db.query(
         `SELECT id, COALESCE(assigned_http_proxy_id, proxy_id, assigned_socks5_proxy_id) proxy_id
@@ -1244,6 +1588,22 @@ app.post('/accounts/:id/archive', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+app.post('/accounts/:id/refresh-stats', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const result = await refreshAccountStats(userId, req.params.id, {
+      displayName: req.body.display_name
+    });
+    res.redirect(`/accounts?stats_sync=${encodeURIComponent(result.status)}&account_id=${encodeURIComponent(req.params.id)}`);
+  } catch (err) {
+    if (/Account not found|display name/i.test(err.message)) {
+      res.redirect(`/accounts?stats_sync=failed&stats_error=${encodeURIComponent(err.message)}`);
+      return;
+    }
+    next(err);
+  }
+});
+
 app.get('/accounts/:id/copy/:field', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
@@ -1296,7 +1656,7 @@ app.get('/workflows', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
     await ensureStarterWorkflows(userId);
-    const [workflows, runs, accounts, proxies, devices, counts] = await Promise.all([
+    const [workflows, runs, accounts, proxies, devices, counts, access, helper] = await Promise.all([
       db.query(
         `SELECT w.*, COUNT(s.id)::int step_count
          FROM workflows w
@@ -1319,16 +1679,20 @@ app.get('/workflows', requireAuth, async (req, res, next) => {
       db.query(`SELECT id, username, legacy_login, display_name, account_type, status FROM accounts WHERE user_id=$1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 200`, [userId]),
       db.query(`SELECT id, name, proxy_type, host, port, status FROM proxies WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200`, [userId]),
       db.query(`SELECT id, device_name, status, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId]),
-      db.query(`SELECT status, COUNT(*)::int count FROM workflow_runs WHERE user_id=$1 GROUP BY status`, [userId])
+      db.query(`SELECT status, COUNT(*)::int count FROM workflow_runs WHERE user_id=$1 GROUP BY status`, [userId]),
+      accessSummaryForUser(req.currentUserRecord),
+      helperStatus(userId)
     ]);
     res.render('workflows/index', {
-      title: 'Workflows',
+      title: 'Browser Automator',
       workflows: workflows.rows,
       runs: runs.rows,
       accounts: accounts.rows,
       proxies: proxies.rows,
       devices: devices.rows,
       counts: counts.rows,
+      access,
+      helper,
       query: req.query,
       mask
     });
@@ -1338,6 +1702,8 @@ app.get('/workflows', requireAuth, async (req, res, next) => {
 app.post('/workflows', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
+    const access = await accessSummaryForUser(req.currentUserRecord);
+    if (!access.gates.browserAutomator) throw new Error('Browser Automator is not available for your subscription tier.');
     const template = oneOf(req.body.template, workflowTypes, 'generic_form_fill');
     const name = escapeText(req.body.name) || workflowTemplateName(template);
     const description = escapeText(req.body.description) || workflowTemplateDescription(template);
@@ -1348,7 +1714,7 @@ app.post('/workflows', requireAuth, async (req, res, next) => {
       [userId, name, description, template]
     );
     await replaceWorkflowSteps(userId, result.rows[0].id, workflowTemplateSteps(template));
-    await activity.log(userId, 'workflow_created', 'workflow', result.rows[0].id, `Created workflow ${name}`, { type: template });
+    await activity.log(userId, 'workflow_created', 'workflow', result.rows[0].id, `Created automation ${name}`, { type: template });
     res.redirect(`/workflows/${result.rows[0].id}/edit`);
   } catch (err) { next(err); }
 });
@@ -1362,7 +1728,7 @@ app.get('/workflows/runs/:id', requireAuth, async (req, res, next) => {
       db.query(`SELECT e.* FROM companion_job_events e JOIN companion_jobs j ON j.id=e.companion_job_id AND j.user_id=e.user_id WHERE e.user_id=$1 AND j.workflow_run_id=$2 ORDER BY e.created_at DESC LIMIT 100`, [userId, run.id]),
       db.query(`SELECT id, window_title, image_size, created_at FROM live_snapshots WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1`, [userId])
     ]);
-    res.render('workflows/run', { title: 'Workflow Run', run, events: events.rows, jobEvents: jobEvents.rows, snapshot: snapshot.rows[0] || null });
+    res.render('workflows/run', { title: 'Job Status', run, events: events.rows, jobEvents: jobEvents.rows, snapshot: snapshot.rows[0] || null });
   } catch (err) { next(err); }
 });
 
@@ -1372,7 +1738,7 @@ app.post('/workflows/runs/:id/continue', requireAuth, async (req, res, next) => 
     const run = await loadWorkflowRun(userId, req.params.id);
     await db.query(`UPDATE workflow_runs SET status='running', updated_at=NOW() WHERE id=$1 AND user_id=$2`, [run.id, userId]);
     await insertWorkflowRunEvent(userId, run.id, 'user_continue', 'User confirmed manual step and continued.');
-    await activity.log(userId, 'workflow_user_continue', 'workflow_run', run.id, 'User continued workflow after manual step');
+    await activity.log(userId, 'workflow_user_continue', 'workflow_run', run.id, 'User continued automation after manual step');
     res.redirect(`/workflows/runs/${run.id}`);
   } catch (err) { next(err); }
 });
@@ -1383,8 +1749,8 @@ app.post('/workflows/runs/:id/cancel', requireAuth, async (req, res, next) => {
     const run = await loadWorkflowRun(userId, req.params.id);
     await db.query(`UPDATE workflow_runs SET status='cancelled', completed_at=NOW(), updated_at=NOW() WHERE id=$1 AND user_id=$2`, [run.id, userId]);
     await db.query(`UPDATE companion_jobs SET status='cancelled', updated_at=NOW(), completed_at=NOW() WHERE user_id=$1 AND workflow_run_id=$2 AND status NOT IN ('completed','failed','cancelled')`, [userId, run.id]);
-    await insertWorkflowRunEvent(userId, run.id, 'cancelled', 'Workflow cancelled by user.');
-    await activity.log(userId, 'workflow_cancelled', 'workflow_run', run.id, 'Workflow cancelled by user');
+    await insertWorkflowRunEvent(userId, run.id, 'cancelled', 'Automation cancelled by user.');
+    await activity.log(userId, 'workflow_cancelled', 'workflow_run', run.id, 'Automation cancelled by user');
     res.redirect(`/workflows/runs/${run.id}`);
   } catch (err) { next(err); }
 });
@@ -1395,7 +1761,7 @@ app.get('/workflows/:id/edit', requireAuth, async (req, res, next) => {
     const workflow = await loadWorkflow(userId, req.params.id);
     const steps = await db.query(`SELECT * FROM workflow_steps WHERE user_id=$1 AND workflow_id=$2 ORDER BY step_order`, [userId, workflow.id]);
     res.render('workflows/form', {
-      title: 'Edit Workflow',
+      title: 'Edit Automation',
       workflow,
       steps: steps.rows,
       stepsJson: JSON.stringify(steps.rows.map(step => ({
@@ -1414,7 +1780,7 @@ app.post('/workflows/:id', requireAuth, async (req, res, next) => {
     const userId = req.currentUserId;
     const workflow = await loadWorkflow(userId, req.params.id);
     const name = escapeText(req.body.name);
-    if (!name) throw new Error('Workflow name is required.');
+    if (!name) throw new Error('Automation name is required.');
     const status = oneOf(req.body.status, workflowDefinitionStatuses, 'active');
     const type = oneOf(req.body.type, workflowTypes, workflow.type || 'custom');
     await db.query(
@@ -1423,7 +1789,7 @@ app.post('/workflows/:id', requireAuth, async (req, res, next) => {
     );
     const steps = parseWorkflowStepsJson(req.body.steps_json || '[]');
     await replaceWorkflowSteps(userId, workflow.id, steps);
-    await activity.log(userId, 'workflow_updated', 'workflow', workflow.id, `Updated workflow ${name}`, { type, status });
+    await activity.log(userId, 'workflow_updated', 'workflow', workflow.id, `Updated automation ${name}`, { type, status });
     res.redirect(`/workflows/${workflow.id}/edit`);
   } catch (err) { next(err); }
 });
@@ -1431,6 +1797,9 @@ app.post('/workflows/:id', requireAuth, async (req, res, next) => {
 app.post('/workflows/:id/run', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
+    const access = await accessSummaryForUser(req.currentUserRecord);
+    if (!access.gates.browserAutomator) throw new Error('Browser Automator is not available for your subscription tier.');
+    if (!access.gates.runBrowserTask) throw new Error('Daily browser task limit reached for your tier.');
     const workflow = await loadWorkflow(userId, req.params.id);
     const accountId = req.body.account_id ? Number(req.body.account_id) : null;
     const proxyId = req.body.proxy_id ? Number(req.body.proxy_id) : null;
@@ -1439,7 +1808,7 @@ app.post('/workflows/:id/run', requireAuth, async (req, res, next) => {
     if (proxyId) await assertProxyOwnership(userId, proxyId);
     if (deviceId) await assertDeviceOwnership(userId, deviceId);
     const steps = await db.query(`SELECT * FROM workflow_steps WHERE user_id=$1 AND workflow_id=$2 ORDER BY step_order`, [userId, workflow.id]);
-    if (!steps.rows.length) throw new Error('Workflow has no steps.');
+    if (!steps.rows.length) throw new Error('Automation has no steps.');
     const run = await db.query(
       `INSERT INTO workflow_runs (user_id, workflow_id, account_id, proxy_id, companion_device_id, status, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, 'queued', NOW(), NOW())
@@ -1453,27 +1822,16 @@ app.post('/workflows/:id/run', requireAuth, async (req, res, next) => {
        RETURNING id`,
       [userId, deviceId, workflow.id, run.rows[0].id, accountId, proxyId, payload]
     );
-    await insertWorkflowRunEvent(userId, run.rows[0].id, 'queued', 'Workflow queued for companion.', { companion_job_id: job.rows[0].id });
-    await activity.log(userId, 'workflow_started', 'workflow_run', run.rows[0].id, `Queued workflow ${workflow.name}`, { workflow_id: workflow.id });
-    await auditLog(userId, userId, 'workflow_started', 'workflow_run', run.rows[0].id, `Queued workflow ${workflow.name}`, { workflow_id: workflow.id });
+    await insertWorkflowRunEvent(userId, run.rows[0].id, 'queued', 'Automation queued for Local App.', { companion_job_id: job.rows[0].id });
+    await activity.log(userId, 'workflow_started', 'workflow_run', run.rows[0].id, `Queued automation ${workflow.name}`, { workflow_id: workflow.id });
+    await auditLog(userId, userId, 'workflow_started', 'workflow_run', run.rows[0].id, `Queued automation ${workflow.name}`, { workflow_id: workflow.id });
     res.redirect(`/workflows/runs/${run.rows[0].id}`);
   } catch (err) { next(err); }
 });
 
-app.get('/workflow', requireAuth, async (req, res, next) => {
-  try {
-    const userId = req.currentUserId;
-    const settings = await getSettings(userId);
-    const [accounts, helper] = await Promise.all([
-      db.query(`SELECT id, username, legacy_login, display_name, status, account_type, upgrade_status FROM accounts WHERE user_id=$1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 100`, [userId]),
-      helperStatus(userId)
-    ]);
-    let selected = null;
-    let decrypted = {};
-    if (req.query.account_id) ({ account: selected, decrypted } = await loadAccount(userId, req.query.account_id));
-    else if (accounts.rows[0]) ({ account: selected, decrypted } = await loadAccount(userId, accounts.rows[0].id));
-    res.render('workflow', { title: 'Workflow', accounts: accounts.rows, selected, decrypted, settings, helper, proxyMode: proxyMode(selected, helper, settings), mask, nextStep: workflowStep(selected) });
-  } catch (err) { next(err); }
+app.get('/workflow', requireAuth, (req, res) => {
+  const accountId = req.query.account_id ? encodeURIComponent(req.query.account_id) : '';
+  res.redirect(accountId ? `/workflows?account_id=${accountId}` : '/workflows');
 });
 
 app.post('/workflow/:id/status', requireAuth, async (req, res, next) => {
@@ -1486,24 +1844,31 @@ app.post('/workflow/:id/status', requireAuth, async (req, res, next) => {
        archived_at=CASE WHEN $1='archived' THEN NOW() ELSE archived_at END, updated_at=NOW() WHERE id=$3 AND user_id=$4`,
       [status, oneOf(upgradeStatus, workflowStatuses, 'needs_review'), req.params.id, userId]
     );
-    await activity.log(userId, 'workflow_status_changed', 'account', req.params.id, `Workflow status changed to ${status}`, { status });
-    res.redirect(`/workflow?account_id=${req.params.id}`);
+    await activity.log(userId, 'workflow_status_changed', 'account', req.params.id, `Manual progress status changed to ${status}`, { status });
+    res.redirect(`/workflows?account_id=${encodeURIComponent(req.params.id)}`);
   } catch (err) { next(err); }
 });
 
 app.get('/instances', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
-    const [helper, settings, devices, instances, snapshot, jobs, events, accounts, proxies, workflows, stats] = await Promise.all([
+    await markStaleClientInstancesOffline(userId);
+    const [helper, settings, devices, instances, snapshot, jobs, events, accounts, proxies, workflows, stats, access] = await Promise.all([
       helperStatus(userId),
       getSettings(userId),
       db.query(`SELECT id, device_name, companion_version, status, allow_screenshots, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId]),
       db.query(
         `SELECT ci.*, cp.name profile_name, a.username account_username, a.legacy_login account_legacy_login, a.display_name account_display_name,
+                a.gp_amount, a.bank_value, a.wealth_value, a.wealth_amount, a.wealth_source account_wealth_source,
+                sa.username suggested_account_username, sa.legacy_login suggested_account_legacy_login, sa.display_name suggested_account_display_name,
+                ast.total_level stats_total_level, ast.combat_level stats_combat_level, ast.fetched_at stats_fetched_at,
+                ast.status stats_status, ast.error_message stats_error_message,
                 p.name proxy_name, p.host proxy_host, p.port proxy_port, p.proxy_type, p.status proxy_status, d.device_name
          FROM client_instances ci
          LEFT JOIN client_profiles cp ON cp.id=ci.client_profile_id AND cp.user_id=ci.user_id
          LEFT JOIN accounts a ON a.id=ci.account_id AND a.user_id=ci.user_id
+         LEFT JOIN accounts sa ON sa.id=ci.suggested_account_id AND sa.user_id=ci.user_id
+         LEFT JOIN account_stats ast ON ast.account_id=ci.account_id AND ast.user_id=ci.user_id
          LEFT JOIN proxies p ON p.id=ci.proxy_id AND p.user_id=ci.user_id
          LEFT JOIN companion_devices d ON d.id=ci.companion_device_id AND d.user_id=ci.user_id
          WHERE ci.user_id=$1
@@ -1555,10 +1920,11 @@ app.get('/instances', requireAuth, async (req, res, next) => {
           (SELECT COUNT(*)::int FROM companion_devices WHERE user_id=$1 AND status='connected') connected_devices,
           (SELECT COUNT(*)::int FROM companion_jobs WHERE user_id=$1 AND job_type IN ('launch_client','stop_client','detect_clients','request_snapshot') AND status IN ('queued','accepted','running','paused','waiting_for_user')) active_jobs`,
         [userId]
-      )
+      ),
+      accessSummaryForUser(req.currentUserRecord)
     ]);
     res.render('instances', {
-      title: 'Instances',
+      title: 'Live Sessions',
       helper,
       settings,
       devices: devices.rows,
@@ -1570,16 +1936,126 @@ app.get('/instances', requireAuth, async (req, res, next) => {
       proxies: proxies.rows,
       workflows: workflows.rows,
       stats: stats.rows[0],
+      access,
       query: req.query,
       mask
     });
   } catch (err) { next(err); }
 });
 
+app.get('/instances/:id', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const [instance, events, jobs, stats, accounts, proxies, access] = await Promise.all([
+      db.query(
+        `SELECT ci.*, cp.name profile_name, a.username account_username, a.legacy_login account_legacy_login, a.display_name account_display_name,
+                a.gp_amount, a.bank_value, a.wealth_value, a.wealth_amount, a.wealth_source account_wealth_source,
+                sa.username suggested_account_username, sa.legacy_login suggested_account_legacy_login, sa.display_name suggested_account_display_name,
+                ast.total_level stats_total_level, ast.combat_level stats_combat_level, ast.fetched_at stats_fetched_at,
+                ast.status stats_status, ast.error_message stats_error_message,
+                p.name proxy_name, p.host proxy_host, p.port proxy_port, p.proxy_type, p.status proxy_status, d.device_name
+         FROM client_instances ci
+         LEFT JOIN client_profiles cp ON cp.id=ci.client_profile_id AND cp.user_id=ci.user_id
+         LEFT JOIN accounts a ON a.id=ci.account_id AND a.user_id=ci.user_id
+         LEFT JOIN accounts sa ON sa.id=ci.suggested_account_id AND sa.user_id=ci.user_id
+         LEFT JOIN account_stats ast ON ast.account_id=ci.account_id AND ast.user_id=ci.user_id
+         LEFT JOIN proxies p ON p.id=ci.proxy_id AND p.user_id=ci.user_id
+         LEFT JOIN companion_devices d ON d.id=ci.companion_device_id AND d.user_id=ci.user_id
+         WHERE ci.id=$1 AND ci.user_id=$2`,
+        [req.params.id, userId]
+      ),
+      db.query(
+        `SELECT * FROM client_instance_events
+         WHERE client_instance_id=$1 AND user_id=$2
+         ORDER BY created_at DESC
+         LIMIT 100`,
+        [req.params.id, userId]
+      ),
+      db.query(
+        `SELECT * FROM companion_jobs
+         WHERE client_instance_id=$1 AND user_id=$2
+         ORDER BY updated_at DESC
+         LIMIT 50`,
+        [req.params.id, userId]
+      ),
+      db.query(
+        `SELECT * FROM account_stats
+         WHERE account_id=(SELECT account_id FROM client_instances WHERE id=$1 AND user_id=$2) AND user_id=$2
+         LIMIT 1`,
+        [req.params.id, userId]
+      ),
+      db.query(`SELECT id, username, legacy_login, display_name FROM accounts WHERE user_id=$1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 200`, [userId]),
+      db.query(`SELECT id, name, proxy_type, host, port, status FROM proxies WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200`, [userId]),
+      accessSummaryForUser(req.currentUserRecord)
+    ]);
+    if (!instance.rows[0]) throw new Error('Client instance not found.');
+    res.render('instance', {
+      title: 'Live Session',
+      instance: instance.rows[0],
+      events: events.rows,
+      jobs: jobs.rows,
+      accountStats: stats.rows[0] || null,
+      accounts: accounts.rows,
+      proxies: proxies.rows,
+      access,
+      mask
+    });
+  } catch (err) { next(err); }
+});
+
+app.post('/instances/:id/match', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const instance = await loadClientInstance(userId, req.params.id);
+    const accountId = req.body.account_id ? Number(req.body.account_id) : null;
+    const proxyId = req.body.proxy_id ? Number(req.body.proxy_id) : null;
+    if (accountId) await assertAccountOwnership(userId, accountId);
+    if (proxyId) await assertProxyOwnership(userId, proxyId);
+    await db.query(
+      `UPDATE client_instances
+       SET account_id=$1, proxy_id=$2, suggested_account_id=NULL, match_confidence=$3, match_reason=$4, updated_at=NOW()
+       WHERE id=$5 AND user_id=$6`,
+      [accountId, proxyId, accountId ? 'manual' : null, accountId ? 'User confirmed account match.' : null, instance.id, userId]
+    );
+    if (accountId) await applyClientInstanceAccountStatus(userId, accountId, {}, instance);
+    await insertClientInstanceEvent(userId, instance.id, 'account_matched_to_client', accountId ? 'User matched an account to this live session.' : 'User cleared account match.', { account_id: accountId, proxy_id: proxyId });
+    await activity.log(userId, 'account_matched_to_client', 'client_instance', instance.id, 'Matched account to live session', { account_id: accountId });
+    res.redirect(`/instances/${instance.id}`);
+  } catch (err) { next(err); }
+});
+
+app.post('/instances/:id/unmatch', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const instance = await loadClientInstance(userId, req.params.id);
+    await db.query(
+      `UPDATE client_instances
+       SET account_id=NULL, suggested_account_id=NULL, match_confidence=NULL, match_reason=NULL, updated_at=NOW()
+       WHERE id=$1 AND user_id=$2`,
+      [instance.id, userId]
+    );
+    await insertClientInstanceEvent(userId, instance.id, 'account_unmatched_from_client', 'User removed account match from this live session.');
+    await activity.log(userId, 'account_unmatched_from_client', 'client_instance', instance.id, 'Removed account match from live session');
+    res.redirect(`/instances/${instance.id}`);
+  } catch (err) { next(err); }
+});
+
+app.post('/instances/:id/refresh-stats', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const instance = await loadClientInstance(userId, req.params.id);
+    if (!instance.account_id) throw new Error('Match an account before refreshing stats.');
+    const result = await refreshAccountStats(userId, instance.account_id);
+    await insertClientInstanceEvent(userId, instance.id, 'stats_refreshed', `Stats refresh ${result.status}.`, { account_id: instance.account_id, status: result.status });
+    res.redirect(`/instances/${instance.id}?stats_sync=${encodeURIComponent(result.status)}`);
+  } catch (err) { next(err); }
+});
+
 app.get('/clients', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
-    const [helper, settings, devices, profiles, instances, snapshot, jobs, accounts, proxies, workflows, stats] = await Promise.all([
+    await markStaleClientInstancesOffline(userId);
+    const [helper, settings, devices, profiles, instances, snapshot, jobs, accounts, proxies, workflows, stats, access] = await Promise.all([
       helperStatus(userId),
       getSettings(userId),
       db.query(`SELECT id, device_name, companion_version, status, allow_screenshots, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId]),
@@ -1637,10 +2113,11 @@ app.get('/clients', requireAuth, async (req, res, next) => {
           (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1 AND status IN ('stopped','crashed','unknown')) stopped_clients,
           (SELECT COUNT(*)::int FROM companion_jobs WHERE user_id=$1 AND status IN ('queued','accepted','running','paused','waiting_for_user')) active_jobs`,
         [userId]
-      )
+      ),
+      accessSummaryForUser(req.currentUserRecord)
     ]);
     res.render('clients', {
-      title: 'Clients',
+      title: 'Launch Profiles',
       helper,
       settings,
       devices: devices.rows,
@@ -1652,6 +2129,7 @@ app.get('/clients', requireAuth, async (req, res, next) => {
       proxies: proxies.rows,
       workflows: workflows.rows,
       stats: stats.rows[0],
+      access,
       query: req.query,
       mask
     });
@@ -1661,6 +2139,8 @@ app.get('/clients', requireAuth, async (req, res, next) => {
 app.post('/clients/profiles', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
+    const access = await accessSummaryForUser(req.currentUserRecord);
+    if (!access.gates.clientLauncher) throw new Error('Client Launcher is not available for your subscription tier.');
     const profile = await clientProfileFromBody(userId, req.body);
     const result = await db.query(
       `INSERT INTO client_profiles (user_id, name, client_type, launch_args_encrypted, default_account_id, default_proxy_id, default_workflow_id, notes, enabled, updated_at)
@@ -1678,8 +2158,8 @@ app.post('/clients/profiles', requireAuth, async (req, res, next) => {
         profile.enabled
       ]
     );
-    await activity.log(userId, 'client_profile_created', 'client_profile', result.rows[0].id, `Created client profile ${profile.name}`, { client_type: profile.client_type });
-    await auditLog(userId, userId, 'client_profile_created', 'client_profile', result.rows[0].id, `Created client profile ${profile.name}`, { client_type: profile.client_type });
+    await activity.log(userId, 'client_profile_created', 'client_profile', result.rows[0].id, `Created launch profile ${profile.name}`, { client_type: profile.client_type });
+    await auditLog(userId, userId, 'client_profile_created', 'client_profile', result.rows[0].id, `Created launch profile ${profile.name}`, { client_type: profile.client_type });
     res.redirect('/clients');
   } catch (err) { next(err); }
 });
@@ -1687,6 +2167,8 @@ app.post('/clients/profiles', requireAuth, async (req, res, next) => {
 app.post('/clients/profiles/:id', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
+    const access = await accessSummaryForUser(req.currentUserRecord);
+    if (!access.gates.clientLauncher) throw new Error('Client Launcher is not available for your subscription tier.');
     const existing = await loadClientProfile(userId, req.params.id);
     const profile = await clientProfileFromBody(userId, req.body);
     await db.query(
@@ -1706,7 +2188,7 @@ app.post('/clients/profiles/:id', requireAuth, async (req, res, next) => {
         userId
       ]
     );
-    await activity.log(userId, 'client_profile_updated', 'client_profile', req.params.id, `Updated client profile ${profile.name}`, { client_type: profile.client_type });
+    await activity.log(userId, 'client_profile_updated', 'client_profile', req.params.id, `Updated launch profile ${profile.name}`, { client_type: profile.client_type });
     res.redirect('/clients');
   } catch (err) { next(err); }
 });
@@ -1714,6 +2196,8 @@ app.post('/clients/profiles/:id', requireAuth, async (req, res, next) => {
 app.post('/clients/profiles/:id/delete', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
+    const access = await accessSummaryForUser(req.currentUserRecord);
+    if (!access.gates.clientLauncher) throw new Error('Client Launcher is not available for your subscription tier.');
     const result = await db.query(
       `DELETE FROM client_profiles
        WHERE id=$1 AND user_id=$2
@@ -1721,8 +2205,8 @@ app.post('/clients/profiles/:id/delete', requireAuth, async (req, res, next) => 
       [req.params.id, userId]
     );
     if (!result.rows[0]) throw new Error('Client profile not found.');
-    await activity.log(userId, 'client_profile_deleted', 'client_profile', result.rows[0].id, `Deleted client profile ${result.rows[0].name}`);
-    await auditLog(userId, userId, 'client_profile_deleted', 'client_profile', result.rows[0].id, `Deleted client profile ${result.rows[0].name}`);
+    await activity.log(userId, 'client_profile_deleted', 'client_profile', result.rows[0].id, `Deleted launch profile ${result.rows[0].name}`);
+    await auditLog(userId, userId, 'client_profile_deleted', 'client_profile', result.rows[0].id, `Deleted launch profile ${result.rows[0].name}`);
     res.redirect('/clients');
   } catch (err) { next(err); }
 });
@@ -1730,6 +2214,10 @@ app.post('/clients/profiles/:id/delete', requireAuth, async (req, res, next) => 
 app.post('/clients/profiles/:id/launch', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
+    const access = await accessSummaryForUser(req.currentUserRecord);
+    if (!access.gates.clientLauncher) {
+      throw new Error('Client launcher is not available for your subscription tier.');
+    }
     const profile = await loadClientProfile(userId, req.params.id);
     const deviceId = req.body.companion_device_id ? Number(req.body.companion_device_id) : null;
     const accountId = req.body.account_id ? Number(req.body.account_id) : profile.default_account_id || null;
@@ -1763,11 +2251,14 @@ app.post('/clients/instances/:id/attach', requireAuth, async (req, res, next) =>
     if (accountId) await assertAccountOwnership(userId, accountId);
     if (proxyId) await assertProxyOwnership(userId, proxyId);
     await db.query(
-      `UPDATE client_instances SET account_id=$1, proxy_id=$2, updated_at=NOW() WHERE id=$3 AND user_id=$4`,
-      [accountId, proxyId, instance.id, userId]
+      `UPDATE client_instances
+       SET account_id=$1, proxy_id=$2, suggested_account_id=NULL, match_confidence=$3, match_reason=$4, updated_at=NOW()
+       WHERE id=$5 AND user_id=$6`,
+      [accountId, proxyId, accountId ? 'manual' : null, accountId ? 'User confirmed account match.' : null, instance.id, userId]
     );
-    await insertClientInstanceEvent(userId, instance.id, 'attached_account_proxy', 'Attached account/proxy to client instance.', { account_id: accountId, proxy_id: proxyId });
-    await activity.log(userId, 'client_instance_attached', 'client_instance', instance.id, 'Attached account/proxy to client instance');
+    if (accountId) await applyClientInstanceAccountStatus(userId, accountId, {}, instance);
+    await insertClientInstanceEvent(userId, instance.id, 'account_matched_to_client', 'Attached account/proxy to live session.', { account_id: accountId, proxy_id: proxyId });
+    await activity.log(userId, 'account_matched_to_client', 'client_instance', instance.id, 'Attached account/proxy to live session', { account_id: accountId });
     res.redirect('/instances');
   } catch (err) { next(err); }
 });
@@ -1780,8 +2271,8 @@ app.post('/clients/instances/:id/stop-tracking', requireAuth, async (req, res, n
       `UPDATE client_instances SET status='stopped', stopped_at=NOW(), updated_at=NOW() WHERE id=$1 AND user_id=$2`,
       [instance.id, userId]
     );
-    await insertClientInstanceEvent(userId, instance.id, 'stop_tracking', 'User stopped tracking this client instance.');
-    await activity.log(userId, 'client_stopped_tracking', 'client_instance', instance.id, 'Stopped tracking client instance');
+    await insertClientInstanceEvent(userId, instance.id, 'stop_tracking', 'User stopped tracking this live session.');
+    await activity.log(userId, 'client_stopped_tracking', 'client_instance', instance.id, 'Stopped tracking live session');
     res.redirect('/instances');
   } catch (err) { next(err); }
 });
@@ -1789,6 +2280,8 @@ app.post('/clients/instances/:id/stop-tracking', requireAuth, async (req, res, n
 app.post('/clients/instances/:id/request-snapshot', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
+    const access = await accessSummaryForUser(req.currentUserRecord);
+    if (!access.gates.snapshots) throw new Error('Live session snapshots are not available for your subscription tier.');
     const instance = await loadClientInstance(userId, req.params.id);
     const settings = await getSettings(userId);
     if (settings.allow_companion_snapshots !== 'true') throw new Error('Snapshots are disabled in Settings.');
@@ -1809,7 +2302,7 @@ app.post('/clients/instances/:id/request-snapshot', requireAuth, async (req, res
       [userId, instance.companion_device_id, instance.id, instance.account_id, instance.proxy_id, payload]
     );
     await insertClientInstanceEvent(userId, instance.id, 'snapshot_requested', 'Snapshot requested by user.', { companion_job_id: job.rows[0].id });
-    await activity.log(userId, 'snapshot_requested', 'client_instance', instance.id, 'Snapshot requested for client instance');
+    await activity.log(userId, 'snapshot_requested', 'client_instance', instance.id, 'Snapshot requested for live session');
     res.redirect(`/instances?snapshot_job=${job.rows[0].id}`);
   } catch (err) { next(err); }
 });
@@ -1882,6 +2375,7 @@ app.get('/local-jobs', requireAuth, async (req, res, next) => {
       filters,
       companionJobStatuses,
       companionJobTypes,
+      jobTypeLabel,
       query: req.query,
       mask
     });
@@ -2135,71 +2629,14 @@ app.get('/imports-exports', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-app.post('/imports/preview', requireAuth, upload.single('accounts_file'), async (req, res, next) => {
-  try {
-    const userId = req.currentUserId;
-    const text = inputText(req);
-    const preview = parseAccountImport(text, req.body.delimiter || ':', { account_type: req.body.account_type, import_format: req.body.import_format });
-    await markDuplicates(userId, preview);
-    const stats = previewStats(preview);
-    await recordImportExportRun(userId, 'import_preview', stats.valid, null, { duplicate: stats.duplicate, invalid: stats.invalid });
-    res.render('imports-exports', { title: 'Imports / Exports', preview, exportRows: null, options: { ...req.body, accounts_text: text }, stats, settings: await getSettings(userId) });
-  } catch (err) { next(err); }
-});
-
-app.post('/imports/commit', requireAuth, async (req, res, next) => {
-  try {
-    const userId = req.currentUserId;
-    const rows = parseAccountImport(req.body.accounts_text || '', req.body.delimiter || ':', { account_type: req.body.account_type, import_format: req.body.import_format });
-    await markDuplicates(userId, rows);
-    let imported = 0;
-    for (const row of rows.filter(item => item.valid && (req.body.duplicate_mode === 'update' || !item.duplicate))) {
-      const account = accountFromImport(row, req.body);
-      if (req.body.duplicate_mode === 'update') await db.query(accountUpsertSql(), accountParams(account, userId));
-      else await db.query(accountInsertSql('ON CONFLICT (user_id, username) DO NOTHING'), accountParams(account, userId));
-      imported += 1;
-    }
-    await recordImportExportRun(userId, 'import_commit', imported, null, { duplicate_mode: req.body.duplicate_mode || 'skip' });
-    await activity.log(userId, 'accounts_imported', 'account', null, `Imported ${imported} account line(s)`, { duplicate_mode: req.body.duplicate_mode || 'skip' });
-    res.redirect('/accounts');
-  } catch (err) { next(err); }
-});
-
-app.post('/exports/preview', requireAuth, async (req, res, next) => {
-  try {
-    const userId = req.currentUserId;
-    const format = oneOf(req.body.format, exportFormats, 'legacy_user_pass');
-    const rows = await exportRows(userId, req.body);
-    if (req.body.confirm_export_action === 'yes') await applyExportAction(userId, req.body);
-    await recordImportExportRun(userId, 'export_preview', rows.length, format, { account_type: req.body.account_type, export_action: req.body.export_action || 'keep' });
-    await activity.log(userId, 'account_exported', 'account', null, `Prepared ${rows.length} account(s) for export`, { format, export_action: req.body.export_action || 'keep' });
-    res.render('imports-exports', { title: 'Imports / Exports', preview: null, exportRows: rows, options: req.body, stats: null, settings: await getSettings(userId) });
-  } catch (err) { next(err); }
-});
-
-app.get('/local-helper', requireAuth, async (req, res, next) => {
-  try {
-    const userId = req.currentUserId;
-    const [helper, settings] = await Promise.all([
-      helperStatus(userId),
-      getSettings(userId)
-    ]);
-    const pairingCode = req.session.helperPairingCode || null;
-    req.session.helperPairingCode = null;
-    res.render('local-helper', {
-      title: 'Companion',
-      helper,
-      settings,
-      pairingCode,
-      download: helperDownloadMetadata()
-    });
-  } catch (err) { next(err); }
+app.get('/local-helper', requireAuth, (req, res) => {
+  res.redirect('/companion');
 });
 
 app.get('/companion', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
-    const [helper, settings, devices, statuses, snapshot, jobs, stats] = await Promise.all([
+    const [helper, settings, devices, statuses, snapshot, jobs, stats, access] = await Promise.all([
       helperStatus(userId),
       getSettings(userId),
       db.query(
@@ -2245,12 +2682,13 @@ app.get('/companion', requireAuth, async (req, res, next) => {
           (SELECT COUNT(*)::int FROM companion_jobs WHERE user_id=$1 AND status IN ('queued','accepted','running','paused','waiting_for_user')) active_jobs,
           (SELECT COUNT(*)::int FROM client_instances WHERE user_id=$1 AND status IN ('pending','launching','running','scanning','detected')) running_instances`,
         [userId]
-      )
+      ),
+      accessSummaryForUser(req.currentUserRecord)
     ]);
     const pairingCode = req.session.helperPairingCode || null;
     req.session.helperPairingCode = null;
     res.render('companion', {
-      title: 'Companion',
+      title: 'Client Monitor',
       helper,
       settings,
       devices: devices.rows,
@@ -2259,7 +2697,8 @@ app.get('/companion', requireAuth, async (req, res, next) => {
       jobs: jobs.rows,
       stats: stats.rows[0],
       pairingCode,
-      download: helperDownloadMetadata()
+      download: helperDownloadMetadata(),
+      access
     });
   } catch (err) { next(err); }
 });
@@ -2267,6 +2706,11 @@ app.get('/companion', requireAuth, async (req, res, next) => {
 app.post('/companion/pairing-code', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
+    const access = await accessSummaryForUser(req.currentUserRecord);
+    if (!access.gates.addDevice) {
+      req.session.helperPairingCode = null;
+      throw new Error('Connected device limit reached for your subscription tier.');
+    }
     const code = generatePairingCode();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await db.query(
@@ -2281,8 +2725,8 @@ app.post('/companion/pairing-code', requireAuth, async (req, res, next) => {
       [userId, hashPairingCode(code), expiresAt]
     );
     req.session.helperPairingCode = { code, expiresAt: expiresAt.toISOString() };
-    await activity.log(userId, 'companion_pair', 'companion', null, 'Generated a short-lived Companion pairing code');
-    await auditLog(userId, userId, 'companion_pair', 'companion', null, 'Generated a short-lived Companion pairing code');
+    await activity.log(userId, 'companion_pair', 'companion', null, 'Generated a short-lived Local App pairing code');
+    await auditLog(userId, userId, 'companion_pair', 'companion', null, 'Generated a short-lived Local App pairing code');
     res.redirect('/companion');
   } catch (err) { next(err); }
 });
@@ -2297,9 +2741,9 @@ app.post('/companion/devices/:id/revoke', requireAuth, async (req, res, next) =>
        RETURNING id, device_name`,
       [req.params.id, userId]
     );
-    if (!result.rows[0]) throw new Error('Companion device not found.');
-    await activity.log(userId, 'companion_revoke', 'companion_device', result.rows[0].id, `Revoked companion device ${result.rows[0].device_name || result.rows[0].id}`);
-    await auditLog(userId, userId, 'companion_revoke', 'companion_device', result.rows[0].id, 'Revoked companion device');
+    if (!result.rows[0]) throw new Error('Local App device not found.');
+    await activity.log(userId, 'companion_revoke', 'companion_device', result.rows[0].id, `Revoked Local App device ${result.rows[0].device_name || result.rows[0].id}`);
+    await auditLog(userId, userId, 'companion_revoke', 'companion_device', result.rows[0].id, 'Revoked Local App device');
     res.redirect('/companion');
   } catch (err) { next(err); }
 });
@@ -2312,33 +2756,10 @@ app.post('/companion/devices/:id', requireAuth, async (req, res, next) => {
        SET device_name=$1, allow_screenshots=$2, updated_at=NOW()
        WHERE id=$3 AND user_id=$4 AND status <> 'revoked'
        RETURNING id, device_name, allow_screenshots`,
-      [escapeText(req.body.device_name) || 'GS Companion', req.body.allow_screenshots === 'yes', req.params.id, userId]
+      [escapeText(req.body.device_name) || 'GS Local App', req.body.allow_screenshots === 'yes', req.params.id, userId]
     );
-    if (!result.rows[0]) throw new Error('Companion device not found.');
-    await activity.log(userId, 'companion_device_updated', 'companion_device', result.rows[0].id, 'Updated companion device settings');
-    res.redirect('/companion');
-  } catch (err) { next(err); }
-});
-
-app.post('/local-helper/pairing-code', requireAuth, async (req, res, next) => {
-  try {
-    const userId = req.currentUserId;
-    const code = generatePairingCode();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    await db.query(
-      `UPDATE helper_pairing_codes
-       SET expires_at=NOW()
-       WHERE user_id=$1 AND used_at IS NULL AND expires_at > NOW()`,
-      [userId]
-    );
-    await db.query(
-      `INSERT INTO helper_pairing_codes (user_id, code_hash, expires_at)
-       VALUES ($1, $2, $3)`,
-      [userId, hashPairingCode(code), expiresAt]
-    );
-    req.session.helperPairingCode = { code, expiresAt: expiresAt.toISOString() };
-    await activity.log(userId, 'companion_pair', 'companion', null, 'Generated a short-lived Companion pairing code');
-    await auditLog(userId, userId, 'companion_pair', 'companion', null, 'Generated a short-lived Companion pairing code');
+    if (!result.rows[0]) throw new Error('Local App device not found.');
+    await activity.log(userId, 'companion_device_updated', 'companion_device', result.rows[0].id, 'Updated Local App device settings');
     res.redirect('/companion');
   } catch (err) { next(err); }
 });
@@ -2346,21 +2767,26 @@ app.post('/local-helper/pairing-code', requireAuth, async (req, res, next) => {
 app.get('/downloads/helper/windows', requireAuth, (req, res) => {
   const download = helperDownloadMetadata();
   if (download.available) {
-    const windowsPath = path.join(__dirname, '..', 'companion', 'dist', 'GS Account Manager Companion Setup.exe');
-    return res.download(windowsPath, 'GS Account Manager Companion Setup.exe');
+    return res.download(download.filePath, download.fileName);
   }
   return res.status(404).render('helper-download', {
-    title: 'GS Account Manager Companion Download',
+    title: 'GS Local App Download',
     download
   });
 });
 
 app.get('/downloads', requireAuth, async (req, res, next) => {
   try {
+    const [downloadItems, access] = await Promise.all([
+      db.query(`SELECT * FROM download_items WHERE status <> 'hidden' ORDER BY sort_order, category, title`),
+      accessSummaryForUser(req.currentUserRecord)
+    ]);
     res.render('downloads', {
       title: 'Downloads',
       download: helperDownloadMetadata(),
-      companionName: 'GS Account Manager Companion'
+      companionName: 'GS Local App',
+      downloadItems: downloadItems.rows,
+      access
     });
   } catch (err) { next(err); }
 });
@@ -2383,6 +2809,7 @@ app.post('/settings', requireAuth, async (req, res, next) => {
       'default_export_delimiter', 'export_behavior_default', 'mask_sensitive_values', 'otp_refresh_interval',
       'companion_heartbeat_interval_seconds', 'default_browser_type', 'require_confirmation_before_export_delete', 'allow_companion_snapshots',
       'client_detection_process_names', 'client_snapshot_retention_hours', 'client_launcher_requires_confirmation',
+      'enable_local_client_detection', 'auto_sync_stats_on_client_detected', 'stats_refresh_cooldown_minutes', 'custom_client_process_names',
       'require_helper_for_proxy_actions', 'allow_website_only_browser_open',
       'warn_before_opening_without_helper', 'require_confirmation_before_direct_open',
       'show_proxy_mode_before_open', 'enable_assisted_fill_buttons', 'theme_name', 'workflow_mode'
@@ -2474,6 +2901,10 @@ const defaultSettings = {
   screenshot_interval_seconds: '30',
   companion_heartbeat_interval_seconds: '30',
   client_detection_process_names: 'RuneLite,JagexLauncher,Jagex Launcher,osclient,DreamBot',
+  enable_local_client_detection: 'false',
+  auto_sync_stats_on_client_detected: 'false',
+  stats_refresh_cooldown_minutes: '30',
+  custom_client_process_names: 'RuneLite,JagexLauncher,Jagex Launcher,osclient,DreamBot',
   client_snapshot_retention_hours: '24',
   client_launcher_requires_confirmation: 'true',
   default_browser_type: 'chromium',
@@ -2524,7 +2955,16 @@ function attachCurrentUser(req, res, next) {
   res.locals.companionJobTypes = companionJobTypes;
   res.locals.clientTypes = clientTypes;
   res.locals.clientInstanceStatuses = clientInstanceStatuses;
+  res.locals.clientStates = clientStates;
+  res.locals.wealthSources = wealthSources;
   res.locals.paymentMethods = paymentMethods;
+  res.locals.downloadStatuses = downloadStatuses;
+  res.locals.downloadCategories = downloadCategories;
+  res.locals.clientStateLabel = clientStateLabel;
+  res.locals.clientStateClass = clientStateClass;
+  res.locals.clientStateFromRow = clientStateFromRow;
+  res.locals.formatWealthValue = formatWealthValue;
+  res.locals.jobTypeLabel = jobTypeLabel;
   res.locals.isAdmin = req.currentUser && req.currentUser.role === 'admin';
   res.locals.hasFullAccess = false;
   res.locals.isLimitedAccess = false;
@@ -2626,24 +3066,365 @@ function requireAdmin(req, res, next) {
   return res.status(403).render('error', { title: 'Admin only', message: 'This page is only available to admins.' });
 }
 
-function helperDownloadMetadata() {
-  const windowsPath = path.join(__dirname, '..', 'companion', 'dist', 'GS Account Manager Companion Setup.exe');
-  const available = fs.existsSync(windowsPath);
+async function subscriptionTierForUser(user) {
+  if (!user) return null;
+  if (user.subscription_tier_id) {
+    const byId = await db.query('SELECT * FROM subscription_tiers WHERE id=$1', [user.subscription_tier_id]);
+    if (byId.rows[0]) return byId.rows[0];
+  }
+  const fallbackSlug = isAdminUser(user) ? 'admin-owner' : 'starter';
+  const fallback = await db.query('SELECT * FROM subscription_tiers WHERE slug=$1', [fallbackSlug]);
+  return fallback.rows[0] || null;
+}
+
+async function browserTaskUsageToday(userId) {
+  const result = await db.query(
+    `SELECT successful_count, failed_count
+     FROM browser_task_usage
+     WHERE user_id=$1 AND date=CURRENT_DATE`,
+    [userId]
+  );
+  return result.rows[0] || { successful_count: 0, failed_count: 0 };
+}
+
+async function activeDeviceCount(userId) {
+  const result = await db.query(
+    `SELECT COUNT(*)::int count
+     FROM companion_devices
+     WHERE user_id=$1 AND status <> 'revoked'`,
+    [userId]
+  );
+  return result.rows[0].count;
+}
+
+async function accessSummaryForUser(user) {
+  const [tier, usage, deviceCount] = await Promise.all([
+    subscriptionTierForUser(user),
+    user && user.id ? browserTaskUsageToday(user.id) : Promise.resolve({ successful_count: 0, failed_count: 0 }),
+    user && user.id ? activeDeviceCount(user.id) : Promise.resolve(0)
+  ]);
+  const gates = {
+    clientMonitor: canUseClientMonitor(user, tier),
+    clientLauncher: canUseClientLauncher(user, tier),
+    browserAutomator: canUseBrowserAutomator(user, tier),
+    snapshots: canUseSnapshots(user, tier),
+    addDevice: canAddDevice(user, tier, deviceCount),
+    runBrowserTask: canRunBrowserTask(user, tier, usage)
+  };
   return {
-    available,
-    version: available ? config.appVersion : 'Coming soon',
-    releaseDate: available ? 'Packaged locally' : 'Coming soon',
-    fileSize: available ? `${Math.ceil(fs.statSync(windowsPath).size / 1024 / 1024)} MB` : '',
+    tier,
+    usage,
+    deviceCount,
+    gates,
+    dailyTaskLimit: isAdminUser(user) || !tier || tier.daily_successful_browser_task_limit === null
+      ? null
+      : Number(tier.daily_successful_browser_task_limit),
+    dailyTaskLimitLabel: isAdminUser(user) || !tier || tier.daily_successful_browser_task_limit === null
+      ? 'Unlimited'
+      : String(tier.daily_successful_browser_task_limit)
+  };
+}
+
+function activeTierAccess(user) {
+  return Boolean(user && (isAdminUser(user) || activeSubscriptionStatuses.includes(user.subscription_status)));
+}
+
+function canUseBrowserAutomator(user, tier) {
+  if (isAdminUser(user)) return true;
+  return activeTierAccess(user) && Boolean(tier && tier.active && tier.browser_automator_enabled);
+}
+
+function canUseClientMonitor(user, tier) {
+  if (isAdminUser(user)) return true;
+  return activeTierAccess(user) && Boolean(tier && tier.active);
+}
+
+function canUseClientLauncher(user, tier) {
+  if (isAdminUser(user)) return true;
+  return activeTierAccess(user) && Boolean(tier && tier.active && tier.client_launcher_enabled);
+}
+
+function canUseSnapshots(user, tier) {
+  if (isAdminUser(user)) return true;
+  return activeTierAccess(user) && Boolean(tier && tier.active && tier.snapshots_enabled);
+}
+
+function canAddDevice(user, tier, deviceCount = 0) {
+  if (isAdminUser(user)) return true;
+  if (!activeTierAccess(user) || !tier || !tier.active) return false;
+  if (tier.max_devices === null || tier.max_devices === undefined) return true;
+  return Number(deviceCount) < Number(tier.max_devices);
+}
+
+function canRunBrowserTask(user, tier, usage = {}) {
+  if (isAdminUser(user)) return true;
+  if (!canUseBrowserAutomator(user, tier)) return false;
+  if (!tier || tier.daily_successful_browser_task_limit === null || tier.daily_successful_browser_task_limit === undefined) return true;
+  return Number(usage.successful_count || 0) < Number(tier.daily_successful_browser_task_limit);
+}
+
+async function recordBrowserTaskUsage(userId, outcome) {
+  const successful = outcome === 'successful' ? 1 : 0;
+  const failed = outcome === 'failed' ? 1 : 0;
+  await db.query(
+    `INSERT INTO browser_task_usage (user_id, date, successful_count, failed_count, updated_at)
+     VALUES ($1, CURRENT_DATE, $2, $3, NOW())
+     ON CONFLICT (user_id, date) DO UPDATE SET
+       successful_count=browser_task_usage.successful_count + EXCLUDED.successful_count,
+       failed_count=browser_task_usage.failed_count + EXCLUDED.failed_count,
+       updated_at=NOW()`,
+    [userId, successful, failed]
+  );
+}
+
+function isBrowserTaskJob(jobType) {
+  return ['workflow_run', 'run_workflow', 'open_browser', 'fill_visible_fields'].includes(jobType);
+}
+
+function jobTypeLabel(type) {
+  return {
+    workflow_run: 'Browser Automator',
+    run_workflow: 'Browser Automator',
+    open_browser: 'Open Browser',
+    fill_visible_fields: 'Fill Visible Fields',
+    launch_client: 'Launch Client',
+    stop_client: 'Stop Client',
+    detect_clients: 'Detect Clients',
+    request_snapshot: 'Snapshot Request',
+    client_status: 'Client Status',
+    heartbeat: 'Heartbeat'
+  }[type] || String(type || 'Local Job').replace(/_/g, ' ');
+}
+
+function helperDownloadMetadata() {
+  const distDir = path.join(__dirname, '..', 'companion', 'dist');
+  const windowsPath = path.join(distDir, 'GS Local App Setup.exe');
+  const legacyWindowsPath = path.join(distDir, 'GS Account Manager Companion Setup.exe');
+  const filePath = fs.existsSync(windowsPath) ? windowsPath : legacyWindowsPath;
+  const fileName = path.basename(filePath);
+  const available = fs.existsSync(windowsPath);
+  const legacyAvailable = !available && fs.existsSync(legacyWindowsPath);
+  return {
+    available: available || legacyAvailable,
+    version: available || legacyAvailable ? config.appVersion : 'Coming soon',
+    releaseDate: available || legacyAvailable ? 'Packaged locally' : 'Coming soon',
+    fileSize: available || legacyAvailable ? `${Math.ceil(fs.statSync(filePath).size / 1024 / 1024)} MB` : '',
+    filePath,
+    fileName,
     windowsPath: '/downloads/helper/windows'
   };
+}
+
+function setupStepsForWorkspace(counts = {}, helper = {}, access = {}) {
+  const steps = [
+    {
+      number: 1,
+      title: 'Discord workspace',
+      status: 'complete',
+      label: 'Ready',
+      description: 'Your Discord login owns this workspace and keeps records isolated by user.',
+      href: '/',
+      action: 'Open Dashboard'
+    },
+    {
+      number: 2,
+      title: 'Install GS Local App',
+      status: helper && helper.connected ? 'complete' : 'current',
+      label: helper && helper.connected ? 'Connected' : 'Required for automation',
+      description: 'Browser automation, client monitoring, launch jobs, and live status run locally on your PC.',
+      href: '/downloads',
+      action: 'Open Downloads'
+    },
+    {
+      number: 3,
+      title: 'Pair Local App Device',
+      status: Number(counts.devices || 0) > 0 ? 'complete' : helper && helper.connected ? 'complete' : 'current',
+      label: `${Number(counts.connected_devices || 0)} connected`,
+      description: 'Create a short-lived code on the website, then enter it in GS Local App.',
+      href: '/companion',
+      action: 'Pair Device'
+    },
+    {
+      number: 4,
+      title: 'Add accounts and proxies',
+      status: Number(counts.accounts || 0) > 0 ? 'complete' : 'current',
+      label: `${Number(counts.accounts || 0)} accounts / ${Number(counts.proxies || 0)} proxies`,
+      description: 'Import or add account and proxy records. Sensitive values stay encrypted and masked by default.',
+      href: '/accounts',
+      secondaryHref: '/proxies',
+      action: 'Open Accounts'
+    },
+    {
+      number: 5,
+      title: 'Create launch profiles',
+      status: Number(counts.launch_profiles || 0) > 0 ? 'complete' : 'next',
+      label: `${Number(counts.launch_profiles || 0)} profiles`,
+      description: 'Launch profiles describe local client paths and startup options for visible user-triggered launches.',
+      href: '/clients',
+      action: 'Open Launch Profiles'
+    },
+    {
+      number: 6,
+      title: 'Build automation jobs',
+      status: Number(counts.automations || 0) > 0 ? 'complete' : 'next',
+      label: access && access.gates && access.gates.browserAutomator ? 'Enabled by tier' : 'Tier gated',
+      description: 'Browser Automator jobs are queued to GS Local App and must pause for CAPTCHA, 2FA, or security checks.',
+      href: '/workflows',
+      action: 'Open Browser Automator'
+    },
+    {
+      number: 7,
+      title: 'Monitor jobs and sessions',
+      status: Number(counts.local_jobs || 0) > 0 || Number(counts.live_sessions || 0) > 0 ? 'complete' : 'next',
+      label: `${Number(counts.local_jobs || 0)} jobs / ${Number(counts.live_sessions || 0)} sessions`,
+      description: 'Use Local Jobs and Live Sessions to watch status, manual pauses, device heartbeats, and safe events.',
+      href: '/local-jobs',
+      secondaryHref: '/instances',
+      action: 'Open Local Jobs'
+    }
+  ];
+
+  let foundCurrent = false;
+  return steps.map(step => {
+    if (step.status === 'complete') return step;
+    if (!foundCurrent) {
+      foundCurrent = true;
+      return { ...step, status: 'current' };
+    }
+    return { ...step, status: step.status === 'current' ? 'next' : step.status };
+  });
+}
+
+function automationCompatibilityMatrix() {
+  return [
+    {
+      name: 'GS Local App',
+      type: 'Local automation agent',
+      detection: 'Supported',
+      launchProfiles: 'Supported',
+      browserAutomator: 'Foundation ready',
+      liveSessions: 'Supported starter',
+      snapshots: 'Opt-in starter',
+      proxyMode: 'HTTP proxy handoff planned',
+      status: 'working',
+      notes: 'Required for paid automation features. Runs locally and reports safe job status to the website.'
+    },
+    {
+      name: 'Automation Browser',
+      type: 'Visible controlled browser',
+      detection: 'Not applicable',
+      launchProfiles: 'Managed by Local App',
+      browserAutomator: 'Foundation ready',
+      liveSessions: 'Job status only',
+      snapshots: 'Opt-in starter',
+      proxyMode: 'Planned through Local App launch options',
+      status: 'placeholder',
+      notes: 'Designed for visible, user-triggered browser tasks. CAPTCHA, 2FA, and security checks must pause for manual completion.'
+    },
+    {
+      name: 'RuneLite',
+      type: 'Client tool',
+      detection: 'Window/process detection starter',
+      launchProfiles: 'Supported',
+      browserAutomator: 'Not applicable',
+      liveSessions: 'Supported starter',
+      snapshots: 'Opt-in starter',
+      proxyMode: 'External/client-dependent',
+      status: 'partial',
+      notes: 'GS can detect and launch configured local paths. It does not inject, read memory, or control gameplay.'
+    },
+    {
+      name: 'Jagex Launcher',
+      type: 'Launcher',
+      detection: 'Window/process detection starter',
+      launchProfiles: 'Supported',
+      browserAutomator: 'Not applicable',
+      liveSessions: 'Supported starter',
+      snapshots: 'Opt-in starter',
+      proxyMode: 'External/client-dependent',
+      status: 'partial',
+      notes: 'GS can track visible process/window status only. Login, verification, and security checks remain manual.'
+    },
+    {
+      name: 'Official OSRS Client',
+      type: 'Client tool',
+      detection: 'Window/process detection starter',
+      launchProfiles: 'Supported',
+      browserAutomator: 'Not applicable',
+      liveSessions: 'Supported starter',
+      snapshots: 'Opt-in starter',
+      proxyMode: 'External/client-dependent',
+      status: 'partial',
+      notes: 'Public stats sync can use display names. Wealth values require manual or safe local reporting.'
+    },
+    {
+      name: 'DreamBot',
+      type: 'Third-party client',
+      detection: 'Window/process detection starter',
+      launchProfiles: 'Configurable',
+      browserAutomator: 'Not applicable',
+      liveSessions: 'Supported starter',
+      snapshots: 'Opt-in starter',
+      proxyMode: 'External/client-dependent',
+      status: 'partial',
+      notes: 'GS only detects/launches configured local software. No scripts, gameplay automation, injection, memory reads, or bypass behavior are implemented.'
+    },
+    {
+      name: 'Custom Client',
+      type: 'User configured',
+      detection: 'Configured process names',
+      launchProfiles: 'Configurable',
+      browserAutomator: 'Not applicable',
+      liveSessions: 'Supported starter',
+      snapshots: 'Opt-in starter',
+      proxyMode: 'External/client-dependent',
+      status: 'partial',
+      notes: 'Users can add local executable paths and process names. Matching should be confirmed manually unless confidence is high.'
+    }
+  ];
+}
+
+function setupGuideSections() {
+  return [
+    {
+      title: '1. Connect Discord',
+      status: 'Working',
+      body: 'Sign in with Discord. Your internal user ID scopes all accounts, proxies, settings, logs, devices, jobs, automations, live sessions, and stats.'
+    },
+    {
+      title: '2. Install and pair GS Local App',
+      status: 'Foundation ready',
+      body: 'Install the Windows Local App when the packaged installer is available. Create a pairing code on Client Monitor, enter it locally, then confirm heartbeat status.'
+    },
+    {
+      title: '3. Import account and proxy data',
+      status: 'Working',
+      body: 'Use Accounts and Proxies pages for import/export. Passwords, OTP secrets, recovery passwords, and proxy passwords are encrypted at rest and masked in list views.'
+    },
+    {
+      title: '4. Configure launch profiles',
+      status: 'Foundation ready',
+      body: 'Create Launch Profiles for local client paths and startup options. Launches are queued to a visible Local App device and tracked as Local Jobs.'
+    },
+    {
+      title: '5. Run Browser Automator jobs',
+      status: 'Scaffolded',
+      body: 'Browser Automator jobs are meant to run in a visible local browser. They may fill visible fields after user action, but must pause for CAPTCHA, 2FA, email verification, phone verification, and security checks.'
+    },
+    {
+      title: '6. Watch Local Jobs and Live Sessions',
+      status: 'Working starter',
+      body: 'Local Jobs show queued/running/completed work. Live Sessions show detected local client status, linked accounts, public stats sync, and optional snapshots.'
+    }
+  ];
 }
 
 function proxyMode(account, helper, settings) {
   const hasProxy = Boolean(account && account.proxy_host);
   return {
-    browserMode: helper && helper.connected ? 'Companion mode' : 'Website-only mode',
+    browserMode: helper && helper.connected ? 'Local App mode' : 'Website-only mode',
     modeDescription: helper && helper.connected
-      ? 'Companion mode: opens controlled Chrome through selected proxy when available.'
+      ? 'Local App mode: opens controlled Chrome through selected proxy when available.'
       : 'Website-only mode: opens in your current browser. No proxy control.',
     helperConnected: helper && helper.connected ? 'yes' : 'no',
     proxyType: hasProxy ? account.proxy_type || 'HTTP' : 'Direct',
@@ -2662,6 +3443,14 @@ function maskEndpoint(host) {
   const visible = value.replace(/[^a-z0-9.-]/gi, '');
   if (visible.length <= 4) return '*'.repeat(visible.length);
   return `${visible.slice(0, 2)}${'*'.repeat(Math.max(3, visible.length - 4))}${visible.slice(-2)}`;
+}
+
+function slugify(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || `item-${Date.now()}`;
 }
 
 function sensitiveCopyField(field) {
@@ -2794,6 +3583,176 @@ async function loadClientInstance(userId, instanceId) {
   return result.rows[0];
 }
 
+async function prepareDetectedClientInstance(userId, item) {
+  if (item.account_id) return item;
+  const suggestion = await suggestAccountMatch(userId, item);
+  if (!suggestion) return item;
+  return {
+    ...item,
+    suggested_account_id: suggestion.account_id,
+    match_confidence: suggestion.confidence,
+    match_reason: suggestion.reason
+  };
+}
+
+async function suggestAccountMatch(userId, item) {
+  const haystack = normalizeMatchText([
+    item.window_title,
+    item.instance_name,
+    item.process_name,
+    item.current_activity,
+    item.match_hint
+  ].filter(Boolean).join(' '));
+  if (!haystack) return null;
+  const accounts = await db.query(
+    `SELECT id, username, legacy_login, display_name, jagex_name
+     FROM accounts
+     WHERE user_id=$1 AND archived_at IS NULL
+     ORDER BY updated_at DESC
+     LIMIT 500`,
+    [userId]
+  );
+  let best = null;
+  for (const account of accounts.rows) {
+    const candidates = [
+      ['display name', account.display_name],
+      ['jagex name', account.jagex_name],
+      ['legacy login', account.legacy_login],
+      ['login username', account.username]
+    ];
+    for (const [label, value] of candidates) {
+      const normalized = normalizeMatchText(value);
+      if (!normalized || normalized.length < 3) continue;
+      const exact = haystack === normalized;
+      const contained = haystack.includes(normalized);
+      if (!exact && !contained) continue;
+      const score = exact ? 100 : normalized.length + (label.includes('display') ? 20 : 0);
+      if (!best || score > best.score) {
+        best = {
+          account_id: account.id,
+          confidence: exact ? 'high' : 'suggested',
+          reason: `${label} matched visible client text`,
+          score
+        };
+      }
+    }
+  }
+  if (!best) return null;
+  return {
+    account_id: best.account_id,
+    confidence: best.confidence,
+    reason: best.reason
+  };
+}
+
+function normalizeMatchText(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9@._ -]+/g, ' ').replace(/\s+/g, ' ');
+}
+
+async function refreshAccountStats(userId, accountId, options = {}) {
+  const accountResult = await db.query(
+    `SELECT id, username, legacy_login, display_name, jagex_name
+     FROM accounts
+     WHERE id=$1 AND user_id=$2`,
+    [accountId, userId]
+  );
+  const account = accountResult.rows[0];
+  if (!account) throw new Error('Account not found.');
+  const displayName = escapeText(options.displayName) || account.display_name || account.jagex_name || account.legacy_login || account.username;
+  if (!displayName) throw new Error('A display name or login is required before refreshing stats.');
+  const stats = await osrsStats.fetchPublicStats(displayName);
+  const savedDisplayName = stats.display_name || displayName;
+  const fetchedAt = new Date();
+  await db.query(
+    `INSERT INTO account_stats (
+       user_id, account_id, display_name, total_level, combat_level, attack, strength, defence,
+       ranged, prayer, magic, hitpoints, total_xp, other_skills, fetched_at, source, status, error_message
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+     ON CONFLICT (user_id, account_id) DO UPDATE SET
+       display_name=EXCLUDED.display_name,
+       total_level=EXCLUDED.total_level,
+       combat_level=EXCLUDED.combat_level,
+       attack=EXCLUDED.attack,
+       strength=EXCLUDED.strength,
+       defence=EXCLUDED.defence,
+       ranged=EXCLUDED.ranged,
+       prayer=EXCLUDED.prayer,
+       magic=EXCLUDED.magic,
+       hitpoints=EXCLUDED.hitpoints,
+       total_xp=EXCLUDED.total_xp,
+       other_skills=EXCLUDED.other_skills,
+       fetched_at=EXCLUDED.fetched_at,
+       source=EXCLUDED.source,
+       status=EXCLUDED.status,
+       error_message=EXCLUDED.error_message
+     RETURNING *`,
+    [
+      userId,
+      account.id,
+      savedDisplayName,
+      stats.total_level,
+      stats.combat_level,
+      stats.attack,
+      stats.strength,
+      stats.defence,
+      stats.ranged,
+      stats.prayer,
+      stats.magic,
+      stats.hitpoints,
+      stats.total_xp,
+      stats.skills || {},
+      fetchedAt,
+      stats.source || 'osrs_hiscores',
+      oneOf(stats.status, ['ok', 'not_found', 'failed'], 'failed'),
+      stats.error_message || null
+    ]
+  );
+  await db.query(
+    `UPDATE accounts
+     SET total_level=$1, combat_level=$2, last_stats_sync_at=$3, stats_sync_status=$4, stats_sync_error=$5, updated_at=NOW()
+     WHERE id=$6 AND user_id=$7`,
+    [
+      stats.total_level,
+      stats.combat_level,
+      fetchedAt,
+      oneOf(stats.status, ['ok', 'not_found', 'failed'], 'failed'),
+      stats.error_message || null,
+      account.id,
+      userId
+    ]
+  );
+  const action = stats.status === 'ok' ? 'stats_refreshed' : 'stats_lookup_failed';
+  await activity.log(userId, action, 'account', account.id, stats.status === 'ok' ? 'OSRS stats refreshed' : 'OSRS stats lookup failed', {
+    status: stats.status,
+    display_name: savedDisplayName
+  });
+  return {
+    ...stats,
+    display_name: savedDisplayName,
+    fetched_at: fetchedAt
+  };
+}
+
+async function maybeAutoRefreshStats(userId, accountId, settings) {
+  if (!accountId || settings.auto_sync_stats_on_client_detected !== 'true') return;
+  const cooldownMinutes = Math.max(1, Number(settings.stats_refresh_cooldown_minutes || 30));
+  const account = await db.query(
+    `SELECT id, last_stats_sync_at
+     FROM accounts
+     WHERE id=$1 AND user_id=$2`,
+    [accountId, userId]
+  );
+  if (!account.rows[0]) return;
+  const lastSync = account.rows[0].last_stats_sync_at ? new Date(account.rows[0].last_stats_sync_at).getTime() : 0;
+  if (lastSync && Date.now() - lastSync < cooldownMinutes * 60 * 1000) return;
+  try {
+    await refreshAccountStats(userId, accountId);
+  } catch (error) {
+    await activity.log(userId, 'stats_lookup_failed', 'account', accountId, 'Automatic OSRS stats lookup failed', { reason: 'safe_lookup_failed' });
+  }
+}
+
 async function clientLaunchPayload(userId, profile, options) {
   let account = null;
   let proxy = null;
@@ -2853,20 +3812,90 @@ function normalizeClientStatusPayload(body) {
 
 function normalizeClientInstance(item) {
   const running = item.running !== false;
+  const clientState = deriveClientState(item, running);
+  const status = statusForClientState(clientState, item.status, running);
+  const wealthReport = normalizeWealthReport(item);
   return {
     id: item.client_instance_id || item.instance_id || item.id || null,
     client_profile_id: item.client_profile_id || item.profile_id || null,
     account_id: item.account_id || null,
     proxy_id: item.proxy_id || null,
+    suggested_account_id: item.suggested_account_id || null,
     instance_name: escapeText(item.instance_name || item.name),
     process_name: escapeText(item.process_name || item.processName),
     process_id: numberOrNull(item.process_id || item.processId || item.pid),
     window_title: escapeText(item.window_title || item.windowTitle),
-    status: oneOf(item.status, clientInstanceStatuses, running ? 'running' : 'stopped'),
-    current_activity: escapeText(item.current_activity || item.activity),
+    status,
+    client_state: clientState,
+    current_activity: escapeText(item.current_activity || item.activity) || activityForClientState(clientState),
     error_message: escapeText(item.error_message || item.error),
+    detected_at: safeDate(item.detected_at || item.detectedAt),
+    last_seen_at: safeDate(item.last_seen_at || item.lastSeenAt),
+    match_confidence: escapeText(item.match_confidence || item.matchConfidence),
+    match_reason: escapeText(item.match_reason || item.matchReason),
+    match_hint: escapeText(item.match_hint || item.matched_account_hint || item.account_hint || item.client_label),
+    reported_display_name: escapeText(item.reported_display_name || item.display_name || item.displayName),
+    ...wealthReport,
     metadata: safeMetadata(item.metadata || {})
   };
+}
+
+function deriveClientState(item, running = true) {
+  const raw = String(item.client_state || item.game_state || item.state || item.current_state || '').toLowerCase().replace(/[\s-]+/g, '_');
+  const status = String(item.status || '').toLowerCase();
+  const title = String(item.window_title || item.windowTitle || '').toLowerCase();
+  const activity = String(item.current_activity || item.activity || '').toLowerCase();
+  if (['offline', 'closed', 'stopped', 'last_seen'].includes(raw) || running === false || status === 'stopped') return 'offline';
+  if (['error', 'crashed', 'failed'].includes(raw) || status === 'crashed') return 'error';
+  if (['active', 'in_game', 'ingame', 'game', 'running_active'].includes(raw)) return 'active';
+  if (['idle', 'login', 'login_screen', 'login_window', 'signed_out'].includes(raw)) return 'idle';
+  if (/(login|sign in|signed out|authenticator|launcher)/i.test(title) || /(login screen|signed out|waiting for login)/i.test(activity)) return 'idle';
+  if (/(in game|logged in|playing|active session)/i.test(activity)) return 'active';
+  return 'unknown';
+}
+
+function statusForClientState(clientState, rawStatus, running = true) {
+  const status = oneOf(rawStatus, clientInstanceStatuses, '');
+  if (clientState === 'active') return 'running';
+  if (clientState === 'idle' || clientState === 'unknown') return status || 'detected';
+  if (clientState === 'offline') return 'stopped';
+  if (clientState === 'error') return 'crashed';
+  return running ? (status || 'detected') : 'stopped';
+}
+
+function activityForClientState(clientState) {
+  return {
+    active: 'In Game / Active',
+    idle: 'Login Screen / Idle',
+    offline: 'Offline / Last Seen',
+    error: 'Error / Needs Review',
+    unknown: 'Detected / Unknown State'
+  }[clientState] || 'Detected / Unknown State';
+}
+
+function normalizeWealthReport(item) {
+  const gpValue = firstReportValue(item, ['gp_amount', 'gpAmount', 'reported_gp_amount', 'reportedGpAmount']);
+  const bankValue = firstReportValue(item, ['bank_value', 'bankValue', 'reported_bank_value', 'reportedBankValue']);
+  const wealthValue = firstReportValue(item, ['wealth_value', 'wealthValue', 'wealth_amount', 'wealthAmount', 'reported_wealth_value', 'reportedWealthValue']);
+  const hasGp = gpValue !== null;
+  const hasBank = bankValue !== null;
+  const hasWealth = wealthValue !== null;
+  const hasAny = hasGp || hasBank || hasWealth;
+  const source = hasAny ? oneOf(item.wealth_source || item.wealthSource, wealthSources, 'companion_reported') : 'unknown';
+  return {
+    reported_gp_amount: hasGp ? integerOrZero(gpValue) : null,
+    reported_bank_value: hasBank ? integerOrZero(bankValue) : null,
+    reported_wealth_value: hasWealth ? integerOrZero(wealthValue) : null,
+    wealth_source: source,
+    wealth_updated_at: hasAny ? (safeDate(item.wealth_updated_at || item.wealthUpdatedAt) || new Date().toISOString()) : null
+  };
+}
+
+function firstReportValue(item, keys) {
+  for (const key of keys) {
+    if (hasOwn(item, key) && item[key] !== null && item[key] !== undefined && item[key] !== '') return item[key];
+  }
+  return null;
 }
 
 async function upsertClientInstance(device, item) {
@@ -2874,9 +3903,11 @@ async function upsertClientInstance(device, item) {
   const clientProfileId = item.client_profile_id ? Number(item.client_profile_id) : null;
   const accountId = item.account_id ? Number(item.account_id) : null;
   const proxyId = item.proxy_id ? Number(item.proxy_id) : null;
+  const suggestedAccountId = item.suggested_account_id ? Number(item.suggested_account_id) : null;
   if (clientProfileId) await assertClientProfileOwnership(userId, clientProfileId);
   if (accountId) await assertAccountOwnership(userId, accountId);
   if (proxyId) await assertProxyOwnership(userId, proxyId);
+  if (suggestedAccountId) await assertAccountOwnership(userId, suggestedAccountId);
   let result;
   if (item.id) {
     result = await db.query(
@@ -2885,9 +3916,16 @@ async function upsertClientInstance(device, item) {
            proxy_id=COALESCE($4, proxy_id), instance_name=COALESCE(NULLIF($5, ''), instance_name),
            process_name=COALESCE(NULLIF($6, ''), process_name), process_id=COALESCE($7, process_id),
            window_title=COALESCE(NULLIF($8, ''), window_title), status=$9, current_activity=COALESCE(NULLIF($10, ''), current_activity),
-           last_seen_at=NOW(), started_at=CASE WHEN $9 IN ('pending','running','launching','scanning','detected') THEN COALESCE(started_at, NOW()) ELSE started_at END,
-           stopped_at=CASE WHEN $9='stopped' THEN NOW() ELSE stopped_at END, error_message=NULLIF($11, ''), updated_at=NOW()
-       WHERE id=$12 AND user_id=$13
+           error_message=NULLIF($11, ''), detected_at=COALESCE($12, detected_at, NOW()),
+           suggested_account_id=COALESCE($13, suggested_account_id), match_confidence=COALESCE(NULLIF($14, ''), match_confidence),
+           match_reason=COALESCE(NULLIF($15, ''), match_reason), last_seen_at=COALESCE($16, NOW()),
+           client_state=$17, reported_display_name=COALESCE(NULLIF($18, ''), reported_display_name),
+           reported_gp_amount=COALESCE($19, reported_gp_amount), reported_bank_value=COALESCE($20, reported_bank_value),
+           reported_wealth_value=COALESCE($21, reported_wealth_value), wealth_source=CASE WHEN $23 IS NOT NULL THEN $22 ELSE wealth_source END,
+           wealth_updated_at=COALESCE($23, wealth_updated_at),
+           started_at=CASE WHEN $9 IN ('pending','running','launching','scanning','detected') THEN COALESCE(started_at, NOW()) ELSE started_at END,
+           stopped_at=CASE WHEN $9='stopped' THEN NOW() ELSE stopped_at END, updated_at=NOW()
+       WHERE id=$24 AND user_id=$25
        RETURNING *`,
       [
         device.id,
@@ -2901,6 +3939,18 @@ async function upsertClientInstance(device, item) {
         item.status,
         item.current_activity,
         item.error_message,
+        item.detected_at,
+        suggestedAccountId,
+        item.match_confidence,
+        item.match_reason,
+        item.last_seen_at,
+        item.client_state,
+        item.reported_display_name,
+        item.reported_gp_amount,
+        item.reported_bank_value,
+        item.reported_wealth_value,
+        item.wealth_source,
+        item.wealth_updated_at,
         item.id,
         userId
       ]
@@ -2911,11 +3961,13 @@ async function upsertClientInstance(device, item) {
       `INSERT INTO client_instances (
          user_id, companion_device_id, client_profile_id, account_id, proxy_id, instance_name,
          process_name, process_id, window_title, status, current_activity, last_seen_at,
-         started_at, stopped_at, error_message, updated_at
+         started_at, stopped_at, error_message, detected_at, suggested_account_id, match_confidence, match_reason,
+         client_state, reported_display_name, reported_gp_amount, reported_bank_value, reported_wealth_value, wealth_source, wealth_updated_at, updated_at
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(),
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12, NOW()),
                CASE WHEN $10 IN ('pending','running','launching','scanning','detected') THEN NOW() ELSE NULL END,
-               CASE WHEN $10='stopped' THEN NOW() ELSE NULL END, NULLIF($12, ''), NOW())
+               CASE WHEN $10='stopped' THEN NOW() ELSE NULL END, NULLIF($13, ''), COALESCE($14, NOW()), $15, NULLIF($16, ''), NULLIF($17, ''),
+               $18, NULLIF($19, ''), $20, $21, $22, $23, $24, NOW())
        RETURNING *`,
       [
         userId,
@@ -2929,18 +3981,106 @@ async function upsertClientInstance(device, item) {
         item.window_title,
         item.status,
         item.current_activity,
-        item.error_message
+        item.last_seen_at,
+        item.error_message,
+        item.detected_at,
+        suggestedAccountId,
+        item.match_confidence,
+        item.match_reason,
+        item.client_state,
+        item.reported_display_name,
+        item.reported_gp_amount,
+        item.reported_bank_value,
+        item.reported_wealth_value,
+        item.wealth_source,
+        item.wealth_updated_at
       ]
     );
   }
   const instance = result.rows[0];
-  await insertClientInstanceEvent(userId, instance.id, 'status_update', `Client instance reported ${instance.status}.`, {
+  if (instance.account_id) await applyClientInstanceAccountStatus(userId, instance.account_id, item, instance);
+  const statusEvent = instance.client_state === 'offline' ? 'client_stopped' : 'client_detected';
+  await insertClientInstanceEvent(userId, instance.id, statusEvent, `Client instance reported ${instance.status}.`, {
     process_name: instance.process_name,
     process_id: instance.process_id,
     window_title: instance.window_title,
-    companion_device_id: device.id
+    companion_device_id: device.id,
+    client_state: instance.client_state,
+    suggested_account_id: instance.suggested_account_id,
+    match_confidence: instance.match_confidence,
+    wealth_source: instance.wealth_source
   });
+  await activity.log(userId, statusEvent, 'client_instance', instance.id, `Client instance ${clientStateLabel(instance.client_state)}`, { status: instance.status, client_state: instance.client_state, companion_device_id: device.id });
   return safeClientInstance(instance);
+}
+
+async function applyClientInstanceAccountStatus(userId, accountId, item, instance) {
+  const wealthReported = item.reported_gp_amount !== null || item.reported_bank_value !== null || item.reported_wealth_value !== null;
+  const lastSeen = instance.last_seen_at || item.last_seen_at || new Date();
+  if (!wealthReported) {
+    await db.query(
+      `UPDATE accounts
+       SET client_state=$1, client_last_seen_at=$2, updated_at=NOW()
+       WHERE id=$3 AND user_id=$4`,
+      [instance.client_state || 'unknown', lastSeen, accountId, userId]
+    );
+    return;
+  }
+  await db.query(
+    `UPDATE accounts
+     SET client_state=$1,
+         client_last_seen_at=$2,
+         gp_amount=COALESCE($3, gp_amount),
+         bank_value=COALESCE($4, bank_value),
+         wealth_value=COALESCE($5, wealth_value),
+         wealth_amount=COALESCE($5, wealth_amount),
+         wealth_source=$6,
+         wealth_updated_at=COALESCE($7, NOW()),
+         updated_at=NOW()
+     WHERE id=$8 AND user_id=$9`,
+    [
+      instance.client_state || 'unknown',
+      lastSeen,
+      item.reported_gp_amount,
+      item.reported_bank_value,
+      item.reported_wealth_value,
+      oneOf(item.wealth_source, wealthSources, 'companion_reported'),
+      item.wealth_updated_at,
+      accountId,
+      userId
+    ]
+  );
+  await activity.log(userId, 'wealth_reported', 'account', accountId, 'Wealth values updated from allowed client status report', {
+    source: oneOf(item.wealth_source, wealthSources, 'companion_reported'),
+    client_instance_id: instance.id
+  });
+}
+
+async function markStaleClientInstancesOffline(userId, staleMinutes = 5) {
+  const result = await db.query(
+    `UPDATE client_instances
+     SET status='stopped',
+         client_state='offline',
+         current_activity='Offline / Last Seen',
+         stopped_at=COALESCE(stopped_at, last_seen_at, NOW()),
+         updated_at=NOW()
+     WHERE user_id=$1
+       AND status IN ('pending','launching','running','scanning','detected')
+       AND last_seen_at IS NOT NULL
+       AND last_seen_at < NOW() - ($2::int * INTERVAL '1 minute')
+     RETURNING id, account_id, last_seen_at`,
+    [userId, Math.max(1, Number(staleMinutes || 5))]
+  );
+  const accountIds = [...new Set(result.rows.map(row => Number(row.account_id)).filter(Boolean))];
+  for (const accountId of accountIds) {
+    const latest = result.rows.find(row => Number(row.account_id) === accountId);
+    await db.query(
+      `UPDATE accounts
+       SET client_state='offline', client_last_seen_at=COALESCE($1, client_last_seen_at), updated_at=NOW()
+       WHERE id=$2 AND user_id=$3`,
+      [latest ? latest.last_seen_at : null, accountId, userId]
+    );
+  }
 }
 
 async function insertClientInstanceEvent(userId, clientInstanceId, eventType, message, metadata = {}) {
@@ -2962,10 +4102,21 @@ function safeClientInstance(instance) {
     process_id: instance.process_id,
     window_title: instance.window_title,
     status: instance.status,
+    client_state: instance.client_state,
     current_activity: instance.current_activity,
+    detected_at: instance.detected_at,
     last_seen_at: instance.last_seen_at,
     started_at: instance.started_at,
-    stopped_at: instance.stopped_at
+    stopped_at: instance.stopped_at,
+    suggested_account_id: instance.suggested_account_id,
+    match_confidence: instance.match_confidence,
+    match_reason: instance.match_reason,
+    reported_display_name: instance.reported_display_name,
+    reported_gp_amount: instance.reported_gp_amount,
+    reported_bank_value: instance.reported_bank_value,
+    reported_wealth_value: instance.reported_wealth_value,
+    wealth_source: instance.wealth_source,
+    wealth_updated_at: instance.wealth_updated_at
   };
 }
 
@@ -2981,12 +4132,12 @@ async function assertProxyOwnership(userId, proxyId) {
 
 async function assertDeviceOwnership(userId, deviceId) {
   const result = await db.query('SELECT id FROM companion_devices WHERE id=$1 AND user_id=$2 AND status <> $3', [deviceId, userId, 'revoked']);
-  if (!result.rows[0]) throw new Error('Companion device not found for this user.');
+  if (!result.rows[0]) throw new Error('Local App device not found for this user.');
 }
 
 async function loadWorkflow(userId, workflowId) {
   const result = await db.query('SELECT * FROM workflows WHERE id=$1 AND user_id=$2', [workflowId, userId]);
-  if (!result.rows[0]) throw new Error('Workflow not found.');
+  if (!result.rows[0]) throw new Error('Automation not found.');
   return result.rows[0];
 }
 
@@ -3005,7 +4156,7 @@ async function loadWorkflowRun(userId, runId) {
      WHERE r.id=$1 AND r.user_id=$2`,
     [runId, userId]
   );
-  if (!result.rows[0]) throw new Error('Workflow run not found.');
+  if (!result.rows[0]) throw new Error('Job not found.');
   return result.rows[0];
 }
 
@@ -3028,8 +4179,8 @@ function workflowTemplateName(type) {
     login_fill: 'Login form fill',
     account_creation_fill: 'Account creation form fill',
     generic_form_fill: 'Generic multi-field form fill',
-    custom: 'Custom workflow'
-  }[type] || 'Custom workflow';
+    custom: 'Custom automation'
+  }[type] || 'Custom automation';
 }
 
 function workflowTemplateDescription(type) {
@@ -3037,8 +4188,8 @@ function workflowTemplateDescription(type) {
     login_fill: 'Open a login page and fill visible login fields after a user-started run.',
     account_creation_fill: 'Open a signup page and fill selected visible fields, then pause for manual checks.',
     generic_form_fill: 'Fill a generic form from selected account field references.',
-    custom: 'User-controlled visible browser workflow.'
-  }[type] || 'User-controlled visible browser workflow.';
+    custom: 'User-controlled visible browser automation.'
+  }[type] || 'User-controlled visible browser automation.';
 }
 
 function workflowTemplateSteps(type) {
@@ -3062,7 +4213,7 @@ function workflowTemplateSteps(type) {
       { step_type: 'pause_for_user', label: 'Review before submit', manual_pause: true, config: { message: 'Review the visible page. Submit manually if everything looks correct.' } }
     ],
     custom: [
-      { step_type: 'note', label: 'Manual-safe workflow note', config: { message: 'Add steps. Keep CAPTCHA, 2FA, email, and phone verification manual.' } }
+      { step_type: 'note', label: 'Manual-safe automation note', config: { message: 'Add steps. Keep CAPTCHA, 2FA, email, and phone verification manual.' } }
     ]
   };
   return templates[type] || templates.custom;
@@ -3070,8 +4221,8 @@ function workflowTemplateSteps(type) {
 
 function parseWorkflowStepsJson(raw) {
   let parsed;
-  try { parsed = JSON.parse(raw || '[]'); } catch (error) { throw new Error('Workflow steps JSON is invalid.'); }
-  if (!Array.isArray(parsed)) throw new Error('Workflow steps JSON must be an array.');
+  try { parsed = JSON.parse(raw || '[]'); } catch (error) { throw new Error('Automation steps JSON is invalid.'); }
+  if (!Array.isArray(parsed)) throw new Error('Automation steps JSON must be an array.');
   return parsed.map((step, index) => ({
     step_order: Number(step.step_order || index + 1),
     step_type: oneOf(step.step_type, workflowStepTypes, 'note'),
@@ -3186,7 +4337,7 @@ async function loadCompanionJobForDevice(device, jobId) {
      WHERE id=$1 AND user_id=$2 AND (companion_device_id IS NULL OR companion_device_id=$3)`,
     [jobId, device.user_id, device.id]
   );
-  if (!result.rows[0]) throw new Error('Companion job not found.');
+  if (!result.rows[0]) throw new Error('Local App job not found.');
   return result.rows[0];
 }
 
@@ -3222,6 +4373,14 @@ function statusToClientInstanceStatus(status) {
   if (status === 'queued' || status === 'accepted') return 'launching';
   if (status === 'paused' || status === 'waiting_for_user') return 'running';
   return 'running';
+}
+
+function clientStateFromJobStatus(status) {
+  if (status === 'failed') return 'error';
+  if (status === 'cancelled') return 'offline';
+  if (status === 'paused' || status === 'waiting_for_user') return 'idle';
+  if (status === 'completed' || status === 'running') return 'active';
+  return 'unknown';
 }
 
 function safeJobResult(result) {
@@ -3276,11 +4435,6 @@ function setUserSession(req, user) {
   req.session.discordId = user.discord_id;
   req.session.user = discordAuth.sessionUser(user);
   req.session.csrfToken = null;
-}
-
-function inputText(req) {
-  const uploaded = req.file ? req.file.buffer.toString('utf8') : '';
-  return uploaded || req.body.accounts_text || '';
 }
 
 async function passwordLength(userId) {
@@ -3394,6 +4548,10 @@ function accountFromBody(body, existing = {}) {
     gp_amount: integerOrZero(body.gp_amount),
     platinum_amount: integerOrZero(body.platinum_amount),
     wealth_amount: integerOrZero(body.wealth_amount),
+    bank_value: optionalInteger(body.bank_value),
+    wealth_value: optionalInteger(body.wealth_value || body.wealth_amount),
+    wealth_source: oneOf(body.wealth_source, wealthSources, hasManualWealthBody(body) ? 'manual' : 'unknown'),
+    wealth_updated_at: hasManualWealthBody(body) ? new Date() : null,
     ban_status: oneOf(body.ban_status, ['none', 'temp', 'perm', 'unknown'], 'none'),
     completed_tutorial: body.completed_tutorial === 'yes',
     total_level: numberOrNull(body.total_level),
@@ -3410,7 +4568,8 @@ function accountParams(account, userId) {
     account.birth_month, account.birth_day, account.birth_year, account.proxy_id, account.assigned_http_proxy_id, account.assigned_socks5_proxy_id,
     account.status, account.credential_status, account.upgrade_status, account.email_creation_status,
     account.verified || 'unknown', account.character_type || null, account.gp_amount || 0, account.platinum_amount || 0,
-    account.wealth_amount || 0, account.ban_status || 'none', account.completed_tutorial === true, account.total_level || null, account.tags || null
+    account.wealth_amount || 0, account.bank_value, account.wealth_value, account.wealth_source || 'unknown', account.wealth_updated_at,
+    account.ban_status || 'none', account.completed_tutorial === true, account.total_level || null, account.tags || null
   ];
 }
 
@@ -3422,7 +4581,8 @@ function accountColumns() {
     'jagex_email_encrypted', 'jagex_password_encrypted', 'jagex_name', 'first_name', 'last_name',
     'birth_month', 'birth_day', 'birth_year', 'proxy_id', 'assigned_http_proxy_id', 'assigned_socks5_proxy_id',
     'status', 'credential_status', 'upgrade_status', 'email_creation_status',
-    'verified', 'character_type', 'gp_amount', 'platinum_amount', 'wealth_amount', 'ban_status',
+    'verified', 'character_type', 'gp_amount', 'platinum_amount', 'wealth_amount',
+    'bank_value', 'wealth_value', 'wealth_source', 'wealth_updated_at', 'ban_status',
     'completed_tutorial', 'total_level', 'tags'
   ];
 }
@@ -3533,6 +4693,10 @@ function accountFromImport(row, body) {
     gp_amount: 0,
     platinum_amount: 0,
     wealth_amount: 0,
+    bank_value: null,
+    wealth_value: null,
+    wealth_source: 'unknown',
+    wealth_updated_at: null,
     ban_status: 'none',
     completed_tutorial: false,
     total_level: null,
@@ -3546,76 +4710,6 @@ async function markDuplicates(userId, rows) {
   const existing = await db.query('SELECT username, legacy_login FROM accounts WHERE user_id=$1 AND (username = ANY($2) OR legacy_login = ANY($2))', [userId, names]);
   const found = new Set(existing.rows.flatMap(row => [row.username, row.legacy_login]).filter(Boolean));
   rows.forEach(row => { row.duplicate = found.has(row.username); });
-}
-
-function previewStats(rows) {
-  return {
-    valid: rows.filter(row => row.valid).length,
-    duplicate: rows.filter(row => row.duplicate).length,
-    invalid: rows.filter(row => !row.valid).length
-  };
-}
-
-async function exportRows(userId, options) {
-  const type = oneOf(options.account_type, accountTypes, 'legacy');
-  const format = oneOf(options.format, exportFormats, 'legacy_user_pass');
-  const selectedIds = selectedAccountIds(options);
-  const params = [userId, type];
-  const selectedClause = selectedIds.length ? `AND a.id = ANY($3)` : '';
-  if (selectedIds.length) params.push(selectedIds);
-  const result = await db.query(
-    `SELECT a.*, p.host proxy_host, p.port proxy_port
-     FROM accounts a LEFT JOIN proxies p ON p.id = COALESCE(a.assigned_http_proxy_id, a.proxy_id) AND p.user_id = a.user_id
-     WHERE a.user_id=$1 AND a.account_type=$2 AND a.archived_at IS NULL
-       ${selectedClause}
-     ORDER BY a.username`,
-    params
-  );
-  return result.rows.map(account => {
-    const d = {
-      legacy_password: decrypt(account.legacy_password_encrypted) || decrypt(account.password_encrypted),
-      otp_secret: decrypt(account.otp_secret_encrypted),
-      jagex_email: decrypt(account.jagex_email_encrypted) || decrypt(account.target_email_encrypted),
-      jagex_password: decrypt(account.jagex_password_encrypted)
-    };
-    switch (format) {
-      case 'legacy_user_pass_otp':
-        return `${account.legacy_login || account.username}:${d.legacy_password}:${d.otp_secret}`;
-      case 'jagex_email_pass':
-        return `${d.jagex_email}:${d.jagex_password}`;
-      case 'jagex_email_pass_otp':
-        return `${d.jagex_email}:${d.jagex_password}:${d.otp_secret}`;
-      case 'safe_csv':
-        return csvLine([
-          account.id, account.account_type, account.legacy_login || account.username, account.display_name,
-          account.status, account.credential_status, account.upgrade_status, account.email_creation_status,
-          account.category, account.country_code, account.proxy_host ? `${account.proxy_host}:${account.proxy_port}` : '',
-          account.notes, account.updated_at, account.exported_at || ''
-        ]);
-      default:
-        return `${account.legacy_login || account.username}:${d.legacy_password}`;
-    }
-  });
-}
-
-async function applyExportAction(userId, options) {
-  const type = oneOf(options.account_type, accountTypes, 'legacy');
-  const action = options.export_action || 'keep';
-  const selectedIds = selectedAccountIds(options);
-  const params = [userId, type];
-  const selectedClause = selectedIds.length ? `AND id = ANY($3)` : '';
-  if (selectedIds.length) params.push(selectedIds);
-  if (action === 'mark_exported') {
-    await db.query(`UPDATE accounts SET status='exported', exported_at=NOW(), updated_at=NOW() WHERE user_id=$1 AND account_type=$2 AND archived_at IS NULL ${selectedClause}`, params);
-    await activity.log(userId, 'accounts_marked_exported', 'account', null, `Marked ${type} accounts exported`);
-  }
-  if (action === 'archive') {
-    await db.query(`UPDATE accounts SET status='archived', archived_at=NOW(), updated_at=NOW() WHERE user_id=$1 AND account_type=$2 AND archived_at IS NULL ${selectedClause}`, params);
-    await activity.log(userId, 'accounts_archived_after_export', 'account', null, `Archived ${type} accounts after export`);
-  }
-  if (action === 'delete') {
-    await activity.log(userId, 'delete_after_export_requested', 'account', null, 'Delete-after-export was requested but no records were deleted automatically');
-  }
 }
 
 async function buildSelectedAccountExport(userId, options) {
@@ -3868,10 +4962,73 @@ function numberOrNull(value) {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
+function safeDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function hasOwn(value, key) {
+  return value && Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function clientStateLabel(state) {
+  const normalized = oneOf(state, clientStates, 'unknown');
+  const labels = {
+    active: 'Active',
+    idle: 'Idle',
+    offline: 'Offline',
+    unknown: 'Unknown',
+    error: 'Error'
+  };
+  return labels[normalized] || labels.unknown;
+}
+
+function clientStateClass(state) {
+  const normalized = oneOf(state, clientStates, 'unknown');
+  if (normalized === 'active') return 'active running';
+  if (normalized === 'idle') return 'idle';
+  if (normalized === 'offline') return 'offline stopped';
+  if (normalized === 'error') return 'error crashed';
+  return 'unknown detected';
+}
+
+function clientStateFromRow(row, staleMinutes = 5) {
+  if (!row) return 'unknown';
+  const explicit = oneOf(row.client_state || row.active_instance_client_state, clientStates, 'unknown');
+  const status = String(row.status || row.active_instance_status || '').toLowerCase();
+  if (explicit === 'offline' || explicit === 'error') return explicit;
+  if (status === 'stopped') return 'offline';
+  if (['crashed', 'failed'].includes(status)) return 'error';
+  const lastSeenRaw = row.last_seen_at || row.active_instance_last_seen_at || row.client_last_seen_at;
+  if (lastSeenRaw) {
+    const lastSeen = new Date(lastSeenRaw).getTime();
+    if (!Number.isNaN(lastSeen) && Date.now() - lastSeen > Math.max(1, staleMinutes) * 60 * 1000) return 'offline';
+  }
+  return explicit;
+}
+
+function formatWealthValue(value, source = 'unknown') {
+  const numeric = value === null || value === undefined || value === '' ? null : Number(value);
+  if (!Number.isFinite(numeric) || (source === 'unknown' && numeric === 0)) return 'Unknown';
+  return Math.floor(Math.max(0, numeric)).toLocaleString();
+}
+
 function integerOrZero(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0) return 0;
   return Math.floor(number);
+}
+
+function optionalInteger(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return null;
+  return Math.floor(number);
+}
+
+function hasManualWealthBody(body) {
+  return ['gp_amount', 'bank_value', 'wealth_value', 'wealth_amount'].some(key => hasOwn(body, key) && body[key] !== '');
 }
 
 async function start() {
@@ -3900,6 +5057,20 @@ module.exports = {
     isAdminUser,
     requireAdmin,
     loadAccount,
-    getSettings
+    getSettings,
+    deriveClientState,
+    activityForClientState,
+    normalizeClientInstance,
+    formatWealthValue,
+    canUseBrowserAutomator,
+    canUseClientMonitor,
+    canUseClientLauncher,
+    canUseSnapshots,
+    canAddDevice,
+    canRunBrowserTask,
+    isBrowserTaskJob,
+    jobTypeLabel,
+    setupStepsForWorkspace,
+    automationCompatibilityMatrix
   }
 };

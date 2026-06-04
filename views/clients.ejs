@@ -1,26 +1,28 @@
 <%- include('partials/head') %>
+<% const canLaunchClients = isAdmin || (access && access.tier && access.tier.client_launcher_enabled); %>
 <section class="panel">
   <div class="panel-head">
     <div>
       <p class="eyebrow">My Workspace</p>
-      <h2>Client Profiles</h2>
+      <h2>Launch Profiles</h2>
     </div>
     <div class="actions">
-      <a class="button" href="/instances">Instances</a>
+      <a class="button" href="/instances">Live Sessions</a>
       <a class="button" href="/local-jobs">Local Jobs</a>
-      <a class="button" href="/companion">Companion</a>
+      <a class="button" href="/companion">Client Monitor</a>
     </div>
   </div>
-  <% if (query.launch_job) { %><p class="notice">Launch job queued: <%= query.launch_job %>. Open GS Companion to accept it from Local Jobs.</p><% } %>
-  <% if (!helper.connected) { %><p class="notice">Connect GS Companion before launching local clients.</p><% } %>
-  <p class="muted">A client profile is a user-configured launch profile. The website stores safe metadata; machine-specific executable paths stay in GS Companion.</p>
+  <% if (query.launch_job) { %><p class="notice">Launch job queued: <%= query.launch_job %>. Open GS Local App to accept it from Local Jobs.</p><% } %>
+  <% if (!helper.connected) { %><p class="notice">Connect GS Local App before launching local clients.</p><% } %>
+  <% if (!canLaunchClients) { %><p class="notice">Client Launcher is not available on your current tier. Upgrade access is required before launch profile actions can run.</p><% } %>
+  <p class="muted">A launch profile is a user-configured client starter. The website stores safe metadata; machine-specific executable paths stay in GS Local App.</p>
 </section>
 
 <section class="metric-grid dashboard-metrics">
-  <article class="metric"><span>Connected Companions</span><strong><%= stats.connected_devices || 0 %></strong></article>
-  <article class="metric"><span>Client Profiles</span><strong><%= profiles.length %></strong></article>
-  <article class="metric"><span>Running Instances</span><strong><%= stats.running_clients || 0 %></strong></article>
-  <article class="metric"><span>Stopped Instances</span><strong><%= stats.stopped_clients || 0 %></strong></article>
+  <article class="metric"><span>Connected Devices</span><strong><%= stats.connected_devices || 0 %></strong></article>
+  <article class="metric"><span>Launch Profiles</span><strong><%= profiles.length %></strong></article>
+  <article class="metric"><span>Running Sessions</span><strong><%= stats.running_clients || 0 %></strong></article>
+  <article class="metric"><span>Stopped Sessions</span><strong><%= stats.stopped_clients || 0 %></strong></article>
   <article class="metric"><span>Active Local Jobs</span><strong><%= stats.active_jobs || 0 %></strong></article>
   <article class="metric"><span>Snapshots</span><strong><%= settings.allow_companion_snapshots === 'true' ? 'Enabled' : 'Off' %></strong></article>
 </section>
@@ -31,34 +33,34 @@
     <div class="panel-head">
       <div>
         <p class="eyebrow">Create</p>
-        <h2>New Client Profile</h2>
+        <h2>New Launch Profile</h2>
       </div>
-      <button class="button primary">Create Profile</button>
+      <button class="button primary" <%= canLaunchClients ? '' : 'disabled' %>>Create Profile</button>
     </div>
     <label>Profile name<input name="name" placeholder="RuneLite main"></label>
     <label>Client type<select name="client_type"><% clientTypes.forEach(type => { %><option value="<%= type %>"><%= type.replace(/_/g, ' ') %></option><% }) %></select></label>
     <label>Default account<select name="default_account_id"><option value="">No default account</option><% accounts.forEach(account => { %><option value="<%= account.id %>"><%= account.display_name || account.legacy_login || account.username %></option><% }) %></select></label>
     <label>Default proxy<select name="default_proxy_id"><option value="">No default proxy</option><% proxies.forEach(proxy => { %><option value="<%= proxy.id %>"><%= proxy.name || `${proxy.host}:${proxy.port}` %> - <%= proxy.proxy_type %></option><% }) %></select></label>
-    <label>Default workflow<select name="default_workflow_id"><option value="">No default workflow</option><% workflows.forEach(workflow => { %><option value="<%= workflow.id %>"><%= workflow.name %></option><% }) %></select></label>
+    <label>Default automation<select name="default_workflow_id"><option value="">No default automation</option><% workflows.forEach(workflow => { %><option value="<%= workflow.id %>"><%= workflow.name %></option><% }) %></select></label>
     <label>Launch args template<textarea name="launch_args" placeholder="Optional user-provided launch args. Do not include secrets."></textarea></label>
-    <label>Notes<textarea name="notes" placeholder="Local reminder for this client profile"></textarea></label>
-    <p class="notice">Launching is visible and user-triggered through GS Companion. This does not add gameplay scripts, injection, hidden automation, or security bypass behavior.</p>
+    <label>Notes<textarea name="notes" placeholder="Local reminder for this launch profile"></textarea></label>
+    <p class="notice">Launching is visible and user-triggered through GS Local App. This does not add gameplay scripts, injection, hidden automation, or security bypass behavior.</p>
   </form>
 
   <article class="panel">
     <div class="panel-head">
       <div>
-        <p class="eyebrow">Companion Required</p>
+        <p class="eyebrow">Local App Required</p>
         <h2>Local Executable Paths</h2>
       </div>
       <a class="button small" href="/downloads">Download</a>
     </div>
-    <p class="muted">Set executable paths inside the Windows Companion app. Keeping local paths off the website avoids leaking PC-specific details and keeps launches user-controlled.</p>
+    <p class="muted">Set executable paths inside GS Local App. Keeping local paths off the website avoids leaking PC-specific details and keeps launches user-controlled.</p>
     <div class="checklist-grid">
       <p class="row-line"><span>Visible launch</span><strong>Required</strong></p>
       <p class="row-line"><span>Client injection</span><strong>Never</strong></p>
       <p class="row-line"><span>Gameplay scripting</span><strong>Not included</strong></p>
-      <p class="row-line"><span>Proxy launch</span><strong>Companion placeholder</strong></p>
+      <p class="row-line"><span>Proxy launch</span><strong>Local App placeholder</strong></p>
     </div>
   </article>
 </section>
@@ -67,7 +69,7 @@
   <div class="panel-head">
     <div>
       <p class="eyebrow">Launch Profiles</p>
-      <h2>Saved Clients</h2>
+      <h2>Saved Launch Profiles</h2>
     </div>
     <span class="tag"><%= profiles.length %> profile(s)</span>
   </div>
@@ -81,7 +83,7 @@
           <td>
             <select form="profile-<%= profile.id %>" name="default_account_id"><option value="">No default account</option><% accounts.forEach(account => { %><option value="<%= account.id %>" <%= Number(profile.default_account_id) === Number(account.id) ? 'selected' : '' %>><%= account.display_name || account.legacy_login || account.username %></option><% }) %></select>
             <select form="profile-<%= profile.id %>" name="default_proxy_id"><option value="">No default proxy</option><% proxies.forEach(proxy => { %><option value="<%= proxy.id %>" <%= Number(profile.default_proxy_id) === Number(proxy.id) ? 'selected' : '' %>><%= proxy.name || `${proxy.host}:${proxy.port}` %></option><% }) %></select>
-            <select form="profile-<%= profile.id %>" name="default_workflow_id"><option value="">No default workflow</option><% workflows.forEach(workflow => { %><option value="<%= workflow.id %>" <%= Number(profile.default_workflow_id) === Number(workflow.id) ? 'selected' : '' %>><%= workflow.name %></option><% }) %></select>
+            <select form="profile-<%= profile.id %>" name="default_workflow_id"><option value="">No default automation</option><% workflows.forEach(workflow => { %><option value="<%= workflow.id %>" <%= Number(profile.default_workflow_id) === Number(workflow.id) ? 'selected' : '' %>><%= workflow.name %></option><% }) %></select>
           </td>
           <td><input form="profile-<%= profile.id %>" type="hidden" name="enabled" value="no"><label class="check"><input form="profile-<%= profile.id %>" type="checkbox" name="enabled" value="yes" <%= profile.enabled ? 'checked' : '' %>> enabled</label></td>
           <td>
@@ -90,7 +92,7 @@
               <select name="companion_device_id"><option value="">Any paired device</option><% devices.forEach(device => { %><option value="<%= device.id %>"><%= device.device_name || `Device ${device.id}` %></option><% }) %></select>
               <select name="account_id"><option value="">Use profile account</option><% accounts.forEach(account => { %><option value="<%= account.id %>"><%= account.display_name || account.legacy_login || account.username %></option><% }) %></select>
               <select name="proxy_id"><option value="">Profile/account proxy</option><% proxies.forEach(proxy => { %><option value="<%= proxy.id %>"><%= proxy.name || `${proxy.host}:${proxy.port}` %></option><% }) %></select>
-              <button class="button small">Launch Client</button>
+              <button class="button small" <%= canLaunchClients && helper.connected ? '' : 'disabled' %>>Launch Client</button>
             </form>
           </td>
           <td>
@@ -100,14 +102,14 @@
               <textarea name="notes" placeholder="Notes"><%= profile.notes || '' %></textarea>
               <button class="button small">Save</button>
             </form>
-            <form method="post" action="/clients/profiles/<%= profile.id %>/delete" data-confirm="Delete this client profile? Existing job and instance history stays as safe records.">
+            <form method="post" action="/clients/profiles/<%= profile.id %>/delete" data-confirm="Delete this launch profile? Existing job and live session history stays as safe records.">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button class="button small danger">Delete</button>
             </form>
           </td>
         </tr>
       <% }) %>
-      <% if (!profiles.length) { %><tr><td colspan="6"><p class="muted">Create a client profile, then configure its executable path locally in GS Companion.</p></td></tr><% } %>
+      <% if (!profiles.length) { %><tr><td colspan="6"><p class="muted">Create a launch profile, then configure its executable path locally in GS Local App.</p></td></tr><% } %>
     </tbody>
   </table>
 </section>

@@ -1,0 +1,126 @@
+<%- include('partials/head') %>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Live Session</p>
+      <h2><%= instance.instance_name || instance.profile_name || instance.process_name || 'Local Client' %></h2>
+    </div>
+    <div class="actions">
+      <a class="button" href="/instances">All Live Sessions</a>
+      <a class="button" href="/clients">Launch Profiles</a>
+    </div>
+  </div>
+  <p class="muted">This view shows safe local process/window metadata reported by GS Local App. It does not include memory, sessions, cookies, tokens, or gameplay automation.</p>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <h2>Status</h2>
+    <% const detailClientState = clientStateFromRow(instance); %>
+    <p class="row-line"><span>Client state</span><strong class="status <%= clientStateClass(detailClientState) %>"><%= clientStateLabel(detailClientState) %></strong></p>
+    <p class="row-line"><span>Status</span><strong class="status <%= instance.status %>"><%= instance.status %></strong></p>
+    <p class="row-line"><span>Activity</span><strong><%= instance.current_activity || 'Detected / Unknown State' %></strong></p>
+    <p class="row-line"><span>Process</span><strong><%= instance.process_name || '-' %> <%= instance.process_id ? `(PID ${instance.process_id})` : '' %></strong></p>
+    <p class="row-line"><span>Window</span><strong><%= instance.window_title || '-' %></strong></p>
+    <p class="row-line"><span>Detected</span><strong><%= instance.detected_at ? new Date(instance.detected_at).toLocaleString() : '-' %></strong></p>
+    <p class="row-line"><span>Last seen</span><strong><%= instance.last_seen_at ? new Date(instance.last_seen_at).toLocaleString() : '-' %></strong></p>
+    <p class="row-line"><span>Local App Device</span><strong><%= instance.device_name || 'Local App' %></strong></p>
+  </article>
+
+  <article class="panel">
+    <h2>Account Match</h2>
+    <p class="row-line"><span>Matched account</span><strong><%= instance.account_display_name || instance.account_legacy_login || instance.account_username || 'Unassigned' %></strong></p>
+    <p class="row-line"><span>Suggested account</span><strong><%= instance.suggested_account_display_name || instance.suggested_account_legacy_login || instance.suggested_account_username || 'None' %></strong></p>
+    <p class="row-line"><span>Match reason</span><strong><%= instance.match_reason || '-' %></strong></p>
+    <form class="form-grid" method="post" action="/instances/<%= instance.id %>/match">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <label>Account<select name="account_id"><option value="">No account</option><% accounts.forEach(account => { %><option value="<%= account.id %>" <%= Number(instance.account_id || instance.suggested_account_id) === Number(account.id) ? 'selected' : '' %>><%= account.display_name || account.legacy_login || account.username %></option><% }) %></select></label>
+      <label>Proxy<select name="proxy_id"><option value="">No proxy</option><% proxies.forEach(proxy => { %><option value="<%= proxy.id %>" <%= Number(instance.proxy_id) === Number(proxy.id) ? 'selected' : '' %>><%= proxy.name || `${proxy.host}:${proxy.port}` %></option><% }) %></select></label>
+      <button class="button primary">Save Match</button>
+    </form>
+    <form method="post" action="/instances/<%= instance.id %>/unmatch">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <button class="button">Unmatch Account</button>
+    </form>
+  </article>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <div class="panel-head">
+      <h2>OSRS Stats</h2>
+      <form method="post" action="/instances/<%= instance.id %>/refresh-stats">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button class="button small" <%= instance.account_id ? '' : 'disabled' %>>Refresh Stats</button>
+      </form>
+    </div>
+    <% if (accountStats) { %>
+      <p class="row-line"><span>Display name</span><strong><%= accountStats.display_name %></strong></p>
+      <p class="row-line"><span>Total level</span><strong><%= accountStats.total_level || '-' %></strong></p>
+      <p class="row-line"><span>Combat</span><strong><%= accountStats.combat_level || '-' %></strong></p>
+      <p class="row-line"><span>Core combat</span><strong>Atk <%= accountStats.attack || '-' %> / Str <%= accountStats.strength || '-' %> / Def <%= accountStats.defence || '-' %> / HP <%= accountStats.hitpoints || '-' %></strong></p>
+      <p class="row-line"><span>Ranged / Prayer / Magic</span><strong><%= accountStats.ranged || '-' %> / <%= accountStats.prayer || '-' %> / <%= accountStats.magic || '-' %></strong></p>
+      <p class="row-line"><span>Status</span><strong class="status <%= accountStats.status %>"><%= accountStats.status %></strong></p>
+      <p class="row-line"><span>Fetched</span><strong><%= new Date(accountStats.fetched_at).toLocaleString() %></strong></p>
+      <% if (accountStats.error_message) { %><p class="notice"><%= accountStats.error_message %></p><% } %>
+    <% } else { %>
+      <p class="muted">No stats have been fetched for the matched account yet.</p>
+    <% } %>
+  </article>
+
+  <article class="panel">
+    <h2>Proxy</h2>
+    <% if (instance.proxy_host) { %>
+      <p class="row-line"><span>Proxy</span><strong><%= instance.proxy_name || `${mask(instance.proxy_host)}:${instance.proxy_port}` %></strong></p>
+      <p class="row-line"><span>Type</span><strong><%= instance.proxy_type || 'HTTP' %></strong></p>
+      <p class="row-line"><span>Status</span><strong class="status <%= instance.proxy_status || 'unknown' %>"><%= instance.proxy_status || 'unknown' %></strong></p>
+    <% } else { %>
+      <p class="muted">No proxy is matched to this instance.</p>
+    <% } %>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Safe Runtime Report</p>
+      <h2>Display / Wealth</h2>
+    </div>
+    <% const detailWealthSource = instance.wealth_source && instance.wealth_source !== 'unknown' ? instance.wealth_source : instance.account_wealth_source; %>
+    <span class="tag"><%= detailWealthSource || 'unknown' %></span>
+  </div>
+  <p class="row-line"><span>Last reported display name</span><strong><%= instance.reported_display_name || instance.account_display_name || 'Unknown' %></strong></p>
+  <p class="row-line"><span>GP</span><strong><%= formatWealthValue(instance.reported_gp_amount ?? instance.gp_amount, detailWealthSource) %></strong></p>
+  <p class="row-line"><span>Bank value</span><strong><%= formatWealthValue(instance.reported_bank_value ?? instance.bank_value, detailWealthSource) %></strong></p>
+  <p class="row-line"><span>Wealth value</span><strong><%= formatWealthValue(instance.reported_wealth_value ?? instance.wealth_value ?? instance.wealth_amount, detailWealthSource) %></strong></p>
+  <p class="muted">Hiscores cannot provide GP or bank value. Bank/wealth values only update from manual entry or user-permitted companion/client status reports.</p>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <h2>Recent Events</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Event</th><th>Message</th></tr></thead>
+      <tbody>
+        <% events.forEach(event => { %>
+          <tr><td><%= new Date(event.created_at).toLocaleString() %></td><td><%= event.event_type %></td><td><%= event.message || '' %></td></tr>
+        <% }) %>
+        <% if (!events.length) { %><tr><td colspan="3"><p class="muted">No events yet.</p></td></tr><% } %>
+      </tbody>
+    </table>
+  </article>
+
+  <article class="panel">
+    <h2>Local Jobs</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Type</th><th>Status</th></tr></thead>
+      <tbody>
+        <% jobs.forEach(job => { %>
+          <tr><td><%= new Date(job.updated_at || job.created_at).toLocaleString() %></td><td><%= job.job_type %></td><td><span class="status <%= job.status %>"><%= job.status %></span></td></tr>
+        <% }) %>
+        <% if (!jobs.length) { %><tr><td colspan="3"><p class="muted">No local jobs for this live session yet.</p></td></tr><% } %>
+      </tbody>
+    </table>
+  </article>
+</section>
+<%- include('partials/foot') %>

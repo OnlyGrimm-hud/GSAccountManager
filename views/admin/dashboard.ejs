@@ -10,7 +10,7 @@
   <article class="metric"><span>Banned users</span><strong><%= userTotals.banned || 0 %></strong></article>
   <article class="metric"><span>Total accounts</span><strong><%= accountCount %></strong></article>
   <article class="metric"><span>Total proxies</span><strong><%= proxyCount %></strong></article>
-  <article class="metric"><span>Companion devices</span><strong><%= (companionMap.connected || 0) + (companionMap.disconnected || 0) + (companionMap.revoked || 0) %></strong></article>
+  <article class="metric"><span>Local app devices</span><strong><%= (companionMap.connected || 0) + (companionMap.disconnected || 0) + (companionMap.revoked || 0) %></strong></article>
   <article class="metric"><span>Running clients</span><strong><%= (clientMap.running || 0) + (clientMap.detected || 0) + (clientMap.launching || 0) %></strong></article>
 </section>
 
@@ -27,11 +27,11 @@
   </article>
   <article class="panel">
     <p class="eyebrow">Platform Health</p>
-    <h2>Companion + Jobs</h2>
+    <h2>Local App + Jobs</h2>
     <p class="row-line"><span>Connected</span><strong><%= companionMap.connected || 0 %></strong></p>
     <p class="row-line"><span>Disconnected</span><strong><%= companionMap.disconnected || 0 %></strong></p>
     <p class="row-line"><span>Active jobs</span><strong><%= (jobMap.queued || 0) + (jobMap.accepted || 0) + (jobMap.running || 0) %></strong></p>
-    <div class="actions"><a class="button small" href="/admin/system">System Health</a><a class="button small" href="/admin/subscriptions">Subscriptions</a></div>
+    <div class="actions"><a class="button small" href="/admin/system">System Health</a><a class="button small" href="/admin/subscriptions">Subscriptions</a><a class="button small" href="/admin/downloads">Downloads Manager</a></div>
   </article>
 </section>
 

@@ -3,12 +3,12 @@
 <section class="panel">
   <div class="panel-head">
     <div>
-      <p class="eyebrow">Admin Management</p>
-      <h2>Subscription Controls</h2>
+      <p class="eyebrow">Admin</p>
+      <h2>Subscriptions</h2>
     </div>
-    <a class="button primary" href="/admin/users">Manage Users</a>
+    <a class="button primary" href="/admin/users">Users</a>
   </div>
-  <p class="muted">Payment processing is not connected yet. For now, subscriptions are manual/admin-controlled through user status changes.</p>
+  <p class="muted">Payment processing is not connected yet. Use this page to assign tiers, set access status, mark manual payment, and keep payment notes.</p>
 </section>
 
 <section class="metric-grid">
@@ -17,24 +17,117 @@
   <% }) %>
 </section>
 
-<section class="content-grid">
-  <article class="panel">
-    <p class="eyebrow">Placeholder</p>
-    <h2>Future Subscription Handling</h2>
-    <p class="muted">This section is reserved for manual subscription review, crypto/payment confirmations, release access, and billing status notes.</p>
-    <div class="checklist-grid">
-      <% paymentMethods.forEach(method => { %>
-        <p class="row-line"><span><%= method %></span><strong>Placeholder</strong></p>
+<section class="panel">
+  <div class="panel-head">
+    <h2>Subscription Tiers</h2>
+    <span class="tag"><%= tiers.length %> tier(s)</span>
+  </div>
+  <div class="card-grid">
+    <% tiers.forEach(tier => { %>
+      <article class="panel mini-card">
+        <form method="post" action="/admin/subscriptions/tiers/<%= tier.id %>" class="form-grid">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <div class="panel-head">
+            <h2><input class="table-input" name="name" value="<%= tier.name %>"></h2>
+            <span class="status <%= tier.active ? 'ready' : 'blocked' %>"><%= tier.active ? 'active' : 'inactive' %></span>
+          </div>
+          <label>Description<textarea name="description"><%= tier.description || '' %></textarea></label>
+          <div class="form-grid two">
+            <label>Max devices<input type="number" name="max_devices" value="<%= tier.max_devices === null ? '' : tier.max_devices %>" placeholder="unlimited"></label>
+            <label>Daily successful browser tasks<input type="number" name="daily_successful_browser_task_limit" value="<%= tier.daily_successful_browser_task_limit === null ? '' : tier.daily_successful_browser_task_limit %>" placeholder="unlimited"></label>
+            <label>Max accounts<input type="number" name="max_accounts" value="<%= tier.max_accounts === null ? '' : tier.max_accounts %>" placeholder="unlimited"></label>
+            <label>Max proxies<input type="number" name="max_proxies" value="<%= tier.max_proxies === null ? '' : tier.max_proxies %>" placeholder="unlimited"></label>
+            <label>Price label<input name="price_label" value="<%= tier.price_label || '' %>"></label>
+            <label>Sort order<input type="number" name="sort_order" value="<%= tier.sort_order || 0 %>"></label>
+          </div>
+          <div class="form-grid two">
+            <label class="check"><input type="checkbox" name="snapshots_enabled" value="yes" <%= tier.snapshots_enabled ? 'checked' : '' %>> Snapshots</label>
+            <label class="check"><input type="checkbox" name="client_launcher_enabled" value="yes" <%= tier.client_launcher_enabled ? 'checked' : '' %>> Client launcher</label>
+            <label class="check"><input type="checkbox" name="browser_automator_enabled" value="yes" <%= tier.browser_automator_enabled ? 'checked' : '' %>> Browser Automator</label>
+            <label class="check"><input type="checkbox" name="active" value="yes" <%= tier.active ? 'checked' : '' %>> Active</label>
+          </div>
+          <label>Payment notes<textarea name="payment_notes"><%= tier.payment_notes || '' %></textarea></label>
+          <button class="button small">Save Tier</button>
+        </form>
+      </article>
+    <% }) %>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>User Access</h2>
+    <span class="tag">manual control</span>
+  </div>
+  <table>
+    <thead><tr><th>User</th><th>Tier</th><th>Status</th><th>Dates / Payment</th><th>Today</th><th>Save</th></tr></thead>
+    <tbody>
+      <% users.forEach(item => { %>
+        <% const usage = usageByUser[item.id] || { successful_count: 0, failed_count: 0 }; %>
+        <tr>
+          <td>
+            <strong><%= item.global_name || item.username || item.discord_username %></strong><br>
+            <code><%= item.discord_id %></code><br>
+            <span class="muted"><%= item.discord_email || '' %></span>
+          </td>
+          <td>
+            <select form="subscription-user-<%= item.id %>" name="subscription_tier_id">
+              <option value="">No tier</option>
+              <% tiers.forEach(tier => { %><option value="<%= tier.id %>" <%= Number(item.subscription_tier_id) === Number(tier.id) ? 'selected' : '' %>><%= tier.name %></option><% }) %>
+            </select>
+          </td>
+          <td>
+            <select form="subscription-user-<%= item.id %>" name="subscription_status">
+              <% subscriptionStatuses.forEach(status => { %><option value="<%= status %>" <%= item.subscription_status === status ? 'selected' : '' %>><%= status %></option><% }) %>
+            </select>
+            <p class="muted">Role: <%= item.role %></p>
+          </td>
+          <td>
+            <label>Started<input form="subscription-user-<%= item.id %>" name="subscription_started_at" type="datetime-local" value=""></label>
+            <label>Expires<input form="subscription-user-<%= item.id %>" name="subscription_expires_at" type="datetime-local" value="<%= item.subscription_expires_at ? new Date(item.subscription_expires_at).toISOString().slice(0,16) : '' %>"></label>
+            <select form="subscription-user-<%= item.id %>" name="payment_method">
+              <% paymentMethods.forEach(method => { %><option value="<%= method %>" <%= item.payment_method === method ? 'selected' : '' %>><%= method %></option><% }) %>
+            </select>
+            <label class="check"><input form="subscription-user-<%= item.id %>" type="checkbox" name="manually_paid" value="yes"> Mark manually paid now</label>
+            <textarea form="subscription-user-<%= item.id %>" name="payment_note" placeholder="payment note"><%= item.payment_note || '' %></textarea>
+          </td>
+          <td>
+            <strong><%= usage.successful_count || 0 %></strong> successful<br>
+            <span class="muted"><%= usage.failed_count || 0 %> failed/manual failed</span>
+          </td>
+          <td>
+            <form id="subscription-user-<%= item.id %>" method="post" action="/admin/subscriptions/users/<%= item.id %>">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small">Save</button>
+            </form>
+          </td>
+        </tr>
       <% }) %>
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Payment Placeholder</p>
+      <h2>Crypto Payment Settings</h2>
     </div>
-  </article>
-  <article class="panel">
-    <p class="eyebrow">Current Rule</p>
-    <h2>Access Gating</h2>
-    <p class="row-line"><span>Admin</span><strong>Full access</strong></p>
-    <p class="row-line"><span>Active/trial</span><strong>Full access</strong></p>
-    <p class="row-line"><span>Inactive/expired</span><strong>Private build locked</strong></p>
-    <p class="row-line"><span>Banned/disabled</span><strong>Locked</strong></p>
-  </article>
+    <span class="tag">Payment setup coming soon</span>
+  </div>
+  <p class="muted">No crypto verification is implemented. Do not display fake addresses. Addresses are optional and encrypted if entered later.</p>
+  <div class="content-grid">
+    <% paymentSettings.forEach(setting => { %>
+      <form method="post" action="/admin/subscriptions/payment-settings/<%= setting.id %>" class="panel form-grid">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <h2><%= setting.method %></h2>
+        <label class="check"><input type="checkbox" name="enabled" value="yes" <%= setting.enabled ? 'checked' : '' %>> Enabled</label>
+        <label>Public Label<input name="public_label" value="<%= setting.public_label || setting.method %>"></label>
+        <label>New Address<input name="address" placeholder="optional; saved encrypted"></label>
+        <label>Instructions<textarea name="instructions"><%= setting.instructions || 'Payment setup coming soon.' %></textarea></label>
+        <button class="button small">Save Payment Placeholder</button>
+      </form>
+    <% }) %>
+  </div>
 </section>
 <%- include('../partials/foot') %>

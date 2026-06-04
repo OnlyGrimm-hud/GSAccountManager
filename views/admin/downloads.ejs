@@ -1,0 +1,72 @@
+<%- include('../partials/head') %>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Admin</p>
+      <h2>Downloads Manager</h2>
+    </div>
+    <a class="button" href="/downloads">View Public Downloads</a>
+  </div>
+  <p class="muted">Manage public download cards, local app release metadata, setup guide links, and third-party client setup links. Do not upload or redistribute third-party installers unless explicitly allowed.</p>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Add / Upsert Download Card</h2>
+  </div>
+  <form method="post" action="/admin/downloads" class="form-grid three">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label>Name<input name="title" required></label>
+    <label>Slug<input name="slug" placeholder="optional"></label>
+    <label>Category<select name="category"><% downloadCategories.forEach(category => { %><option value="<%= category %>"><%= category.replace(/_/g, ' ') %></option><% }) %></select></label>
+    <label>Status<select name="status"><% downloadStatuses.forEach(status => { %><option value="<%= status %>"><%= status.replace(/_/g, ' ') %></option><% }) %></select></label>
+    <label>Version<input name="version"></label>
+    <label>Sort Order<input name="sort_order" type="number" value="100"></label>
+    <label>Download URL<input name="download_url"></label>
+    <label>Description<textarea name="description"></textarea></label>
+    <label>Public Notes<textarea name="public_notes"></textarea></label>
+    <label>Admin Notes<textarea name="admin_notes"></textarea></label>
+    <button class="button primary">Save Download Card</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>Managed Cards</h2>
+    <span class="tag"><%= items.length %> item(s)</span>
+  </div>
+  <table>
+    <thead><tr><th>Name</th><th>Category / Status</th><th>Version / URL</th><th>Notes</th><th>Save</th></tr></thead>
+    <tbody>
+      <% items.forEach(item => { %>
+        <tr>
+          <td>
+            <input class="table-input" form="download-<%= item.id %>" name="title" value="<%= item.title %>">
+            <input class="table-input" form="download-<%= item.id %>" name="slug" value="<%= item.slug %>">
+          </td>
+          <td>
+            <select form="download-<%= item.id %>" name="category"><% downloadCategories.forEach(category => { %><option value="<%= category %>" <%= item.category === category ? 'selected' : '' %>><%= category.replace(/_/g, ' ') %></option><% }) %></select>
+            <select form="download-<%= item.id %>" name="status"><% downloadStatuses.forEach(status => { %><option value="<%= status %>" <%= item.status === status ? 'selected' : '' %>><%= status.replace(/_/g, ' ') %></option><% }) %></select>
+            <input class="table-input short" form="download-<%= item.id %>" name="sort_order" type="number" value="<%= item.sort_order || 0 %>">
+          </td>
+          <td>
+            <input class="table-input" form="download-<%= item.id %>" name="version" value="<%= item.version || '' %>" placeholder="version">
+            <input class="table-input" form="download-<%= item.id %>" name="download_url" value="<%= item.download_url || '' %>" placeholder="download/setup URL">
+          </td>
+          <td>
+            <textarea form="download-<%= item.id %>" name="description" placeholder="description"><%= item.description || '' %></textarea>
+            <textarea form="download-<%= item.id %>" name="public_notes" placeholder="public notes"><%= item.public_notes || '' %></textarea>
+            <textarea form="download-<%= item.id %>" name="admin_notes" placeholder="admin notes"><%= item.admin_notes || '' %></textarea>
+          </td>
+          <td>
+            <form id="download-<%= item.id %>" method="post" action="/admin/downloads/<%= item.id %>">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="button small">Save</button>
+            </form>
+          </td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+<%- include('../partials/foot') %>

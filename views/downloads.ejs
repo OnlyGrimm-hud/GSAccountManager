@@ -1,56 +1,101 @@
 <%- include('partials/head') %>
-<section class="helper-hero">
-  <article class="panel download-card">
-    <p class="eyebrow">Windows Companion App</p>
-    <h2><%= companionName %></h2>
-    <div class="helper-detail-grid">
-      <p class="row-line"><span>Status</span><strong><%= download.available ? 'Available' : 'Coming soon' %></strong></p>
-      <p class="row-line"><span>Version</span><strong><%= download.version %></strong></p>
-      <p class="row-line"><span>Release</span><strong><%= download.releaseDate %></strong></p>
-      <p class="row-line"><span>File size</span><strong><%= download.fileSize || 'Not packaged yet' %></strong></p>
-    </div>
-    <div class="actions">
-      <% if (download.available) { %>
-        <a class="button primary" href="<%= download.windowsPath %>">Download for Windows</a>
-      <% } else { %>
-        <button class="button primary" type="button" disabled>Coming soon</button>
-      <% } %>
-      <a class="button" href="/companion">Open Companion</a>
-    </div>
-    <p class="notice">Security note: the companion only connects to your own GS Account Manager account after pairing. Pairing codes expire quickly, and device tokens are stored server-side only as hashes.</p>
-  </article>
-
-  <article class="panel">
-    <p class="eyebrow">Install Instructions</p>
-    <h2>Before First Use</h2>
-    <ol class="helper-list">
-      <li>Log in to GS Account Manager with Discord.</li>
-      <li>Open Companion and create a pairing code.</li>
-      <li>Install the Windows companion when the package is released.</li>
-      <li>Enter the pairing code in the local app.</li>
-      <li>Confirm the website shows the device as connected.</li>
-      <li>Open Clients for launch profiles, Instances for local sessions, and Local Jobs for the companion queue.</li>
-    </ol>
-    <div class="notice">
-      <strong>Packaging commands</strong>
-      <p class="muted">From the companion folder: npm install, npm start, npm run build, npm run package.</p>
-    </div>
-    <p class="muted">The companion foundation supports pairing, heartbeat, job polling, visible launcher placeholders, Windows process/window detection, and job status reporting. Controlled browser fill remains user-triggered and manual-check safe.</p>
-  </article>
-</section>
+<%
+  const itemBySlug = Object.fromEntries((downloadItems || []).map(item => [item.slug, item]));
+  const localApp = itemBySlug['gs-local-app'] || {};
+  const browserRuntime = itemBySlug['browser-runtime'] || {};
+  const setupGuide = itemBySlug['setup-guide'] || {};
+  const clientTools = (downloadItems || []).filter(item => item.category === 'client_tool');
+  const localAppAvailable = download.available || localApp.status === 'available';
+  const localAppUrl = download.available ? download.windowsPath : localApp.download_url;
+%>
 <section class="panel">
   <div class="panel-head">
     <div>
-      <p class="eyebrow">Changelog Placeholder</p>
-      <h2>GS Companion v<%= appVersion %></h2>
+      <p class="eyebrow">Required Local Tools</p>
+      <h2>Downloads</h2>
     </div>
-    <span class="tag"><%= download.available ? 'Available' : 'Coming Soon' %></span>
+    <% if (isAdmin) { %><a class="button" href="/admin/downloads">Downloads Manager</a><% } %>
   </div>
-  <ul class="helper-list">
-    <li>Pair Device, Status, Clients, Instances, Jobs, Controlled Browser, Settings, and Logs tabs.</li>
-    <li>Local executable paths are stored in Companion local settings.</li>
-    <li>Client detection uses normal OS process/window enumeration when available.</li>
-    <li>No gameplay automation, CAPTCHA bypass, hidden automation, or client injection.</li>
-  </ul>
+  <p class="muted">GS Account Manager runs on Render, but client monitoring and browser automation run locally through GS Local App on your PC.</p>
+</section>
+
+<section class="content-grid">
+  <article class="panel download-card">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Local App</p>
+        <h2>GS Local App</h2>
+      </div>
+      <span class="status <%= localAppAvailable ? 'ready' : 'needs_review' %>"><%= localAppAvailable ? 'Available' : 'Coming Soon' %></span>
+    </div>
+    <p class="muted"><%= localApp.description || 'Connects this PC to GS Account Manager, opens browser automation sessions, monitors local clients, sends live status/snapshots, and launches configured clients.' %></p>
+    <div class="helper-detail-grid">
+      <p class="row-line"><span>Version</span><strong><%= download.available ? download.version : (localApp.version || 'Coming soon') %></strong></p>
+      <p class="row-line"><span>Connected devices</span><strong><%= access.deviceCount %></strong></p>
+      <p class="row-line"><span>Device limit</span><strong><%= access.tier && access.tier.max_devices !== null ? access.tier.max_devices : 'Unlimited' %></strong></p>
+    </div>
+    <div class="actions">
+      <% if (localAppAvailable && localAppUrl) { %>
+        <a class="button primary" href="<%= localAppUrl %>">Download Windows App</a>
+      <% } else { %>
+        <span class="tag">Installer not packaged yet</span>
+      <% } %>
+      <a class="button" href="/setup-guide">View Setup Guide</a>
+      <a class="button" href="/companion">Pair Device</a>
+      <a class="button" href="/compatibility">Compatibility</a>
+    </div>
+  </article>
+
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Browser Runtime</p>
+        <h2>Automation Browser</h2>
+      </div>
+      <span class="status needs_review"><%= browserRuntime.status === 'available' ? 'Available' : 'Managed locally' %></span>
+    </div>
+    <p class="muted"><%= browserRuntime.description || 'Required for browser automation tasks and controlled locally on your PC by GS Local App.' %></p>
+    <div class="checklist-grid">
+      <p class="row-line"><span>Used by</span><strong>GS Local App</strong></p>
+      <p class="row-line"><span>Runs on</span><strong>Your PC</strong></p>
+      <p class="row-line"><span>Render requirement</span><strong>None</strong></p>
+      <p class="row-line"><span>Browser Automator</span><strong><%= access.gates.browserAutomator ? 'Enabled by tier' : 'Locked by tier' %></strong></p>
+    </div>
+    <p class="notice">If Playwright/Chromium is used, GS Local App will install or manage that browser runtime locally.</p>
+    <div class="actions">
+      <a class="button small" href="/workflows">Open Browser Automator</a>
+      <a class="button small" href="/local-jobs">View Local Jobs</a>
+    </div>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Client Setup</p>
+      <h2>Client Downloads / Setup Links</h2>
+    </div>
+    <span class="tag">Third-party links only</span>
+  </div>
+  <p class="notice">GS does not bundle or redistribute third-party client installers unless explicitly allowed. Use official links and configure local executable paths inside GS Local App settings.</p>
+  <div class="card-grid">
+    <% clientTools.forEach(item => { %>
+      <article class="panel mini-card">
+        <div class="panel-head">
+          <h2><%= item.title %></h2>
+          <span class="status <%= item.status === 'available' ? 'ready' : 'needs_review' %>"><%= item.status === 'available' ? 'Configured' : 'Not configured' %></span>
+        </div>
+        <p class="muted"><%= item.description || '' %></p>
+        <% if (item.public_notes) { %><p class="muted"><%= item.public_notes %></p><% } %>
+        <div class="actions">
+          <% if (item.download_url && item.status === 'available') { %>
+            <a class="button small" href="<%= item.download_url %>" target="_blank" rel="noopener">Open Setup Link</a>
+          <% } else { %>
+            <span class="tag">Setup in local app</span>
+          <% } %>
+        </div>
+      </article>
+    <% }) %>
+  </div>
 </section>
 <%- include('partials/foot') %>

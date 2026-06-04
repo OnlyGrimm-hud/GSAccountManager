@@ -1,0 +1,121 @@
+<%- include('partials/head') %>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Automation Setup</p>
+      <h2>Setup Wizard</h2>
+    </div>
+    <div class="actions">
+      <a class="button" href="/setup-guide">Setup Guide</a>
+      <a class="button" href="/compatibility">Compatibility</a>
+      <a class="button primary" href="/workflows">Browser Automator</a>
+    </div>
+  </div>
+  <p class="muted">GS Account Manager is structured around paid local automation: accounts and proxies live in the web app, while GS Local App runs visible browser jobs, launch jobs, client monitoring, and live status on your PC.</p>
+  <p class="notice">Automation must stay visible, user-triggered, pausable, and safe-logged. CAPTCHA, 2FA, email verification, phone verification, and security checks must pause for manual completion.</p>
+</section>
+
+<section class="metric-grid dashboard-metrics">
+  <article class="metric"><span>Accounts</span><strong><%= counts.accounts || 0 %></strong></article>
+  <article class="metric"><span>Proxies</span><strong><%= counts.proxies || 0 %></strong></article>
+  <article class="metric"><span>Connected Devices</span><strong><%= counts.connected_devices || 0 %></strong></article>
+  <article class="metric"><span>Launch Profiles</span><strong><%= counts.launch_profiles || 0 %></strong></article>
+  <article class="metric"><span>Automations</span><strong><%= counts.automations || 0 %></strong></article>
+  <article class="metric"><span>Local Jobs</span><strong><%= counts.local_jobs || 0 %></strong></article>
+  <article class="metric"><span>Live Sessions</span><strong><%= counts.live_sessions || 0 %></strong></article>
+  <article class="metric"><span>Daily Tasks</span><strong><%= access.dailyTaskLimitLabel %></strong></article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Recommended Flow</p>
+      <h2>From setup to automation</h2>
+    </div>
+    <span class="tag"><%= helper.statusLabel %></span>
+  </div>
+  <div class="setup-steps">
+    <% steps.forEach(step => { %>
+      <article class="panel mini-card setup-step <%= step.status %>">
+        <div class="step-num"><%= step.number %></div>
+        <div class="panel-head">
+          <h2><%= step.title %></h2>
+          <span class="status <%= step.status === 'complete' ? 'ready' : step.status === 'current' ? 'needs_review' : 'unknown' %>"><%= step.status %></span>
+        </div>
+        <p class="tag"><%= step.label %></p>
+        <p class="muted"><%= step.description %></p>
+        <div class="actions">
+          <a class="button small <%= step.status === 'current' ? 'primary' : '' %>" href="<%= step.href %>"><%= step.action %></a>
+          <% if (step.secondaryHref) { %><a class="button small" href="<%= step.secondaryHref %>">Related Page</a><% } %>
+        </div>
+      </article>
+    <% }) %>
+  </div>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Local App</p>
+        <h2>Device and automation status</h2>
+      </div>
+      <span class="status <%= helper.connected ? 'ready' : 'needs_review' %>"><%= helper.statusLabel %></span>
+    </div>
+    <div class="checklist-grid">
+      <p class="row-line"><span>Installer</span><strong><%= download.available ? `Available v${download.version}` : 'Coming Soon' %></strong></p>
+      <p class="row-line"><span>Pairing</span><strong><%= counts.devices || 0 %> device(s)</strong></p>
+      <p class="row-line"><span>Browser Automator</span><strong><%= access.gates.browserAutomator ? 'Enabled' : 'Tier locked' %></strong></p>
+      <p class="row-line"><span>Snapshots</span><strong><%= access.gates.snapshots ? 'Allowed by tier' : 'Tier locked or disabled' %></strong></p>
+      <p class="row-line"><span>Successful tasks today</span><strong><%= access.usage.successful_count || 0 %> / <%= access.dailyTaskLimitLabel %></strong></p>
+    </div>
+    <div class="actions">
+      <a class="button" href="/downloads">Downloads</a>
+      <a class="button" href="/companion">Client Monitor</a>
+      <a class="button" href="/local-jobs">Local Jobs</a>
+    </div>
+  </article>
+
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Automation Boundaries</p>
+        <h2>What GS will and will not do</h2>
+      </div>
+      <span class="tag">Required</span>
+    </div>
+    <div class="checklist-grid">
+      <p class="row-line"><span>Visible browser jobs</span><strong>Allowed</strong></p>
+      <p class="row-line"><span>User-triggered form fill</span><strong>Allowed</strong></p>
+      <p class="row-line"><span>Manual pauses</span><strong>Required</strong></p>
+      <p class="row-line"><span>CAPTCHA / 2FA bypass</span><strong>Never</strong></p>
+      <p class="row-line"><span>Client injection or memory reads</span><strong>Never</strong></p>
+      <p class="row-line"><span>Hidden/background automation</span><strong>Never</strong></p>
+    </div>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Compatibility Preview</p>
+      <h2>Primary automation pieces</h2>
+    </div>
+    <a class="button small" href="/compatibility">Open Full Matrix</a>
+  </div>
+  <table>
+    <thead><tr><th>Tool</th><th>Type</th><th>Browser Automator</th><th>Live Sessions</th><th>Status</th></tr></thead>
+    <tbody>
+      <% matrix.slice(0, 4).forEach(item => { %>
+        <tr>
+          <td><strong><%= item.name %></strong></td>
+          <td><%= item.type %></td>
+          <td><%= item.browserAutomator %></td>
+          <td><%= item.liveSessions %></td>
+          <td><span class="status <%= item.status %>"><%= item.status %></span></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+<%- include('partials/foot') %>

@@ -1,163 +1,138 @@
 # GS Account Manager
 
-GS Account Manager is a Render-ready, server-rendered web app for secure account storage and manual workflow tracking.
+GS Account Manager is a Render-ready Node/Express app for Discord-authenticated account storage, proxy storage, admin management, subscription gating, and a safe GS Local App foundation.
 
-The app is intentionally manual-only. It stores encrypted account data, provides copy buttons, opens configured pages in new tabs, and tracks local progress. It does not automate third-party logins, submit forms, create external accounts, solve CAPTCHA, bypass security checks, or perform unattended browser actions.
+The product is intentionally manual-workflow-only. It does not solve or bypass CAPTCHA, 2FA, email verification, phone verification, security checks, Cloudflare checks, or account creation protections. Browser and local app work must stay visible, user-triggered, and safe.
 
-## Stack
+## Current Project Structure
 
-- Node.js + Express
-- EJS templates
-- PostgreSQL with `pg`
-- `express-session` with PostgreSQL session storage
-- Discord OAuth2 login
-- AES-256-GCM field encryption using `ENCRYPTION_KEY`
-- Helmet secure headers
-- Login rate limiting
-- CSRF protection for forms
-- Built-in TOTP generation for saved OTP secrets
+```text
+GSAccountManager/
+  package.json                 Web app scripts and dependencies
+  render.yaml                  Render blueprint reference
+  db/init.sql                  Non-destructive PostgreSQL schema/migrations
+  src/                         Express app, auth, config, encryption, parsers
+  views/                       EJS pages and partials
+  public/css/app.css           Web app styling
+  public/js/app.js             Browser-side modal/import helpers
+  scripts/smoke.js             Local smoke checks
+  companion/                   Electron GS Local App skeleton
+  WORKING_CHECKPOINT.md        Stable deployment checkpoint notes
+```
 
 ## Render Settings
 
-Use these exact settings for the GitHub repo `OnlyGrimm-hud/GSAccountManager`:
+Use these settings for the GitHub repository root:
 
-- Root Directory: leave blank / repository root
+- Root Directory: blank
 - Build Command: `npm install`
 - Start Command: `npm start`
 - Health Check Path: `/healthz`
-- Runtime: Node
 
-The app listens on `process.env.PORT`.
+The app listens on Render's `PORT` environment variable.
 
 ## Required Environment Variables
 
-- `DATABASE_URL`: Render Postgres internal connection string.
-- `ENCRYPTION_KEY`: 32 random bytes encoded as base64, or a 64-character hex string.
-- `SESSION_SECRET`: long random session secret.
+- `DATABASE_URL`
+- `ENCRYPTION_KEY`
+- `SESSION_SECRET`
 - `DISCORD_CLIENT_ID`
 - `DISCORD_CLIENT_SECRET`
 - `DISCORD_CALLBACK_URL`
 - `APP_BASE_URL`
 - `AUTH_MODE=discord`
-- `ADMIN_DISCORD_IDS`: comma-separated Discord IDs that should automatically receive admin access.
+- `ADMIN_DISCORD_IDS`
 - `NODE_ENV=production`
 - `COOKIE_SECURE=true`
-- `AUTO_MIGRATE=true`
 
 Optional:
 
-- `ADMIN_PASSWORD_HASH`: optional `scrypt:salt:hexhash` admin password hash.
-- `ADMIN_USERNAME`: optional emergency fallback username.
-- `ADMIN_PASSWORD`: optional emergency fallback password.
+- `AUTO_MIGRATE=true`
+- `ADMIN_USERNAME`
+- `ADMIN_PASSWORD`
+- `ADMIN_PASSWORD_HASH`
 - `APP_NAME=GS Account Manager`
 
-Add these redirect URLs in the Discord Developer Portal:
+`ENCRYPTION_KEY` must decode to exactly 32 bytes. Use a 32-byte base64 key or a 64-character hex key. Do not change it after real encrypted data exists.
+
+Discord redirect URLs:
 
 - `https://gsaccountmanager.com/auth/discord/callback`
 - `http://localhost:3000/auth/discord/callback`
 
-For Render production, set `APP_BASE_URL=https://gsaccountmanager.com` and `DISCORD_CALLBACK_URL=https://gsaccountmanager.com/auth/discord/callback`.
+## What Works Now
 
-Generate an encryption key in PowerShell:
+- Discord OAuth login with `identify` and `email` scopes.
+- Optional emergency admin username/password fallback.
+- Admin promotion and active access through `ADMIN_DISCORD_IDS`.
+- User-owned accounts, proxies, settings, logs, automations, connected devices, local jobs, live sessions, and stats.
+- Subscription gating for `inactive`, `expired`, and `banned` users.
+- Admin dashboard, user management, subscription controls, downloads manager, platform logs, and system health under `/admin`.
+- Account import/export on the Accounts page.
+- Proxy import/export on the Proxies page.
+- Encrypted sensitive account and proxy fields.
+- Masked sensitive values in list views.
+- Copy endpoints that return sensitive fields only on user action.
+- `/healthz` public health check.
+- Browser Automator definitions, job records, job events, local job queue foundation, and visible Playwright execution in GS Local App.
+- Browser Automator supports `open_url`, `wait_for_selector`, `fill_field`, `click`, `screenshot`, `pause_for_user`, `wait_for_user_continue`, `mark_complete`, `fail`, and `note` steps.
+- GS Local App uses Playwright Chromium when installed and falls back to system Microsoft Edge or Chrome when the Playwright browser runtime is not installed yet.
+- Automation-first setup wizard at `/setup`.
+- Local automation setup guide at `/setup-guide`.
+- Compatibility matrix at `/compatibility` for GS Local App, Automation Browser, RuneLite, Jagex Launcher, Official Client, DreamBot, and custom local clients.
+- GS Local App pairing codes, connected device records, heartbeats, revoke/rename controls, and token-authenticated local app APIs.
+- GS Local App starter app with pairing, heartbeat, job polling, opt-in client detection, and local status reporting.
+- Launch Profiles and Live Sessions pages for user-scoped launch profiles, detected sessions, matching, and public OSRS hiscore stats sync.
+- Downloads page with GS Local App, browser runtime, setup guide, and configurable third-party client setup cards.
+- Admin Downloads Manager at `/admin/downloads`.
+- Subscription tier foundation with Starter, Standard, Pro, and Admin/Owner tiers.
+- Admin subscription assignment at `/admin/subscriptions`.
+- Crypto payment placeholders for LTC, BTC, and ETH. No real payment verification is implemented.
+- Logs with user scoping and admin high-level visibility.
 
-```powershell
-$bytes = New-Object byte[] 32
-$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-$rng.GetBytes($bytes)
-[Convert]::ToBase64String($bytes)
-$rng.Dispose()
-```
+## Placeholders And Coming Soon
 
-Do not change `ENCRYPTION_KEY` after storing real account data, or existing encrypted fields will no longer decrypt.
-
-## Local Setup
-
-1. Install Node.js 20 or newer.
-2. Create a PostgreSQL database.
-3. Copy `.env.example` to `.env`.
-4. Fill in the required environment variables.
-5. Install dependencies:
-
-```bash
-npm install
-```
-
-6. Run smoke checks:
-
-```bash
-npm run smoke
-```
-
-7. Start the app:
-
-```bash
-npm start
-```
+- Windows GS Local App packaged download is still a packaging placeholder unless `companion/dist/GS Local App Setup.exe` exists. The app also supports the previous installer filename as a fallback.
+- Browser proxy launch is not production-enabled yet. Browser jobs currently open a visible local Playwright-controlled browser without authenticated proxy launch.
+- Live snapshots are opt-in and Browser Automator screenshot steps require local user confirmation before upload.
+- Proxy testing is a Coming Soon placeholder.
+- Subscription payment processing is not implemented. Admins can assign tiers/status manually.
+- Advanced process detection is limited to safe process/window title detection. There is no memory reading, injection, session theft, or hidden automation.
 
 ## Database
 
-Schema and idempotent startup migrations live in `db/init.sql`. `AUTO_MIGRATE=true` runs the schema on startup.
+`db/init.sql` contains idempotent, non-destructive schema setup. Normal deployment should not require wiping or dropping data.
 
-Existing MVP columns are preserved. The v1 migration adds:
+Important tables and ownership:
 
 - `users`
-- `username`, `global_name`, `avatar`, and `email` Discord profile fields on users
-- `disabled_at` and `disabled_by_user_id` on users
-- `subscription_status` on users, defaulting new Discord users to `inactive`
-- `import_export_runs`
+- `accounts`
+- `proxies`
 - `user_settings`
-- `import_logs`
-- `export_logs`
+- `activity_logs`
 - `audit_logs`
-- `companion_devices`
-- `companion_sessions`
-- `companion_client_status`
+- `import_export_runs`
+- `workflows`, `workflow_steps`, `workflow_runs`, `workflow_run_events`
+- `companion_devices`, `companion_sessions`, `companion_jobs`, `companion_job_events`
+- `client_profiles`, `client_instances`, `client_instance_events`
+- `account_stats`
 - `live_snapshots`
-- `client_profiles`
-- `client_instances`
-- `client_instance_events`
-- `user_id` ownership columns on accounts, proxies, settings, and activity logs
-- `legacy_login`
-- `legacy_password_encrypted`
-- `email_password_encrypted`
-- `jagex_email_encrypted`
-- `jagex_name`
-- `first_name`
-- `last_name`
-- `birth_month`
-- `birth_day`
-- `birth_year`
-- `assigned_http_proxy_id`
-- `assigned_socks5_proxy_id`
-- `credential_status`
-- `upgrade_status`
-- `email_creation_status`
-- `exported_at`
-- `archived_at`
-- proxy `name`
-- proxy `max_accounts_per_proxy`
-- workflow tables: `workflows`, `workflow_steps`, `workflow_runs`, and `workflow_run_events`
-- companion job tables: `companion_jobs` and `companion_job_events`
+- `download_items`
+- `subscription_tiers`
+- `browser_task_usage`
+- `payment_settings`
 
-User roles are `user`, `staff`, or `admin`. Subscription statuses are `inactive`, `active`, `trial`, `expired`, and `banned`.
+User-owned tables include `user_id` and queries should scope normal user access by the logged-in internal user ID.
 
-No database reset should be required for normal upgrades.
+If old account/proxy/log rows have no `user_id`, startup migration logic preserves the rows and assigns them only through the documented ownership migration path. Do not reset the database to upgrade.
 
-If old rows have no `user_id`, they are assigned to the first admin user when one exists and no prior data owner exists yet. The app writes a setup warning to activity logs when this happens. Existing data is not deleted. If no admin exists yet, old unowned rows remain hidden from normal users until an admin is created.
+## Admin Access
 
-## Admin And Subscription Access
+New Discord users default to `role=user` and `subscription_status=inactive`.
 
-- New Discord users default to `role=user` and `subscription_status=inactive`.
-- Discord IDs listed in `ADMIN_DISCORD_IDS` are automatically set to admin and active on login.
-- Inactive or expired users see the private-build/subscription locked page and cannot view account, proxy, client, or log data.
-- Banned or disabled users also see the locked access page.
-- Active and trial users can access the dashboard.
-- Admin users bypass subscription gating.
-- Admins manage users at `/admin/users`.
-- Admin management pages live under `/admin`, `/admin/users`, `/admin/logs`, `/admin/system`, and `/admin/subscriptions`.
-- Admins still have their own personal workspace at Dashboard, Accounts, Proxies, Clients, Instances, Workflows, Local Jobs, Companion, Downloads, Logs, and Settings.
-- Admins can set role and subscription status, including `banned` to disable a user.
-- To make a Discord account admin directly in PostgreSQL:
+Any Discord ID in `ADMIN_DISCORD_IDS` becomes `role=admin` and `subscription_status=active` after login.
+
+Manual SQL fallback:
 
 ```sql
 UPDATE users
@@ -165,98 +140,62 @@ SET role = 'admin', subscription_status = 'active', updated_at = NOW()
 WHERE discord_id = 'YOUR_DISCORD_ID';
 ```
 
-## Import Formats
+Admins can edit role and subscription status at `/admin/users`.
 
-Default delimiter is `:`.
+## Local Development
 
-- `username:password`
-- `username:password:bank_pin`
-- `username:password:bank_pin:otp_secret`
-- `username:password:recovery_email:recovery_password`
-- `username:password:target_email:email_password:first_name:last_name:birth_date`
-- `jagex_email:jagex_password:legacy_login:legacy_password:otp_secret`
+Install web dependencies:
 
-The Accounts page import modal shows valid rows, duplicate rows, and invalid rows before committing. Passwords and OTP secrets are not written to logs.
+```bash
+npm install
+```
 
-## Export Formats
+Run smoke checks:
 
-- `username:password`
-- `username:password:bank_pin`
-- `username:password:bank_pin:otp_secret`
-- `username:password:recovery_email:recovery_password`
-- `jagex_email:jagex_password`
-- `legacy_login:legacy_password:jagex_email:jagex_password`
-- `full account export`
-- `custom` field order
+```bash
+npm run smoke
+```
 
-Selected accounts can be exported from the Accounts page. After export, accounts can be kept, archived, or permanently deleted only when the user selects delete, confirms the irreversible-delete checkbox, and types `DELETE`.
+Start the web app:
 
-## GS Account Manager Companion
+```bash
+npm start
+```
 
-GS Account Manager is a hosted web app, so it cannot directly launch a user's local Chrome with proxy flags or local browser profiles. GS Account Manager Companion is the planned Windows companion app that will run on the user's PC and connect to the user's Discord-authenticated workspace.
+Install GS Local App dependencies:
 
-Current web-side support:
+```bash
+cd companion
+npm install
+npm start
+```
 
-- Companion page at `/companion` with `/local-helper` kept as a compatibility redirect target
-- Clients page at `/clients` for user-scoped client launch profiles
-- Instances page at `/instances` for user-scoped reported local sessions and latest snapshot metadata
-- Local Jobs page at `/local-jobs` for queued/running/completed companion jobs and safe job events
-- Downloads page at `/downloads`
-- Windows download placeholder at `/downloads/helper/windows`
-- user-scoped companion device/session/status/snapshot tables
-- short-lived pairing code generation
-- hashed pairing-code storage
-- companion status cards, device rename/revoke controls, and screenshot opt-in controls
-- user setting to disable snapshots globally
-- workflow job queue APIs for paired companion devices
-- companion settings for proxy/browser-open behavior
-- assisted-fill command creators that create user-scoped helper commands only
-- masked proxy-mode summaries on Dashboard and Workflow
-- Electron companion skeleton in `companion/`
-- token-authenticated companion APIs for pairing, heartbeat, job polling, job status, client instance status, and opt-in snapshots
-- local Companion tabs for Pair Device, Status, Clients, Instances, Jobs, Controlled Browser, Settings, and Logs
-- Windows process/window detection using normal OS APIs only
-- local-only executable path storage and visible user-triggered launch support
+## Cleanup Notes
 
-Default Companion settings:
+The active UI surfaces are:
 
-- require helper for proxied browser actions: true
-- allow website-only normal browser open: true
-- warn before opening without helper/proxy: true
-- require confirmation before direct/no-proxy open: true
-- show proxy mode before opening page: true
-- enable assisted fill buttons: false
+- Dashboard: workspace overview.
+- Setup: onboarding wizard for paid local automation.
+- Accounts: account storage, account import, account export, stats refresh.
+- Proxies: proxy storage, proxy import, proxy export.
+- Browser Automator: automation definitions, queued jobs, visible Local App execution, manual pause handling, and safe event reporting.
+- Launch Profiles: local client launch profile foundation.
+- Live Sessions: detected local client sessions and account matching.
+- Local Jobs: local app queue visibility.
+- Client Monitor: pairing, devices, heartbeat/job/client status.
+- Downloads: GS Local App packaging status, browser runtime notes, setup guide, and client setup links.
+- Compatibility: clear matrix of working, partial, placeholder, and blocked automation support.
+- Logs: safe user activity logs.
+- Settings: user-specific settings.
+- Admin: admin-only platform, user, subscription, downloads, logs, and system health management.
 
-Implemented scaffold:
+Legacy duplicate pages for imports/exports, local helper, and the old singular workflow screen are retired behind redirects.
 
-- workflow templates for login form fill, account creation form fill, and generic multi-field form fill
-- visible-browser-only workflow job payloads
-- live run status/event pages
-- companion job fetch and status buttons
-- manual client status placeholder
+## Next Development Priorities
 
-Planned helper capabilities:
-
-- open Chrome locally with a selected proxy
-- use per-account browser profiles
-- show proxy/direct mode
-- receive user-click browser actions
-- later fill visible login/signup fields from selected records only after explicit user action
-
-The helper will not bypass CAPTCHA, Cloudflare, robot checks, phone verification, email verification, security checks, or 2FA. It will not run hidden background actions, unattended mass actions, automatic account creation, or sensitive form submission without explicit user confirmation.
-
-## Security Notes
-
-- Sensitive account fields are encrypted at rest.
-- Sensitive values are masked by default in list views.
-- Copy actions log the field name only, never the copied value.
-- Passwords, OTP secrets, OTP codes, proxy passwords, and encryption keys are not written to logs.
-- Discord client secrets are used only server-side.
-- Discord users are created with `subscription_status=inactive`; the optional emergency admin fallback is created as active.
-- User-specific records are filtered by the logged-in user's internal `user_id`.
-- Admins can view high-level logs across users; regular users only see their own logs.
-- `.env` is ignored and must not be committed.
-
-## Controlled Browser Foundation
-
-`src/browser-assist.js` is a disabled scaffold for future user-triggered form fill helpers. It does not automate website login, submit forms, create external accounts, bypass CAPTCHA, bypass Cloudflare, bypass security checks, or bypass 2FA.
+1. Package and test the Windows GS Local App installer.
+2. Add browser proxy launch support in GS Local App.
+3. Add production-quality live snapshot controls with clear opt-in behavior.
+4. Expand safe client detection and matching without injection or memory reads.
+5. Add real subscription/payment flow when ready.
+6. Add deeper integration tests for user isolation, admin-only actions, and local automation jobs.

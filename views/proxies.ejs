@@ -51,7 +51,7 @@
     <div class="actions">
       <button class="button primary" type="button" data-open-modal="proxy-import-modal">Open Import Proxies</button>
       <button class="button" type="button" data-open-modal="proxy-export-modal">Export Proxies</button>
-      <button class="button" type="button" disabled>Test Proxy Coming Soon</button>
+      <span class="tag">Proxy testing coming soon</span>
     </div>
   </article>
 </section>
@@ -69,8 +69,8 @@
       <button class="button" form="proxy-export-form" formaction="/proxies/bulk-status" name="status" value="working">Mark Working</button>
       <button class="button" form="proxy-export-form" formaction="/proxies/bulk-status" name="status" value="failed">Mark Failed</button>
       <button class="button" form="proxy-export-form" formaction="/proxies/bulk-status" name="status" value="unchecked">Mark Unchecked</button>
-      <button class="button" type="button" disabled>Assign to Accounts</button>
-      <button class="button" type="button" disabled>Test Proxy</button>
+      <span class="tag">Assign selected proxies from Accounts</span>
+      <span class="tag">Proxy testing coming soon</span>
     </div>
   <% } %>
   <table>

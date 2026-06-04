@@ -3,8 +3,8 @@
   <article class="panel helper-status-card">
     <div class="panel-head">
       <div>
-        <p class="eyebrow">GS Companion</p>
-        <h2>Device Management</h2>
+        <p class="eyebrow">GS Local App</p>
+        <h2>Connected Devices</h2>
       </div>
       <span class="status <%= helper.connected ? 'ready' : 'needs_review' %>"><%= helper.statusLabel %></span>
     </div>
@@ -13,14 +13,17 @@
       <p class="row-line"><span>Last seen</span><strong><%= helper.lastHeartbeat ? new Date(helper.lastHeartbeat).toLocaleString() : 'Never' %></strong></p>
       <p class="row-line"><span>Version</span><strong><%= helper.helperVersion %></strong></p>
       <p class="row-line"><span>Active jobs</span><strong><%= stats.active_jobs || 0 %></strong></p>
-      <p class="row-line"><span>Running instances</span><strong><%= stats.running_instances || 0 %></strong></p>
+      <p class="row-line"><span>Live sessions</span><strong><%= stats.running_instances || 0 %></strong></p>
       <p class="row-line"><span>Safe host/IP label</span><strong>Not collected</strong></p>
       <p class="row-line"><span>Token storage</span><strong><%= helper.tokenStatus %></strong></p>
     </div>
     <form method="post" action="/companion/pairing-code">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <button class="button primary">Pair New Device</button>
+      <button class="button primary" <%= access.gates.addDevice ? '' : 'disabled' %>>Pair Local App Device</button>
     </form>
+    <% if (!access.gates.addDevice) { %>
+      <p class="notice">Connected device limit reached for your tier.</p>
+    <% } %>
     <% if (pairingCode) { %>
       <div class="code-box">
         <span>Pairing code</span>
@@ -34,31 +37,69 @@
 
   <article class="panel download-card">
     <p class="eyebrow">Local App</p>
-    <h2>Windows Companion</h2>
-    <p class="muted">The companion connects only after you create a pairing code and enter it locally. It stores a device token locally and sends heartbeat/status placeholders.</p>
+    <h2>GS Local App</h2>
+    <p class="muted">GS Local App connects only after you create a pairing code and enter it locally. It stores a device token locally and sends heartbeat, client status, and job updates.</p>
     <div class="actions">
+      <a class="button primary" href="/setup">Setup Wizard</a>
       <a class="button" href="/downloads">Open Downloads</a>
-      <a class="button" href="/clients">Clients</a>
-      <a class="button" href="/instances">Instances</a>
+      <a class="button" href="/setup-guide">Setup Guide</a>
+      <a class="button" href="/clients">Launch Profiles</a>
+      <a class="button" href="/instances">Live Sessions</a>
       <a class="button" href="/local-jobs">Local Jobs</a>
       <span class="tag"><%= download.available ? `v${download.version}` : 'Coming soon' %></span>
     </div>
   </article>
 </section>
 
-<section class="metric-grid dashboard-metrics">
-  <article class="metric"><span>Connected Devices</span><strong><%= stats.connected_devices || 0 %></strong></article>
-  <article class="metric"><span>Active Jobs</span><strong><%= stats.active_jobs || 0 %></strong></article>
-  <article class="metric"><span>Running Instances</span><strong><%= stats.running_instances || 0 %></strong></article>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Automation Agent Flow</p>
+      <h2>How GS Local App powers paid automation</h2>
+    </div>
+    <a class="button small" href="/compatibility">Compatibility Matrix</a>
+  </div>
+  <div class="setup-steps compact">
+    <article class="panel mini-card"><div class="step-num">1</div><h2>Pair device</h2><p class="muted">Connect this PC to your Discord-owned workspace with a short-lived pairing code.</p></article>
+    <article class="panel mini-card"><div class="step-num">2</div><h2>Queue jobs</h2><p class="muted">Browser Automator, launch, detect, and snapshot requests are queued as Local Jobs.</p></article>
+    <article class="panel mini-card"><div class="step-num">3</div><h2>Run locally</h2><p class="muted">The Local App opens visible browsers or configured local clients on your PC.</p></article>
+    <article class="panel mini-card"><div class="step-num">4</div><h2>Pause safely</h2><p class="muted">CAPTCHA, 2FA, and verification steps require manual user completion.</p></article>
+    <article class="panel mini-card"><div class="step-num">5</div><h2>Report status</h2><p class="muted">Jobs, live sessions, screenshots, and events sync back without exposing secrets.</p></article>
+  </div>
 </section>
 
 <section class="panel">
   <div class="panel-head">
-    <h2>Active Devices</h2>
+    <div>
+      <p class="eyebrow">Feature Status</p>
+      <h2>Local App Foundation</h2>
+    </div>
+    <span class="tag">Manual safe automation</span>
+  </div>
+  <div class="checklist-grid">
+    <p class="row-line"><span>Device pairing</span><strong>Working</strong></p>
+    <p class="row-line"><span>Heartbeat and job queue</span><strong>Working</strong></p>
+    <p class="row-line"><span>Opt-in client detection</span><strong>Working starter</strong></p>
+    <p class="row-line"><span>Browser Automator jobs</span><strong>Foundation ready</strong></p>
+    <p class="row-line"><span>Live snapshots</span><strong>Placeholder</strong></p>
+    <p class="row-line"><span>Controlled field fill</span><strong>Coming Soon</strong></p>
+    <p class="row-line"><span>CAPTCHA or security bypass</span><strong>Never</strong></p>
+  </div>
+</section>
+
+<section class="metric-grid dashboard-metrics">
+  <article class="metric"><span>Connected Devices</span><strong><%= stats.connected_devices || 0 %></strong></article>
+  <article class="metric"><span>Active Jobs</span><strong><%= stats.active_jobs || 0 %></strong></article>
+  <article class="metric"><span>Live Sessions</span><strong><%= stats.running_instances || 0 %></strong></article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+  <h2>Local App Devices</h2>
     <span class="tag"><%= devices.length %> device(s)</span>
   </div>
   <table>
-    <thead><tr><th>Name</th><th>Status</th><th>Version</th><th>Last Seen</th><th>Screenshots</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Name</th><th>Status</th><th>Version</th><th>Last Seen</th><th>Capabilities</th><th>Screenshots</th><th>Actions</th></tr></thead>
     <tbody>
       <% devices.forEach(device => { %>
         <tr>
@@ -66,6 +107,12 @@
           <td><span class="status <%= device.status %>"><%= device.status %></span></td>
           <td><%= device.companion_version || 'Unknown' %></td>
           <td><%= device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : 'Never' %></td>
+          <td>
+            <span class="tag">Heartbeat</span>
+            <span class="tag">Jobs</span>
+            <span class="tag">Client status</span>
+            <span class="tag"><%= device.allow_screenshots ? 'Snapshots opt-in' : 'Snapshots off' %></span>
+          </td>
           <td><label class="check"><input form="device-<%= device.id %>" type="checkbox" name="allow_screenshots" value="yes" <%= device.allow_screenshots ? 'checked' : '' %>> Opt-in</label></td>
           <td>
             <form id="device-<%= device.id %>" method="post" action="/companion/devices/<%= device.id %>">
@@ -73,7 +120,7 @@
               <button class="button small">Save</button>
             </form>
             <% if (device.status !== 'revoked') { %>
-              <form method="post" action="/companion/devices/<%= device.id %>/revoke" data-confirm="Revoke this companion device?">
+              <form method="post" action="/companion/devices/<%= device.id %>/revoke" data-confirm="Revoke this connected device?">
                 <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                 <button class="button small danger">Revoke Device</button>
               </form>
@@ -83,7 +130,7 @@
           </td>
         </tr>
       <% }) %>
-      <% if (!devices.length) { %><tr><td colspan="6"><p class="muted">No companion devices paired yet.</p></td></tr><% } %>
+      <% if (!devices.length) { %><tr><td colspan="7"><p class="muted">No local app devices paired yet.</p></td></tr><% } %>
     </tbody>
   </table>
 </section>
@@ -94,18 +141,18 @@
     <a class="button small" href="/local-jobs">Open Local Jobs</a>
   </div>
   <table>
-    <thead><tr><th>Created</th><th>Workflow</th><th>Status</th><th>Device</th><th>Run</th></tr></thead>
+    <thead><tr><th>Created</th><th>Automation</th><th>Status</th><th>Device</th><th>Job</th></tr></thead>
     <tbody>
       <% jobs.forEach(job => { %>
         <tr>
           <td><%= new Date(job.created_at).toLocaleString() %></td>
-          <td><%= job.workflow_name || job.job_type %></td>
+          <td><strong><%= job.workflow_name || jobTypeLabel(job.job_type) %></strong><br><span class="muted"><%= job.job_type %></span></td>
           <td><span class="status <%= job.status %>"><%= job.status %></span></td>
           <td><%= job.companion_device_id || 'Any paired device' %></td>
           <td><% if (job.workflow_run_id) { %><a class="button small" href="/workflows/runs/<%= job.workflow_run_id %>">Live Status</a><% } %></td>
         </tr>
       <% }) %>
-      <% if (!jobs.length) { %><tr><td colspan="5"><p class="muted">No workflow jobs queued yet.</p></td></tr><% } %>
+      <% if (!jobs.length) { %><tr><td colspan="5"><p class="muted">No browser automation jobs queued yet.</p></td></tr><% } %>
     </tbody>
   </table>
 </section>
@@ -114,6 +161,14 @@
   <article class="panel">
     <p class="eyebrow">Live Status</p>
     <h2>Local Client Status</h2>
+    <% if (!helper.connected) { %>
+      <p class="notice">Download and pair GS Local App to monitor clients and run browser tasks.</p>
+      <div class="actions">
+        <a class="button primary" href="/downloads">Go to Downloads</a>
+        <a class="button" href="/companion">Pair Device</a>
+        <a class="button" href="/setup-guide">View Setup Guide</a>
+      </div>
+    <% } %>
     <% if (clientStatuses.length) { %>
       <table>
         <thead><tr><th>Device</th><th>Process</th><th>Window</th><th>Status</th><th>Last Seen</th></tr></thead>
@@ -130,9 +185,9 @@
         </tbody>
       </table>
     <% } else { %>
-      <p class="muted">No client status reported yet. Open Instances after pairing GS Companion.</p>
+      <p class="muted">No client status reported yet. Open Live Sessions after pairing GS Local App.</p>
     <% } %>
-    <div class="actions"><a class="button small" href="/instances">Open Instances</a></div>
+    <div class="actions"><a class="button small" href="/instances">Open Live Sessions</a></div>
   </article>
 
   <article class="panel">
@@ -151,12 +206,12 @@
 
 <section class="content-grid">
   <article class="panel">
-    <p class="eyebrow">Controlled Browser</p>
-    <h2>Safe Manual Fill Placeholder</h2>
-    <p class="muted">Planned actions require the user to choose an account and click Fill current page. The companion can fill visible username, password, or email fields only after explicit user action.</p>
+    <p class="eyebrow">Browser Automator</p>
+    <h2>Controlled browser automation</h2>
+    <p class="muted">Browser Automator is the main product direction. Jobs are queued from the website, run locally in a visible browser, and must pause when manual verification is required.</p>
     <div class="checklist-grid">
       <p class="row-line"><span>CAPTCHA bypass</span><strong>Never</strong></p>
-      <p class="row-line"><span>Automatic account creation</span><strong>Not implemented</strong></p>
+      <p class="row-line"><span>User-triggered field fill</span><strong>Planned</strong></p>
       <p class="row-line"><span>Auto-submit sensitive forms</span><strong>Disabled</strong></p>
       <p class="row-line"><span>2FA/security bypass</span><strong>Never</strong></p>
     </div>
@@ -167,7 +222,7 @@
     <h2>User-Triggered Browser Assist</h2>
     <ul class="helper-list">
       <li>Select account inside GS Account Manager.</li>
-      <li>Open controlled browser from the companion.</li>
+      <li>Open a visible automation browser from GS Local App.</li>
       <li>Click Fill current page to fill visible fields.</li>
       <li>If CAPTCHA or security checks appear, stop and complete them manually.</li>
       <li>User reviews the page and clicks submit themselves.</li>

@@ -28,9 +28,12 @@
       <label>Credential Status<select name="credential_status"><% credentialStatuses.forEach(s => { %><option value="<%= s %>" <%= account.credential_status === s ? 'selected' : '' %>><%= s %></option><% }) %></select></label>
       <label>Upgrade Status<select name="upgrade_status"><% workflowStatuses.forEach(s => { %><option value="<%= s %>" <%= account.upgrade_status === s ? 'selected' : '' %>><%= s %></option><% }) %></select></label>
       <label>Email Creation Status<select name="email_creation_status"><% workflowStatuses.forEach(s => { %><option value="<%= s %>" <%= account.email_creation_status === s ? 'selected' : '' %>><%= s %></option><% }) %></select></label>
-      <label>GP<input name="gp_amount" type="number" min="0" value="<%= account.gp_amount || 0 %>"></label>
+      <label>GP<input name="gp_amount" type="number" min="0" value="<%= (account.wealth_source && account.wealth_source !== 'unknown') || account.gp_amount ? account.gp_amount || 0 : '' %>" placeholder="Unknown"></label>
       <label>Plat<input name="platinum_amount" type="number" min="0" value="<%= account.platinum_amount || 0 %>"></label>
-      <label>Wealth<input name="wealth_amount" type="number" min="0" value="<%= account.wealth_amount || 0 %>"></label>
+      <label>Wealth<input name="wealth_amount" type="number" min="0" value="<%= (account.wealth_source && account.wealth_source !== 'unknown') || account.wealth_amount ? account.wealth_amount || 0 : '' %>" placeholder="Unknown"></label>
+      <label>Bank Value<input name="bank_value" type="number" min="0" value="<%= account.bank_value || '' %>" placeholder="Unknown"></label>
+      <label>Wealth Value<input name="wealth_value" type="number" min="0" value="<%= account.wealth_value || account.wealth_amount || '' %>" placeholder="Unknown"></label>
+      <label>Wealth Source<select name="wealth_source"><% wealthSources.forEach(source => { %><option value="<%= source %>" <%= (account.wealth_source || 'unknown') === source ? 'selected' : '' %>><%= source.replace(/_/g, ' ') %></option><% }) %></select></label>
       <label>Total Level<input name="total_level" type="number" min="0" value="<%= account.total_level || '' %>"></label>
       <label>Tags<input name="tags" value="<%= account.tags || '' %>" placeholder="comma,separated"></label>
       <label class="check"><input type="checkbox" name="completed_tutorial" value="yes" <%= account.completed_tutorial ? 'checked' : '' %>> Completed tutorial</label>

@@ -10,9 +10,15 @@ const path = require('path');
 const { parseAccountImport, parseProxyImport } = require('../src/parsers');
 const { currentTotp } = require('../src/otp');
 const { generatePassword } = require('../src/generators');
+const { parseHiscoreLite, estimateCombatLevel, fetchPublicStats } = require('../src/osrs-stats');
 
 const discordAuthSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'discord-auth.js'), 'utf8');
 assert(!discordAuthSource.includes('unowned_logs`,\n      [user.id]'));
+const browserAutomatorSource = fs.readFileSync(path.join(__dirname, '..', 'companion', 'src', 'browser-automator.js'), 'utf8');
+assert(browserAutomatorSource.includes('runBrowserAutomationJob'));
+assert(browserAutomatorSource.includes('manualCheckPatterns'));
+assert(browserAutomatorSource.includes('click_skipped_for_manual_submit'));
+assert(browserAutomatorSource.includes('bypass CAPTCHA, 2FA, email verification, phone verification, or security checks'));
 
 let requireAuth;
 let db;
@@ -74,6 +80,37 @@ const encryptionKey = Buffer.from(process.env.ENCRYPTION_KEY, 'base64');
 assert.strictEqual(encryptionKey.length, 32);
 assert.strictEqual(generatePassword(9).length, 9);
 
+const hiscoreFixture = [
+  '1,2277,4600000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000',
+  '1,99,200000000'
+].join('\n');
+const parsedStats = parseHiscoreLite(hiscoreFixture);
+assert.strictEqual(parsedStats.total_level, 2277);
+assert.strictEqual(parsedStats.attack, 99);
+assert.strictEqual(parsedStats.combat_level, estimateCombatLevel(parsedStats));
+
 function fakeResponse() {
   return {
     redirected: null,
@@ -119,6 +156,22 @@ async function healthCheckWorks() {
 }
 
 async function main() {
+  const successfulStats = await fetchPublicStats('Example', async () => ({
+    ok: true,
+    status: 200,
+    text: async () => hiscoreFixture
+  }));
+  assert.strictEqual(successfulStats.status, 'ok');
+  assert.strictEqual(successfulStats.display_name, 'Example');
+  assert.strictEqual(successfulStats.total_level, 2277);
+
+  const missingStats = await fetchPublicStats('Missing Name', async () => ({
+    ok: false,
+    status: 404,
+    text: async () => ''
+  }));
+  assert.strictEqual(missingStats.status, 'not_found');
+
   if (!fullServerChecksAvailable) {
     const serverSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'server.js'), 'utf8');
     assert(serverSource.includes("app.get('/healthz'"));
@@ -131,10 +184,18 @@ async function main() {
     assert(serverSource.includes("app.get('/admin/logs'"));
     assert(serverSource.includes("app.get('/admin/system'"));
     assert(serverSource.includes("app.get('/admin/subscriptions'"));
+    assert(serverSource.includes("app.get('/admin/downloads'"));
+    assert(serverSource.includes("app.get('/setup'"));
+    assert(serverSource.includes("app.get('/setup-guide'"));
+    assert(serverSource.includes("app.get('/compatibility'"));
     assert(serverSource.includes("app.get('/accounts'"));
     assert(serverSource.includes("app.get('/proxies'"));
     assert(serverSource.includes("app.get('/clients'"));
     assert(serverSource.includes("app.get('/instances'"));
+    assert(serverSource.includes("app.get('/instances/:id'"));
+    assert(serverSource.includes("app.post('/instances/:id/match'"));
+    assert(serverSource.includes("app.post('/instances/:id/unmatch'"));
+    assert(serverSource.includes("app.post('/instances/:id/refresh-stats'"));
     assert(serverSource.includes("app.get('/local-jobs'"));
     assert(serverSource.includes("app.get('/settings'"));
     assert(serverSource.includes("app.get('/logs'"));
@@ -143,6 +204,7 @@ async function main() {
     assert(serverSource.includes("app.get('/workflows'"));
     assert(serverSource.includes("app.post('/accounts/import'"));
     assert(serverSource.includes("app.post('/accounts/export'"));
+    assert(serverSource.includes("app.post('/accounts/:id/refresh-stats'"));
     assert(serverSource.includes("app.post('/accounts/bulk'"));
     assert(serverSource.includes("app.post('/proxies/import'"));
     assert(serverSource.includes("app.post('/proxies/export'"));
@@ -159,6 +221,15 @@ async function main() {
     assert(serverSource.includes("app.post('/api/companion/jobs/:id/status'"));
     assert(serverSource.includes('client_profiles'));
     assert(serverSource.includes('client_instances'));
+    assert(serverSource.includes('account_stats'));
+    assert(serverSource.includes('subscription_tiers'));
+    assert(serverSource.includes('download_items'));
+    assert(serverSource.includes('payment_settings'));
+    assert(serverSource.includes('browser_task_usage'));
+    assert(serverSource.includes('canRunBrowserTask'));
+    assert(serverSource.includes('setupStepsForWorkspace'));
+    assert(serverSource.includes('automationCompatibilityMatrix'));
+    assert(serverSource.includes('enable_local_client_detection'));
     assert(serverSource.includes('restrictLimitedUsers'));
     assert(serverSource.includes('requireNotBlocked'));
     assert(serverSource.includes('requireAdmin'));
@@ -180,9 +251,16 @@ async function main() {
   assert(routeExists('get', '/settings'));
   assert(routeExists('get', '/logs'));
   assert(routeExists('get', '/downloads'));
+  assert(routeExists('get', '/setup'));
+  assert(routeExists('get', '/setup-guide'));
+  assert(routeExists('get', '/compatibility'));
   assert(routeExists('get', '/companion'));
   assert(routeExists('get', '/clients'));
   assert(routeExists('get', '/instances'));
+  assert(routeExists('get', '/instances/:id'));
+  assert(routeExists('post', '/instances/:id/match'));
+  assert(routeExists('post', '/instances/:id/unmatch'));
+  assert(routeExists('post', '/instances/:id/refresh-stats'));
   assert(routeExists('get', '/local-jobs'));
   assert(routeExists('get', '/workflows'));
   assert(routeExists('get', '/admin'));
@@ -190,8 +268,15 @@ async function main() {
   assert(routeExists('get', '/admin/logs'));
   assert(routeExists('get', '/admin/system'));
   assert(routeExists('get', '/admin/subscriptions'));
+  assert(routeExists('get', '/admin/downloads'));
+  assert(routeExists('post', '/admin/downloads'));
+  assert(routeExists('post', '/admin/downloads/:id'));
+  assert(routeExists('post', '/admin/subscriptions/users/:id'));
+  assert(routeExists('post', '/admin/subscriptions/tiers/:id'));
+  assert(routeExists('post', '/admin/subscriptions/payment-settings/:id'));
   assert(routeExists('post', '/accounts/import'));
   assert(routeExists('post', '/accounts/export'));
+  assert(routeExists('post', '/accounts/:id/refresh-stats'));
   assert(routeExists('post', '/accounts/bulk'));
   assert(routeExists('post', '/proxies/import'));
   assert(routeExists('post', '/proxies/export'));
@@ -206,6 +291,51 @@ async function main() {
   assert(routeExists('get', '/api/companion/jobs/next'));
   assert(routeExists('get', '/api/companion/jobs/poll'));
   assert(routeExists('post', '/api/companion/jobs/:id/status'));
+
+  assert.strictEqual(testInternals.deriveClientState({ window_title: 'RuneLite Login Screen' }, true), 'idle');
+  assert.strictEqual(testInternals.deriveClientState({ client_state: 'in_game' }, true), 'active');
+  assert.strictEqual(testInternals.deriveClientState({ process_name: 'RuneLite', window_title: 'RuneLite' }, true), 'unknown');
+  assert.strictEqual(testInternals.deriveClientState({ process_name: 'RuneLite', running: false }, false), 'offline');
+  assert.strictEqual(testInternals.normalizeClientInstance({ process_name: 'RuneLite', window_title: 'RuneLite' }).current_activity, 'Detected / Unknown State');
+  const reportedWealth = testInternals.normalizeClientInstance({ client_state: 'in_game', gp_amount: 100, bank_value: 200, wealth_value: 300, wealth_source: 'client_reported' });
+  assert.strictEqual(reportedWealth.client_state, 'active');
+  assert.strictEqual(reportedWealth.reported_gp_amount, 100);
+  assert.strictEqual(reportedWealth.reported_bank_value, 200);
+  assert.strictEqual(reportedWealth.reported_wealth_value, 300);
+  assert.strictEqual(reportedWealth.wealth_source, 'client_reported');
+  assert.strictEqual(testInternals.formatWealthValue(null, 'unknown'), 'Unknown');
+  assert.strictEqual(testInternals.formatWealthValue(123456, 'companion_reported'), '123,456');
+  const starterTier = {
+    active: true,
+    max_devices: 1,
+    daily_successful_browser_task_limit: 50,
+    snapshots_enabled: false,
+    client_launcher_enabled: false,
+    browser_automator_enabled: true
+  };
+  const standardTier = { ...starterTier, max_devices: 2, snapshots_enabled: true, client_launcher_enabled: true, daily_successful_browser_task_limit: 200 };
+  const activeUser = { role: 'user', subscription_status: 'active' };
+  const inactiveUser = { role: 'user', subscription_status: 'inactive' };
+  const adminUser = { role: 'admin', subscription_status: 'inactive' };
+  assert.strictEqual(testInternals.canUseBrowserAutomator(activeUser, starterTier), true);
+  assert.strictEqual(testInternals.canUseClientMonitor(activeUser, starterTier), true);
+  assert.strictEqual(testInternals.canUseClientLauncher(activeUser, starterTier), false);
+  assert.strictEqual(testInternals.canUseClientLauncher(activeUser, standardTier), true);
+  assert.strictEqual(testInternals.canUseSnapshots(activeUser, starterTier), false);
+  assert.strictEqual(testInternals.canUseSnapshots(activeUser, standardTier), true);
+  assert.strictEqual(testInternals.canAddDevice(activeUser, starterTier, 0), true);
+  assert.strictEqual(testInternals.canAddDevice(activeUser, starterTier, 1), false);
+  assert.strictEqual(testInternals.canRunBrowserTask(activeUser, starterTier, { successful_count: 49 }), true);
+  assert.strictEqual(testInternals.canRunBrowserTask(activeUser, starterTier, { successful_count: 50 }), false);
+  assert.strictEqual(testInternals.canRunBrowserTask(inactiveUser, starterTier, { successful_count: 0 }), false);
+  assert.strictEqual(testInternals.canAddDevice(adminUser, starterTier, 99), true);
+  assert.strictEqual(testInternals.canRunBrowserTask(adminUser, starterTier, { successful_count: 9999 }), true);
+  assert.strictEqual(testInternals.isBrowserTaskJob('workflow_run'), true);
+  assert.strictEqual(testInternals.isBrowserTaskJob('launch_client'), false);
+  assert.strictEqual(testInternals.jobTypeLabel('workflow_run'), 'Browser Automator');
+  assert(testInternals.automationCompatibilityMatrix().some(item => item.name === 'GS Local App'));
+  const setupSteps = testInternals.setupStepsForWorkspace({ accounts: 1, devices: 1, connected_devices: 1, launch_profiles: 0 }, { connected: true }, { gates: { browserAutomator: true } });
+  assert(setupSteps.some(step => step.title === 'Build automation jobs'));
 
   const loginLayer = app._router.stack.find(layer => layer.route && layer.route.path === '/login');
   const loginRes = fakeResponse();

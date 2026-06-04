@@ -58,8 +58,8 @@
           <td>
             <%= item.account_count %> accounts<br>
             <span class="muted"><%= item.proxy_count %> proxies</span><br>
-            <span class="muted"><%= item.companion_count || 0 %> devices</span><br>
-            <span class="muted"><%= item.client_count || 0 %> clients</span>
+            <span class="muted"><%= item.companion_count || 0 %> local app devices</span><br>
+            <span class="muted"><%= item.client_count || 0 %> live sessions</span>
           </td>
           <td>
             <form id="user-<%= item.id %>" method="post" action="/admin/users/<%= item.id %>">

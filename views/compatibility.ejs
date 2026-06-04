@@ -1,0 +1,96 @@
+<%- include('partials/head') %>
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Automation Compatibility</p>
+      <h2>Compatibility Matrix</h2>
+    </div>
+    <div class="actions">
+      <a class="button" href="/setup">Setup Wizard</a>
+      <a class="button" href="/downloads">Downloads</a>
+      <a class="button primary" href="/workflows">Browser Automator</a>
+    </div>
+  </div>
+  <p class="muted">This matrix shows what GS Account Manager can safely manage today and what remains placeholder work. Automation runs through GS Local App on the user's PC, not hidden server-side sessions.</p>
+</section>
+
+<section class="metric-grid dashboard-metrics">
+  <article class="metric"><span>Local App</span><strong><%= helper.statusLabel %></strong></article>
+  <article class="metric"><span>Browser Automator</span><strong><%= access.gates.browserAutomator ? 'Enabled' : 'Locked' %></strong></article>
+  <article class="metric"><span>Snapshots</span><strong><%= settings.allow_companion_snapshots === 'true' ? 'Opt-in On' : 'Off' %></strong></article>
+  <article class="metric"><span>Client Detection</span><strong><%= settings.enable_local_client_detection === 'true' ? 'On' : 'Off' %></strong></article>
+  <article class="metric"><span>Daily Tasks</span><strong><%= access.usage.successful_count || 0 %> / <%= access.dailyTaskLimitLabel %></strong></article>
+  <article class="metric"><span>Devices</span><strong><%= access.deviceCount %></strong></article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Matrix</p>
+      <h2>Supported local tools and automation surfaces</h2>
+    </div>
+    <span class="tag">Safe local automation only</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Tool</th>
+        <th>Detection</th>
+        <th>Launch Profiles</th>
+        <th>Browser Automator</th>
+        <th>Live Sessions</th>
+        <th>Snapshots</th>
+        <th>Proxy Mode</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% matrix.forEach(item => { %>
+        <tr>
+          <td><strong><%= item.name %></strong><br><span class="muted"><%= item.type %></span></td>
+          <td><%= item.detection %></td>
+          <td><%= item.launchProfiles %></td>
+          <td><%= item.browserAutomator %></td>
+          <td><%= item.liveSessions %></td>
+          <td><%= item.snapshots %></td>
+          <td><%= item.proxyMode %></td>
+          <td><span class="status <%= item.status %>"><%= item.status %></span></td>
+        </tr>
+        <tr class="detail-row">
+          <td colspan="8"><span class="muted"><%= item.notes %></span></td>
+        </tr>
+      <% }) %>
+    </tbody>
+  </table>
+</section>
+
+<section class="content-grid">
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Automation that is in scope</h2>
+      <span class="status working">Allowed</span>
+    </div>
+    <div class="checklist-grid">
+      <p class="row-line"><span>Visible local browser jobs</span><strong>Yes</strong></p>
+      <p class="row-line"><span>User-triggered field fill</span><strong>Yes</strong></p>
+      <p class="row-line"><span>Local client launch jobs</span><strong>Yes</strong></p>
+      <p class="row-line"><span>Safe window/process status</span><strong>Yes</strong></p>
+      <p class="row-line"><span>Public OSRS stats sync</span><strong>Yes</strong></p>
+    </div>
+  </article>
+
+  <article class="panel">
+    <div class="panel-head">
+      <h2>Automation that is out of scope</h2>
+      <span class="status blocked">Blocked</span>
+    </div>
+    <div class="checklist-grid">
+      <p class="row-line"><span>CAPTCHA or security bypass</span><strong>Never</strong></p>
+      <p class="row-line"><span>Automatic 2FA/email/phone verification</span><strong>Never</strong></p>
+      <p class="row-line"><span>Hidden browser automation</span><strong>Never</strong></p>
+      <p class="row-line"><span>Game client injection or memory reads</span><strong>Never</strong></p>
+      <p class="row-line"><span>Session/cookie/token capture</span><strong>Never</strong></p>
+    </div>
+  </article>
+</section>
+<%- include('partials/foot') %>

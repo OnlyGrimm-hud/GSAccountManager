@@ -30,6 +30,12 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS discord_email TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_by_user_id BIGINT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_tier_id BIGINT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_started_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_expires_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS manually_paid_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_method TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_note TEXT;
 
 DO $$
 BEGIN
@@ -52,6 +58,125 @@ UPDATE users SET subscription_status = 'inactive' WHERE subscription_status IN (
 UPDATE users SET subscription_status = 'banned' WHERE subscription_status = 'suspended';
 UPDATE users SET subscription_status = 'inactive' WHERE subscription_status NOT IN ('active', 'inactive', 'trial', 'expired', 'banned');
 UPDATE users SET disabled_at = COALESCE(disabled_at, NOW()) WHERE subscription_status = 'banned';
+
+CREATE TABLE IF NOT EXISTS subscription_tiers (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  slug TEXT UNIQUE NOT NULL,
+  description TEXT,
+  max_devices INTEGER,
+  daily_successful_browser_task_limit INTEGER,
+  max_accounts INTEGER,
+  max_proxies INTEGER,
+  snapshots_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  client_launcher_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  browser_automator_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  price_label TEXT,
+  payment_notes TEXT,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO subscription_tiers (
+  name, slug, description, max_devices, daily_successful_browser_task_limit,
+  max_accounts, max_proxies, snapshots_enabled, client_launcher_enabled,
+  browser_automator_enabled, price_label, payment_notes, active, sort_order
+) VALUES
+  ('Starter', 'starter', 'Tier 1 starter plan for basic account/proxy storage, client monitor, and browser automator access.', 1, 50, NULL, NULL, FALSE, FALSE, TRUE, 'Tier 1', 'Payment setup coming soon.', TRUE, 10),
+  ('Standard', 'standard', 'Tier 2 plan with two local app devices, live session snapshots, and client launcher foundation.', 2, 200, NULL, NULL, TRUE, TRUE, TRUE, 'Tier 2', 'Payment setup coming soon.', TRUE, 20),
+  ('Pro', 'pro', 'Tier 3 plan with higher device, job, snapshot, and automator limits.', 5, 1000, NULL, NULL, TRUE, TRUE, TRUE, 'Tier 3', 'Payment setup coming soon.', TRUE, 30),
+  ('Admin / Owner', 'admin-owner', 'Unlimited admin/testing tier.', NULL, NULL, NULL, NULL, TRUE, TRUE, TRUE, 'Admin', 'Admin users bypass limits.', TRUE, 100)
+ON CONFLICT (slug) DO UPDATE SET
+  name=EXCLUDED.name,
+  description=EXCLUDED.description,
+  max_devices=EXCLUDED.max_devices,
+  daily_successful_browser_task_limit=EXCLUDED.daily_successful_browser_task_limit,
+  snapshots_enabled=EXCLUDED.snapshots_enabled,
+  client_launcher_enabled=EXCLUDED.client_launcher_enabled,
+  browser_automator_enabled=EXCLUDED.browser_automator_enabled,
+  price_label=EXCLUDED.price_label,
+  payment_notes=EXCLUDED.payment_notes,
+  active=EXCLUDED.active,
+  sort_order=EXCLUDED.sort_order,
+  updated_at=NOW();
+
+UPDATE users
+SET subscription_tier_id = (SELECT id FROM subscription_tiers WHERE slug='starter')
+WHERE subscription_tier_id IS NULL AND role <> 'admin';
+
+UPDATE users
+SET subscription_tier_id = (SELECT id FROM subscription_tiers WHERE slug='admin-owner')
+WHERE role = 'admin' AND subscription_tier_id IS NULL;
+
+CREATE TABLE IF NOT EXISTS browser_task_usage (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  date DATE NOT NULL,
+  successful_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS download_items (
+  id BIGSERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  slug TEXT UNIQUE NOT NULL,
+  category TEXT NOT NULL,
+  description TEXT,
+  version TEXT,
+  download_url TEXT,
+  status TEXT NOT NULL DEFAULT 'coming_soon',
+  public_notes TEXT,
+  admin_notes TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO download_items (title, slug, category, description, version, download_url, status, public_notes, admin_notes, sort_order) VALUES
+  ('GS Local App', 'gs-local-app', 'local_app', 'Connects this PC to GS Account Manager, opens browser automation sessions, monitors local clients, sends live status/snapshots, and launches configured clients.', '0.1.0', NULL, 'coming_soon', 'Installer packaging is coming soon. Pairing is available after the local app is installed.', 'Set download_url or package the EXE when ready.', 10),
+  ('Browser Runtime / Automation Browser', 'browser-runtime', 'browser_runtime', 'Required for browser automation tasks and controlled locally on the user PC by GS Local App.', NULL, NULL, 'coming_soon', 'GS Local App will install or manage the Playwright/Chromium browser runtime locally.', 'No server-side browser runtime is required on Render.', 20),
+  ('RuneLite', 'runelite', 'client_tool', 'Optional RuneLite setup link for users who want to monitor or launch RuneLite locally.', NULL, 'https://runelite.net/', 'available', 'Install from the official RuneLite website. GS does not redistribute this installer.', 'Third-party link only; do not bundle.', 30),
+  ('Jagex Launcher', 'jagex-launcher', 'client_tool', 'Optional Jagex Launcher setup link.', NULL, 'https://www.jagex.com/en-GB/launcher', 'available', 'Install from the official Jagex website. GS does not redistribute this installer.', 'Third-party link only; do not bundle.', 40),
+  ('Official Client', 'official-client', 'client_tool', 'Optional official OSRS client setup link.', NULL, 'https://oldschool.runescape.com/', 'available', 'Use the official Old School RuneScape website for client setup.', 'Third-party link only; do not bundle.', 50),
+  ('DreamBot', 'dreambot', 'client_tool', 'Optional DreamBot setup link for local client detection/launch profile configuration.', NULL, 'https://dreambot.org/', 'available', 'Install from DreamBot directly if you use it locally. GS does not redistribute this installer.', 'Third-party link only; do not bundle.', 60),
+  ('Custom Client', 'custom-client', 'client_tool', 'Custom local client path configured by the user in GS Local App settings.', NULL, NULL, 'coming_soon', 'Add custom executable paths inside GS Local App settings.', 'Local paths are stored locally, not on the website.', 70),
+  ('Setup Guide', 'setup-guide', 'guide', 'Local App setup, pairing, client profile, and safety guide.', NULL, NULL, 'coming_soon', 'Setup guide content is being prepared.', 'Add documentation URL when ready.', 80)
+ON CONFLICT (slug) DO UPDATE SET
+  title=EXCLUDED.title,
+  category=EXCLUDED.category,
+  description=EXCLUDED.description,
+  version=COALESCE(download_items.version, EXCLUDED.version),
+  download_url=COALESCE(download_items.download_url, EXCLUDED.download_url),
+  status=download_items.status,
+  public_notes=EXCLUDED.public_notes,
+  admin_notes=EXCLUDED.admin_notes,
+  sort_order=EXCLUDED.sort_order,
+  updated_at=NOW();
+
+CREATE TABLE IF NOT EXISTS payment_settings (
+  id BIGSERIAL PRIMARY KEY,
+  method TEXT UNIQUE NOT NULL,
+  address_encrypted TEXT,
+  enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  public_label TEXT,
+  instructions TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO payment_settings (method, enabled, public_label, instructions) VALUES
+  ('LTC', FALSE, 'Litecoin', 'Payment setup coming soon.'),
+  ('BTC', FALSE, 'Bitcoin', 'Payment setup coming soon.'),
+  ('ETH', FALSE, 'Ethereum', 'Payment setup coming soon.')
+ON CONFLICT (method) DO UPDATE SET
+  public_label=EXCLUDED.public_label,
+  instructions=COALESCE(payment_settings.instructions, EXCLUDED.instructions),
+  updated_at=NOW();
 
 CREATE TABLE IF NOT EXISTS proxies (
   id BIGSERIAL PRIMARY KEY,
@@ -489,6 +614,61 @@ UPDATE live_snapshots SET mime_type = content_type WHERE mime_type IS NULL AND c
 UPDATE live_snapshots SET file_size = image_size WHERE file_size IS NULL AND image_size IS NOT NULL;
 
 ALTER TABLE client_profiles ADD COLUMN IF NOT EXISTS default_account_id BIGINT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS combat_level INTEGER;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_stats_sync_at TIMESTAMPTZ;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS stats_sync_status TEXT NOT NULL DEFAULT 'never';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS stats_sync_error TEXT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS bank_value BIGINT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS wealth_value BIGINT;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS wealth_source TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS wealth_updated_at TIMESTAMPTZ;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS client_state TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS client_last_seen_at TIMESTAMPTZ;
+ALTER TABLE client_instances ADD COLUMN IF NOT EXISTS detected_at TIMESTAMPTZ;
+ALTER TABLE client_instances ADD COLUMN IF NOT EXISTS match_confidence TEXT;
+ALTER TABLE client_instances ADD COLUMN IF NOT EXISTS match_reason TEXT;
+ALTER TABLE client_instances ADD COLUMN IF NOT EXISTS suggested_account_id BIGINT;
+ALTER TABLE client_instances ADD COLUMN IF NOT EXISTS client_state TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE client_instances ADD COLUMN IF NOT EXISTS reported_display_name TEXT;
+ALTER TABLE client_instances ADD COLUMN IF NOT EXISTS reported_gp_amount BIGINT;
+ALTER TABLE client_instances ADD COLUMN IF NOT EXISTS reported_bank_value BIGINT;
+ALTER TABLE client_instances ADD COLUMN IF NOT EXISTS reported_wealth_value BIGINT;
+ALTER TABLE client_instances ADD COLUMN IF NOT EXISTS wealth_source TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE client_instances ADD COLUMN IF NOT EXISTS wealth_updated_at TIMESTAMPTZ;
+
+UPDATE accounts
+SET wealth_value = wealth_amount,
+    wealth_source = CASE WHEN wealth_source = 'unknown' THEN 'manual' ELSE wealth_source END,
+    wealth_updated_at = COALESCE(wealth_updated_at, updated_at)
+WHERE wealth_amount > 0 AND (wealth_value IS NULL OR wealth_value = 0);
+
+UPDATE accounts
+SET wealth_source = CASE WHEN wealth_source = 'unknown' THEN 'manual' ELSE wealth_source END,
+    wealth_updated_at = COALESCE(wealth_updated_at, updated_at)
+WHERE gp_amount > 0 AND wealth_updated_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS account_stats (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL,
+  account_id BIGINT NOT NULL,
+  display_name TEXT NOT NULL,
+  total_level INTEGER,
+  combat_level INTEGER,
+  attack INTEGER,
+  strength INTEGER,
+  defence INTEGER,
+  ranged INTEGER,
+  prayer INTEGER,
+  magic INTEGER,
+  hitpoints INTEGER,
+  total_xp BIGINT,
+  other_skills JSONB NOT NULL DEFAULT '{}'::jsonb,
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  source TEXT NOT NULL DEFAULT 'osrs_hiscores',
+  status TEXT NOT NULL DEFAULT 'ok',
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE IF NOT EXISTS workflows (
   id BIGSERIAL PRIMARY KEY,
@@ -609,6 +789,21 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'companion_jobs_job_type_check') THEN
     ALTER TABLE companion_jobs DROP CONSTRAINT companion_jobs_job_type_check;
   END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'account_stats_status_check') THEN
+    ALTER TABLE account_stats DROP CONSTRAINT account_stats_status_check;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'accounts_wealth_source_check') THEN
+    ALTER TABLE accounts DROP CONSTRAINT accounts_wealth_source_check;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'accounts_client_state_check') THEN
+    ALTER TABLE accounts DROP CONSTRAINT accounts_client_state_check;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instances_client_state_check') THEN
+    ALTER TABLE client_instances DROP CONSTRAINT client_instances_client_state_check;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instances_wealth_source_check') THEN
+    ALTER TABLE client_instances DROP CONSTRAINT client_instances_wealth_source_check;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check') THEN
     ALTER TABLE users
       ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'staff', 'admin'));
@@ -637,6 +832,30 @@ BEGIN
     ALTER TABLE companion_jobs
       ADD CONSTRAINT companion_jobs_job_type_check CHECK (job_type IN ('workflow_run', 'run_workflow', 'launch_client', 'stop_client', 'detect_clients', 'request_snapshot', 'open_browser', 'fill_visible_fields', 'pause_workflow', 'resume_workflow', 'cancel_workflow'));
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'account_stats_status_check') THEN
+    ALTER TABLE account_stats
+      ADD CONSTRAINT account_stats_status_check CHECK (status IN ('ok', 'not_found', 'failed'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'account_stats_user_account_unique') THEN
+    ALTER TABLE account_stats
+      ADD CONSTRAINT account_stats_user_account_unique UNIQUE (user_id, account_id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'accounts_wealth_source_check') THEN
+    ALTER TABLE accounts
+      ADD CONSTRAINT accounts_wealth_source_check CHECK (wealth_source IN ('manual', 'companion_reported', 'client_reported', 'unknown'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'accounts_client_state_check') THEN
+    ALTER TABLE accounts
+      ADD CONSTRAINT accounts_client_state_check CHECK (client_state IN ('active', 'idle', 'offline', 'unknown', 'error'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instances_client_state_check') THEN
+    ALTER TABLE client_instances
+      ADD CONSTRAINT client_instances_client_state_check CHECK (client_state IN ('active', 'idle', 'offline', 'unknown', 'error'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instances_wealth_source_check') THEN
+    ALTER TABLE client_instances
+      ADD CONSTRAINT client_instances_wealth_source_check CHECK (wealth_source IN ('manual', 'companion_reported', 'client_reported', 'unknown'));
+  END IF;
 END $$;
 
 INSERT INTO settings (key, value)
@@ -660,6 +879,10 @@ FROM (VALUES
   ('screenshot_interval_seconds', '30'),
   ('companion_heartbeat_interval_seconds', '30'),
   ('client_detection_process_names', 'RuneLite,JagexLauncher,Jagex Launcher,osclient,DreamBot'),
+  ('enable_local_client_detection', 'false'),
+  ('auto_sync_stats_on_client_detected', 'false'),
+  ('stats_refresh_cooldown_minutes', '30'),
+  ('custom_client_process_names', 'RuneLite,JagexLauncher,Jagex Launcher,osclient,DreamBot'),
   ('client_snapshot_retention_hours', '24'),
   ('client_launcher_requires_confirmation', 'true'),
   ('default_browser_type', 'chromium'),
@@ -689,6 +912,13 @@ WHERE NOT EXISTS (
 CREATE INDEX IF NOT EXISTS idx_users_discord_id ON users(discord_id);
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_subscription_status ON users(subscription_status);
+CREATE INDEX IF NOT EXISTS idx_users_subscription_tier ON users(subscription_tier_id);
+CREATE INDEX IF NOT EXISTS idx_subscription_tiers_slug ON subscription_tiers(slug);
+CREATE INDEX IF NOT EXISTS idx_subscription_tiers_active ON subscription_tiers(active, sort_order);
+CREATE INDEX IF NOT EXISTS idx_browser_task_usage_user_date ON browser_task_usage(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_download_items_category ON download_items(category, sort_order);
+CREATE INDEX IF NOT EXISTS idx_download_items_status ON download_items(status);
+CREATE INDEX IF NOT EXISTS idx_payment_settings_method ON payment_settings(method);
 CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(status);
 CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(account_type);
@@ -700,6 +930,10 @@ CREATE INDEX IF NOT EXISTS idx_accounts_exported_at ON accounts(exported_at);
 CREATE INDEX IF NOT EXISTS idx_accounts_archived_at ON accounts(archived_at);
 CREATE INDEX IF NOT EXISTS idx_accounts_character_type ON accounts(character_type);
 CREATE INDEX IF NOT EXISTS idx_accounts_total_level ON accounts(user_id, total_level);
+CREATE INDEX IF NOT EXISTS idx_accounts_combat_level ON accounts(user_id, combat_level);
+CREATE INDEX IF NOT EXISTS idx_accounts_stats_sync ON accounts(user_id, last_stats_sync_at DESC);
+CREATE INDEX IF NOT EXISTS idx_accounts_client_state ON accounts(user_id, client_state);
+CREATE INDEX IF NOT EXISTS idx_accounts_client_last_seen ON accounts(user_id, client_last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_accounts_completed_tutorial ON accounts(user_id, completed_tutorial);
 CREATE INDEX IF NOT EXISTS idx_proxies_user ON proxies(user_id);
 CREATE INDEX IF NOT EXISTS idx_proxies_status ON proxies(status);
@@ -727,8 +961,13 @@ CREATE INDEX IF NOT EXISTS idx_client_instances_user ON client_instances(user_id
 CREATE INDEX IF NOT EXISTS idx_client_instances_device ON client_instances(companion_device_id);
 CREATE INDEX IF NOT EXISTS idx_client_instances_status ON client_instances(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_client_instances_last_seen ON client_instances(user_id, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_client_instances_client_state ON client_instances(user_id, client_state);
+CREATE INDEX IF NOT EXISTS idx_client_instances_suggested_account ON client_instances(suggested_account_id);
 CREATE INDEX IF NOT EXISTS idx_client_instance_events_user ON client_instance_events(user_id);
 CREATE INDEX IF NOT EXISTS idx_client_instance_events_instance ON client_instance_events(client_instance_id);
+CREATE INDEX IF NOT EXISTS idx_account_stats_user ON account_stats(user_id);
+CREATE INDEX IF NOT EXISTS idx_account_stats_account ON account_stats(account_id);
+CREATE INDEX IF NOT EXISTS idx_account_stats_fetched ON account_stats(user_id, fetched_at DESC);
 CREATE INDEX IF NOT EXISTS idx_workflows_user ON workflows(user_id);
 CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
 CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id);
@@ -774,6 +1013,16 @@ BEGIN
     ALTER TABLE users
       ADD CONSTRAINT users_disabled_by_user_id_fkey
       FOREIGN KEY (disabled_by_user_id) REFERENCES users(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_subscription_tier_id_fkey') THEN
+    ALTER TABLE users
+      ADD CONSTRAINT users_subscription_tier_id_fkey
+      FOREIGN KEY (subscription_tier_id) REFERENCES subscription_tiers(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'browser_task_usage_user_id_fkey') THEN
+    ALTER TABLE browser_task_usage
+      ADD CONSTRAINT browser_task_usage_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'import_export_runs_user_id_fkey') THEN
     ALTER TABLE import_export_runs
@@ -915,6 +1164,11 @@ BEGIN
       ADD CONSTRAINT client_instances_proxy_id_fkey
       FOREIGN KEY (proxy_id) REFERENCES proxies(id) ON DELETE SET NULL;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instances_suggested_account_id_fkey') THEN
+    ALTER TABLE client_instances
+      ADD CONSTRAINT client_instances_suggested_account_id_fkey
+      FOREIGN KEY (suggested_account_id) REFERENCES accounts(id) ON DELETE SET NULL;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_instance_events_user_id_fkey') THEN
     ALTER TABLE client_instance_events
       ADD CONSTRAINT client_instance_events_user_id_fkey
@@ -924,6 +1178,16 @@ BEGIN
     ALTER TABLE client_instance_events
       ADD CONSTRAINT client_instance_events_instance_id_fkey
       FOREIGN KEY (client_instance_id) REFERENCES client_instances(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'account_stats_user_id_fkey') THEN
+    ALTER TABLE account_stats
+      ADD CONSTRAINT account_stats_user_id_fkey
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'account_stats_account_id_fkey') THEN
+    ALTER TABLE account_stats
+      ADD CONSTRAINT account_stats_account_id_fkey
+      FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'workflows_user_id_fkey') THEN
     ALTER TABLE workflows

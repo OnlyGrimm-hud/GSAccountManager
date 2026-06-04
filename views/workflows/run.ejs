@@ -1,20 +1,20 @@
 <%- include('../partials/head') %>
 <section class="workflow-hero">
   <div>
-    <p class="eyebrow">Live Run Status</p>
-    <h2><%= run.workflow_name || 'Workflow run' %></h2>
-    <p class="muted">Companion job <%= run.companion_job_id || 'not queued' %> is <%= run.companion_job_status || run.status %>.</p>
+    <p class="eyebrow">Job Status</p>
+    <h2><%= run.workflow_name || 'Browser automation job' %></h2>
+    <p class="muted">Local App job <%= run.companion_job_id || 'not queued' %> is <%= run.companion_job_status || run.status %>.</p>
   </div>
   <span class="status <%= run.status %>"><%= run.status %></span>
 </section>
 
 <section class="content-grid">
   <article class="panel">
-    <h2>Run Details</h2>
+    <h2>Job Details</h2>
     <div class="checklist-grid">
       <p class="row-line"><span>Account</span><strong><%= run.account_display_name || run.account_legacy_login || run.account_username || 'None' %></strong></p>
       <p class="row-line"><span>Proxy</span><strong><%= run.proxy_host ? `${run.proxy_name || ''} ${run.proxy_type || ''} ${run.proxy_host}:${run.proxy_port}` : 'Account/default or direct' %></strong></p>
-      <p class="row-line"><span>Device</span><strong><%= run.companion_device_name || 'Any paired device' %></strong></p>
+      <p class="row-line"><span>Local App Device</span><strong><%= run.companion_device_name || 'Any paired device' %></strong></p>
       <p class="row-line"><span>Created</span><strong><%= new Date(run.created_at).toLocaleString() %></strong></p>
       <p class="row-line"><span>Started</span><strong><%= run.started_at ? new Date(run.started_at).toLocaleString() : 'Not started' %></strong></p>
       <p class="row-line"><span>Completed</span><strong><%= run.completed_at ? new Date(run.completed_at).toLocaleString() : 'Not completed' %></strong></p>
@@ -24,9 +24,9 @@
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
         <button class="button">Continue After Manual Check</button>
       </form>
-      <form method="post" action="/workflows/runs/<%= run.id %>/cancel" data-confirm="Cancel this workflow run?">
+      <form method="post" action="/workflows/runs/<%= run.id %>/cancel" data-confirm="Cancel this browser automation job?">
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-        <button class="button danger">Cancel Run</button>
+        <button class="button danger">Cancel Job</button>
       </form>
     </div>
   </article>
@@ -46,7 +46,7 @@
 
 <section class="content-grid">
   <article class="panel">
-    <h2>Workflow Events</h2>
+    <h2>Automation Events</h2>
     <table>
       <thead><tr><th>Time</th><th>Type</th><th>Message</th></tr></thead>
       <tbody>
@@ -55,7 +55,7 @@
     </table>
   </article>
   <article class="panel">
-    <h2>Companion Events</h2>
+    <h2>Local App Events</h2>
     <table>
       <thead><tr><th>Time</th><th>Type</th><th>Message</th></tr></thead>
       <tbody>
