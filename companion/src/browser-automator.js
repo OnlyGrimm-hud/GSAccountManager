@@ -157,7 +157,7 @@ async function clickConfiguredElement(ctx, page, config) {
 
 async function captureUserApprovedScreenshot(ctx, page, config) {
   if (!ctx.allowScreenshots) {
-    await postJobEvent(ctx, 'screenshot_skipped', 'Screenshot step skipped because screenshots are disabled in Local App settings.');
+    await postJobEvent(ctx, 'screenshot_skipped', 'Screenshot step skipped because screenshots are disabled in GS Agent settings.');
     return;
   }
   const choice = await showMessage(ctx.ownerWindow, {
@@ -181,7 +181,7 @@ async function captureUserApprovedScreenshot(ctx, page, config) {
       content_type: 'image/jpeg',
       client_instance_id: ctx.job.client_instance_id || null,
       account_id: ctx.job.account_id || null,
-      window_title: await page.title().catch(() => config.window_title || 'Automation Browser')
+      window_title: await page.title().catch(() => config.window_title || 'GS Browser Automator')
     }
   });
   await postJobEvent(ctx, 'screenshot_uploaded', 'User-approved browser screenshot uploaded.', {
@@ -195,7 +195,7 @@ async function pauseIfManualCheckDetected(ctx, page) {
   await pauseForUser(
     ctx,
     page,
-    `Manual verification or security check detected (${detected}). Complete it manually in the visible browser. The Local App will not solve or bypass it.`,
+    `Manual verification or security check detected (${detected}). Complete it manually in the visible browser. GS Browser Automator will not solve or bypass it.`,
     'manual_check_detected'
   );
 }
@@ -210,7 +210,7 @@ async function pauseForUser(ctx, page, message, reason) {
     defaultId: 0,
     cancelId: 1,
     message: 'Manual action required',
-    detail: `${message}\n\nDo not use GS Local App to bypass CAPTCHA, 2FA, email verification, phone verification, or security checks.`
+    detail: `${message}\n\nDo not use GS Browser Automator to bypass CAPTCHA, 2FA, email verification, phone verification, or security checks.`
   });
   if (choice.response !== 0) throw new Error('User stopped job during manual pause.');
   await postJobStatus(ctx, 'running', 'User continued after manual step.', { reason });

@@ -1,6 +1,6 @@
 # GS Account Manager
 
-GS Account Manager is a Render-ready Node/Express app for Discord-authenticated account storage, proxy storage, admin management, subscription gating, and a safe GS Local App foundation.
+GS Account Manager is a Render-ready Node/Express app for Discord-authenticated account storage, proxy storage, admin management, subscription gating, and a safe GS Agent foundation.
 
 The product is intentionally manual-workflow-only. It does not solve or bypass CAPTCHA, 2FA, email verification, phone verification, security checks, Cloudflare checks, or account creation protections. Browser and local app work must stay visible, user-triggered, and safe.
 
@@ -16,7 +16,7 @@ GSAccountManager/
   public/css/app.css           Web app styling
   public/js/app.js             Browser-side modal/import helpers
   scripts/smoke.js             Local smoke checks
-  companion/                   Electron GS Local App skeleton
+  companion/                   Electron GS Agent app
   WORKING_CHECKPOINT.md        Stable deployment checkpoint notes
 ```
 
@@ -74,16 +74,17 @@ Discord redirect URLs:
 - Masked sensitive values in list views.
 - Copy endpoints that return sensitive fields only on user action.
 - `/healthz` public health check.
-- Browser Automator definitions, job records, job events, local job queue foundation, and visible Playwright execution in GS Local App.
+- Browser Automator definitions, job records, job events, local job queue foundation, and visible Playwright execution in GS Browser Automator.
 - Browser Automator supports `open_url`, `wait_for_selector`, `fill_field`, `click`, `screenshot`, `pause_for_user`, `wait_for_user_continue`, `mark_complete`, `fail`, and `note` steps.
-- GS Local App uses Playwright Chromium when installed and falls back to system Microsoft Edge or Chrome when the Playwright browser runtime is not installed yet.
+- GS Browser Automator uses Playwright Chromium when installed and falls back to system Microsoft Edge or Chrome when the Playwright browser runtime is not installed yet.
 - Automation-first setup wizard at `/setup`.
 - Local automation setup guide at `/setup-guide`.
-- Compatibility matrix at `/compatibility` for GS Local App, Automation Browser, RuneLite, Jagex Launcher, Official Client, DreamBot, and custom local clients.
-- GS Local App pairing codes, connected device records, heartbeats, revoke/rename controls, and token-authenticated local app APIs.
-- GS Local App starter app with pairing, heartbeat, job polling, opt-in client detection, and local status reporting.
+- Compatibility matrix at `/compatibility` for GS Agent, GS Browser Automator, RuneLite, Jagex Launcher, Official Client, DreamBot, and custom local clients.
+- GS Agent pairing codes, connected device records, heartbeats, revoke/rename controls, and token-authenticated local app APIs.
+- One-time GS Agent pairing: a stable local install ID lets the same PC refresh its device token without consuming another subscription device slot.
+- GS Agent app with pairing, heartbeat, job polling, opt-in client detection, and local status reporting.
 - Launch Profiles and Live Sessions pages for user-scoped launch profiles, detected sessions, matching, and public OSRS hiscore stats sync.
-- Downloads page with GS Local App, browser runtime, setup guide, and configurable third-party client setup cards.
+- Downloads page with GS Agent, browser runtime, setup guide, and configurable third-party client setup cards.
 - Admin Downloads Manager at `/admin/downloads`.
 - Subscription tier foundation with Starter, Standard, Pro, and Admin/Owner tiers.
 - Admin subscription assignment at `/admin/subscriptions`.
@@ -92,7 +93,7 @@ Discord redirect URLs:
 
 ## Placeholders And Coming Soon
 
-- Windows GS Local App packaged download is still a packaging placeholder unless `companion/dist/GS Local App Setup.exe` exists. The app also supports the previous installer filename as a fallback.
+- Windows GS Agent packaged download is still a packaging placeholder unless `companion/dist/GS Agent Setup.exe` exists. The app also supports `GS Local App Setup.exe` and the previous companion installer filename as fallbacks.
 - Browser proxy launch is not production-enabled yet. Browser jobs currently open a visible local Playwright-controlled browser without authenticated proxy launch.
 - Live snapshots are opt-in and Browser Automator screenshot steps require local user confirmation before upload.
 - Proxy testing is a Coming Soon placeholder.
@@ -162,7 +163,7 @@ Start the web app:
 npm start
 ```
 
-Install GS Local App dependencies:
+Install GS Agent dependencies:
 
 ```bash
 cd companion
@@ -178,12 +179,12 @@ The active UI surfaces are:
 - Setup: onboarding wizard for paid local automation.
 - Accounts: account storage, account import, account export, stats refresh.
 - Proxies: proxy storage, proxy import, proxy export.
-- Browser Automator: automation definitions, queued jobs, visible Local App execution, manual pause handling, and safe event reporting.
+- Browser Automator: automation definitions, queued jobs, visible GS Browser Automator execution, manual pause handling, and safe event reporting.
 - Launch Profiles: local client launch profile foundation.
 - Live Sessions: detected local client sessions and account matching.
 - Local Jobs: local app queue visibility.
 - Client Monitor: pairing, devices, heartbeat/job/client status.
-- Downloads: GS Local App packaging status, browser runtime notes, setup guide, and client setup links.
+- Downloads: GS Agent packaging status, browser runtime notes, setup guide, and client setup links.
 - Compatibility: clear matrix of working, partial, placeholder, and blocked automation support.
 - Logs: safe user activity logs.
 - Settings: user-specific settings.
@@ -193,8 +194,8 @@ Legacy duplicate pages for imports/exports, local helper, and the old singular w
 
 ## Next Development Priorities
 
-1. Package and test the Windows GS Local App installer.
-2. Add browser proxy launch support in GS Local App.
+1. Package and test the Windows GS Agent installer.
+2. Add browser proxy launch support in GS Browser Automator.
 3. Add production-quality live snapshot controls with clear opt-in behavior.
 4. Expand safe client detection and matching without injection or memory reads.
 5. Add real subscription/payment flow when ready.

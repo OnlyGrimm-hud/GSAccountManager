@@ -138,14 +138,14 @@ CREATE TABLE IF NOT EXISTS download_items (
 );
 
 INSERT INTO download_items (title, slug, category, description, version, download_url, status, public_notes, admin_notes, sort_order) VALUES
-  ('GS Local App', 'gs-local-app', 'local_app', 'Connects this PC to GS Account Manager, opens browser automation sessions, monitors local clients, sends live status/snapshots, and launches configured clients.', '0.1.0', NULL, 'coming_soon', 'Installer packaging is coming soon. Pairing is available after the local app is installed.', 'Set download_url or package the EXE when ready.', 10),
-  ('Browser Runtime / Automation Browser', 'browser-runtime', 'browser_runtime', 'Required for browser automation tasks and controlled locally on the user PC by GS Local App.', NULL, NULL, 'coming_soon', 'GS Local App will install or manage the Playwright/Chromium browser runtime locally.', 'No server-side browser runtime is required on Render.', 20),
+  ('GS Agent', 'gs-local-app', 'local_app', 'Connects this PC to GS Account Manager, launches configured clients, monitors local status, sends live updates, and runs GS Browser Automator jobs.', '0.1.0', NULL, 'coming_soon', 'Installer packaging is coming soon. Pairing is available after GS Agent is installed.', 'Set download_url or package the EXE when ready.', 10),
+  ('Browser Runtime / GS Browser Automator', 'browser-runtime', 'browser_runtime', 'Required for browser automation tasks and controlled locally on the user PC by GS Agent.', NULL, NULL, 'coming_soon', 'GS Agent will install or manage the Playwright/Chromium browser runtime locally.', 'No server-side browser runtime is required on Render.', 20),
   ('RuneLite', 'runelite', 'client_tool', 'Optional RuneLite setup link for users who want to monitor or launch RuneLite locally.', NULL, 'https://runelite.net/', 'available', 'Install from the official RuneLite website. GS does not redistribute this installer.', 'Third-party link only; do not bundle.', 30),
   ('Jagex Launcher', 'jagex-launcher', 'client_tool', 'Optional Jagex Launcher setup link.', NULL, 'https://www.jagex.com/en-GB/launcher', 'available', 'Install from the official Jagex website. GS does not redistribute this installer.', 'Third-party link only; do not bundle.', 40),
   ('Official Client', 'official-client', 'client_tool', 'Optional official OSRS client setup link.', NULL, 'https://oldschool.runescape.com/', 'available', 'Use the official Old School RuneScape website for client setup.', 'Third-party link only; do not bundle.', 50),
   ('DreamBot', 'dreambot', 'client_tool', 'Optional DreamBot setup link for local client detection/launch profile configuration.', NULL, 'https://dreambot.org/', 'available', 'Install from DreamBot directly if you use it locally. GS does not redistribute this installer.', 'Third-party link only; do not bundle.', 60),
-  ('Custom Client', 'custom-client', 'client_tool', 'Custom local client path configured by the user in GS Local App settings.', NULL, NULL, 'coming_soon', 'Add custom executable paths inside GS Local App settings.', 'Local paths are stored locally, not on the website.', 70),
-  ('Setup Guide', 'setup-guide', 'guide', 'Local App setup, pairing, client profile, and safety guide.', NULL, NULL, 'coming_soon', 'Setup guide content is being prepared.', 'Add documentation URL when ready.', 80)
+  ('Custom Client', 'custom-client', 'client_tool', 'Custom local client path configured by the user in GS Agent settings.', NULL, NULL, 'coming_soon', 'Add custom executable paths inside GS Agent settings.', 'Local paths are stored locally, not on the website.', 70),
+  ('Setup Guide', 'setup-guide', 'guide', 'GS Agent setup, pairing, client profile, and safety guide.', NULL, NULL, 'coming_soon', 'Setup guide content is being prepared.', 'Add documentation URL when ready.', 80)
 ON CONFLICT (slug) DO UPDATE SET
   title=EXCLUDED.title,
   category=EXCLUDED.category,
@@ -304,9 +304,13 @@ CREATE TABLE IF NOT EXISTS companion_devices (
   user_id BIGINT NOT NULL,
   device_name TEXT,
   device_token_hash TEXT NOT NULL,
+  device_install_id_hash TEXT,
+  device_role TEXT NOT NULL DEFAULT 'agent_browser',
   companion_version TEXT,
   status TEXT NOT NULL DEFAULT 'disconnected',
   allow_screenshots BOOLEAN NOT NULL DEFAULT FALSE,
+  paired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  trusted_until_at TIMESTAMPTZ,
   last_seen_at TIMESTAMPTZ,
   revoked_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -420,6 +424,13 @@ ALTER TABLE companion_devices
 ALTER TABLE companion_sessions
   ADD CONSTRAINT companion_sessions_browser_status_check CHECK (browser_status IN ('idle', 'opening', 'running', 'paused', 'closed', 'error'));
 
+ALTER TABLE companion_devices ADD COLUMN IF NOT EXISTS device_install_id_hash TEXT;
+ALTER TABLE companion_devices ADD COLUMN IF NOT EXISTS device_role TEXT NOT NULL DEFAULT 'agent_browser';
+ALTER TABLE companion_devices ADD COLUMN IF NOT EXISTS paired_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE companion_devices ADD COLUMN IF NOT EXISTS trusted_until_at TIMESTAMPTZ;
+UPDATE companion_devices SET device_role='agent_browser' WHERE device_role IS NULL OR device_role = '';
+UPDATE companion_devices SET paired_at=created_at WHERE paired_at IS NULL;
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'accounts_proxy_id_fkey') THEN
@@ -509,9 +520,13 @@ CREATE TABLE IF NOT EXISTS companion_devices (
   user_id BIGINT NOT NULL,
   device_name TEXT,
   device_token_hash TEXT NOT NULL,
+  device_install_id_hash TEXT,
+  device_role TEXT NOT NULL DEFAULT 'agent_browser',
   companion_version TEXT,
   status TEXT NOT NULL DEFAULT 'disconnected',
   allow_screenshots BOOLEAN NOT NULL DEFAULT FALSE,
+  paired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  trusted_until_at TIMESTAMPTZ,
   last_seen_at TIMESTAMPTZ,
   revoked_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -950,6 +965,9 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_user_id);
 CREATE INDEX IF NOT EXISTS idx_companion_devices_user ON companion_devices(user_id);
 CREATE INDEX IF NOT EXISTS idx_companion_devices_status ON companion_devices(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_companion_devices_install_hash
+  ON companion_devices(user_id, device_install_id_hash)
+  WHERE device_install_id_hash IS NOT NULL AND status <> 'revoked';
 CREATE INDEX IF NOT EXISTS idx_companion_sessions_user ON companion_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_companion_client_status_user ON companion_client_status(user_id);
 CREATE INDEX IF NOT EXISTS idx_live_snapshots_user ON live_snapshots(user_id);

@@ -12,10 +12,10 @@
       <a class="button" href="/companion">Client Monitor</a>
     </div>
   </div>
-  <% if (query.launch_job) { %><p class="notice">Launch job queued: <%= query.launch_job %>. Open GS Local App to accept it from Local Jobs.</p><% } %>
-  <% if (!helper.connected) { %><p class="notice">Connect GS Local App before launching local clients.</p><% } %>
+  <% if (query.launch_job) { %><p class="notice">Launch job queued: <%= query.launch_job %>. Open GS Agent to accept it from Local Jobs.</p><% } %>
+  <% if (!helper.connected) { %><p class="notice">Connect GS Agent before launching local clients.</p><% } %>
   <% if (!canLaunchClients) { %><p class="notice">Client Launcher is not available on your current tier. Upgrade access is required before launch profile actions can run.</p><% } %>
-  <p class="muted">A launch profile is a user-configured client starter. The website stores safe metadata; machine-specific executable paths stay in GS Local App.</p>
+  <p class="muted">A launch profile is a user-configured client starter. The website stores safe metadata; machine-specific executable paths stay in GS Agent.</p>
 </section>
 
 <section class="metric-grid dashboard-metrics">
@@ -44,23 +44,23 @@
     <label>Default automation<select name="default_workflow_id"><option value="">No default automation</option><% workflows.forEach(workflow => { %><option value="<%= workflow.id %>"><%= workflow.name %></option><% }) %></select></label>
     <label>Launch args template<textarea name="launch_args" placeholder="Optional user-provided launch args. Do not include secrets."></textarea></label>
     <label>Notes<textarea name="notes" placeholder="Local reminder for this launch profile"></textarea></label>
-    <p class="notice">Launching is visible and user-triggered through GS Local App. This does not add gameplay scripts, injection, hidden automation, or security bypass behavior.</p>
+    <p class="notice">Launching is visible and user-triggered through GS Agent. This does not add gameplay scripts, injection, hidden automation, or security bypass behavior.</p>
   </form>
 
   <article class="panel">
     <div class="panel-head">
       <div>
-        <p class="eyebrow">Local App Required</p>
+        <p class="eyebrow">GS Agent Required</p>
         <h2>Local Executable Paths</h2>
       </div>
       <a class="button small" href="/downloads">Download</a>
     </div>
-    <p class="muted">Set executable paths inside GS Local App. Keeping local paths off the website avoids leaking PC-specific details and keeps launches user-controlled.</p>
+    <p class="muted">Set executable paths inside GS Agent. Keeping local paths off the website avoids leaking PC-specific details and keeps launches user-controlled.</p>
     <div class="checklist-grid">
       <p class="row-line"><span>Visible launch</span><strong>Required</strong></p>
       <p class="row-line"><span>Client injection</span><strong>Never</strong></p>
       <p class="row-line"><span>Gameplay scripting</span><strong>Not included</strong></p>
-      <p class="row-line"><span>Proxy launch</span><strong>Local App placeholder</strong></p>
+      <p class="row-line"><span>Proxy launch</span><strong>GS Agent placeholder</strong></p>
     </div>
   </article>
 </section>
@@ -109,7 +109,7 @@
           </td>
         </tr>
       <% }) %>
-      <% if (!profiles.length) { %><tr><td colspan="6"><p class="muted">Create a launch profile, then configure its executable path locally in GS Local App.</p></td></tr><% } %>
+      <% if (!profiles.length) { %><tr><td colspan="6"><p class="muted">Create a launch profile, then configure its executable path locally in GS Agent.</p></td></tr><% } %>
     </tbody>
   </table>
 </section>

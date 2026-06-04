@@ -13,10 +13,10 @@
       <a class="button" href="/companion">Client Monitor</a>
     </div>
   </div>
-  <% if (query.snapshot_job) { %><p class="notice">Snapshot job queued: <%= query.snapshot_job %>. Screenshots require opt-in on the website and GS Local App.</p><% } %>
+  <% if (query.snapshot_job) { %><p class="notice">Snapshot job queued: <%= query.snapshot_job %>. Screenshots require opt-in on the website and GS Agent.</p><% } %>
   <% if (query.stats_sync) { %><p class="notice">Stats sync <%= query.stats_sync %>.</p><% } %>
-  <% if (!helper.connected) { %><p class="notice">Connect GS Local App to detect local client windows or report live sessions.</p><% } %>
-  <% if (settings.enable_local_client_detection !== 'true') { %><p class="notice">Local client detection is off. Enable it in Settings before publishing detected windows from GS Local App.</p><% } %>
+  <% if (!helper.connected) { %><p class="notice">Connect GS Agent to detect local client windows or report live sessions.</p><% } %>
+  <% if (settings.enable_local_client_detection !== 'true') { %><p class="notice">Local client detection is off. Enable it in Settings before publishing detected windows from GS Agent.</p><% } %>
   <% if (settings.allow_companion_snapshots === 'true' && !(access && access.gates && access.gates.snapshots)) { %><p class="notice">Live session snapshots are not available on your current tier.</p><% } %>
   <p class="muted">Live Sessions are user-reported local client sessions. GS Account Manager does not inject into clients, read memory, run gameplay scripts, or bypass security checks.</p>
 </section>
@@ -30,7 +30,7 @@
     <a class="button small" href="/compatibility">Compatibility Matrix</a>
   </div>
   <div class="status-lane">
-    <span><strong class="status active">Active</strong><br><small>In-game or running state reported by Local App</small></span>
+    <span><strong class="status active">Active</strong><br><small>In-game or running state reported by GS Agent</small></span>
     <span><strong class="status idle">Idle</strong><br><small>Login screen, waiting screen, or manual state</small></span>
     <span><strong class="status unknown">Unknown</strong><br><small>Process detected but state is not known</small></span>
     <span><strong class="status offline">Offline</strong><br><small>Client closed or heartbeat is stale</small></span>
@@ -58,7 +58,7 @@
     <span class="tag"><%= instances.length %> session(s)</span>
   </div>
   <table>
-    <thead><tr><th>Client / Profile</th><th>Matched Account</th><th>Suggested Match</th><th>Proxy</th><th>Local App</th><th>Client State</th><th>Window</th><th>Stats</th><th>Wealth</th><th>Last Update</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Client / Profile</th><th>Matched Account</th><th>Suggested Match</th><th>Proxy</th><th>GS Agent</th><th>Client State</th><th>Window</th><th>Stats</th><th>Wealth</th><th>Last Update</th><th>Actions</th></tr></thead>
     <tbody>
       <% instances.forEach(instance => { %>
         <% const rowClientState = clientStateFromRow(instance); %>
@@ -83,7 +83,7 @@
               <span class="tag">No proxy</span>
             <% } %>
           </td>
-          <td><%= instance.device_name || 'Local App' %></td>
+          <td><%= instance.device_name || 'GS Agent' %></td>
           <td>
             <span class="status <%= clientStateClass(rowClientState) %>"><%= clientStateLabel(rowClientState) %></span><br>
             <span class="muted"><%= instance.current_activity || 'Detected / Unknown State' %></span>
@@ -134,9 +134,9 @@
         </tr>
       <% }) %>
       <% if (!instances.length) { %><tr><td colspan="11">
-        <p class="muted">No live sessions yet. Pair GS Local App, enable local detection if needed, then launch a profile or run Detect Local Clients.</p>
+        <p class="muted">No live sessions yet. Pair GS Agent, enable local detection if needed, then launch a profile or run Detect Local Clients.</p>
         <div class="actions">
-          <a class="button small" href="/downloads">Download Local App</a>
+          <a class="button small" href="/downloads">Download GS Agent</a>
           <a class="button small" href="/companion">Pair Device</a>
           <a class="button small" href="/clients">Launch Profiles</a>
           <a class="button small" href="/setup-guide">Setup Guide</a>

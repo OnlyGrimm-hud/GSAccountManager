@@ -1,14 +1,20 @@
-# GS Local App
+# GS Agent
 
-Local Windows app skeleton for GS Account Manager.
+Local Windows app for GS Account Manager. It currently ships as one install with two clear modules:
+
+- **GS Agent** for client launching, client monitoring, pairing, heartbeat, and local status.
+- **GS Browser Automator** for visible, user-triggered Playwright browser jobs.
+
+The app pairs each PC once. The device token stays stored locally until the user revokes the device, clears local app data, or moves to another computer. Re-pairing the same install refreshes the same device slot; a different install/computer counts against the user's subscription device limit.
 
 Current status:
 
 - Electron shell
 - pairing UI
 - safe local app API pairing request
+- stable local install ID for one-time pairing and same-install re-pairing
 - local device token storage
-- heartbeat placeholder
+- heartbeat support
 - job polling and job status reporting
 - visible Browser Automator execution through Playwright Chromium
 - browser runtime fallback to system Microsoft Edge or Chrome when Playwright Chromium is not installed
@@ -51,4 +57,4 @@ npm run build
 npm run package
 ```
 
-The packaged Windows artifact is planned as `GS Local App Setup.exe`.
+The packaged Windows artifact is planned as `GS Agent Setup.exe`.

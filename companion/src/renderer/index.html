@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GS Local App</title>
+  <title>GS Agent</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,28 +11,29 @@
     <section class="hero">
       <div class="logo">GS</div>
       <div>
-        <p class="eyebrow">Local App</p>
-        <h1>GS Local App</h1>
-        <p>Pair this app with your Discord-authenticated GS Account Manager workspace.</p>
+        <p class="eyebrow">GS Agent + Browser Automator</p>
+        <h1>GS Agent</h1>
+        <p>Pair this PC once, then launch client tools and browser automation from your Discord-authenticated GS workspace.</p>
       </div>
     </section>
 
     <nav class="tabs" aria-label="Local app tabs">
-      <button class="active" data-tab-button="pair">Pair Device</button>
+      <button class="active" data-tab-button="pair">Pair Once</button>
       <button data-tab-button="status">Status</button>
-      <button data-tab-button="clients">Clients</button>
+      <button data-tab-button="clients">GS Agent</button>
       <button data-tab-button="instances">Live Sessions</button>
       <button data-tab-button="jobs">Jobs</button>
-      <button data-tab-button="browser">Browser Automator</button>
+      <button data-tab-button="browser">GS Browser Automator</button>
       <button data-tab-button="settings">Settings</button>
       <button data-tab-button="logs">Logs</button>
     </nav>
 
     <section class="panel" data-tab-panel="pair">
-      <h2>Pair Device</h2>
+      <h2>Pair This PC Once</h2>
+      <p>Pairing stores a long-lived device token locally. You should not need to pair again unless you revoke this device, clear local app data, or move to another computer.</p>
       <label>Website URL <input id="baseUrl" value="https://gsaccountmanager.com"></label>
       <label>Pairing Code <input id="pairingCode" placeholder="GS-XXXXXXXX"></label>
-      <button id="pairButton">Pair Local App</button>
+      <button id="pairButton">Pair GS Agent</button>
       <pre id="pairOutput">Not paired.</pre>
     </section>
 
@@ -41,15 +42,16 @@
       <div class="status-grid">
         <p><span>Website</span><strong id="statusBaseUrl">Not configured</strong></p>
         <p><span>Device token</span><strong id="statusToken">Not paired</strong></p>
+        <p><span>Install ID</span><strong id="statusInstallId">Not generated</strong></p>
         <p><span>Heartbeat</span><strong id="statusHeartbeat">Not sent</strong></p>
       </div>
-      <button id="heartbeatButton">Send Heartbeat Placeholder</button>
-      <p>Jobs come from GS Account Manager automations and must run in a visible browser. Security checks pause for manual completion.</p>
+      <button id="heartbeatButton">Send Heartbeat</button>
+      <p>GS Agent starts and monitors local client tools. GS Browser Automator runs visible browser jobs. Both use the same paired device slot.</p>
     </section>
 
     <section class="panel" data-tab-panel="clients" hidden>
-      <h2>Clients</h2>
-      <p>Client detection enumerates normal Windows process names and window titles only. It does not inject, hook, read memory, or control clients.</p>
+      <h2>GS Agent</h2>
+      <p>GS Agent launches configured client tools and reports safe local status. Detection enumerates normal Windows process names and window titles only. It does not inject, hook, read memory, run gameplay scripts, or control clients.</p>
       <label><input id="enableLocalDetection" type="checkbox"> Enable local client detection on this PC</label>
       <label>Allowed process/window names <input id="processNames" value="RuneLite,Jagex Launcher,JagexLauncher,osclient,DreamBot"></label>
       <div class="actions">
@@ -96,7 +98,7 @@
         <button id="fetchJobButton">Fetch Next Job</button>
         <button id="runBrowserJobButton">Run Browser Automator Job</button>
         <button id="runLaunchJobButton">Run Current Launch Job</button>
-        <button id="closeBrowserButton">Close Automation Browser</button>
+        <button id="closeBrowserButton">Close GS Browser Automator</button>
         <button id="markRunningButton">Mark Running</button>
         <button id="markWaitingButton">Pause For Manual Check</button>
         <button id="markCompleteButton">Mark Complete</button>
@@ -107,8 +109,8 @@
 
     <section class="panel" data-tab-panel="settings" hidden>
       <h2>Settings</h2>
-      <p>Executable paths are local to this PC and are stored only in GS Local App. Launching is user-triggered and visible.</p>
-      <label>Device Name <input id="deviceName" value="Windows Local App"></label>
+      <p>Executable paths are local to this PC and are stored only in GS Agent. Launching is user-triggered and visible.</p>
+      <label>Device Name <input id="deviceName" value="GS Agent"></label>
       <label>Profile name <input id="localProfileName" placeholder="RuneLite main"></label>
       <label>Executable path <input id="localExecutablePath" placeholder="C:\\Path\\To\\Client.exe"></label>
       <label>Launch arguments <input id="localLaunchArgs" placeholder="Optional user-provided args"></label>
@@ -124,11 +126,11 @@
     </section>
 
     <section class="panel" data-tab-panel="browser" hidden>
-      <h2>Browser Automator</h2>
+      <h2>GS Browser Automator</h2>
       <p>Run queued Browser Automator jobs in a visible local Chromium window. Jobs can open pages, wait for fields, fill configured visible fields, click safe non-submit controls, request screenshots, and pause for manual verification.</p>
       <div class="actions">
         <button id="runBrowserJobButton2">Run Current Browser Job</button>
-        <button id="closeBrowserButton2">Close Automation Browser</button>
+        <button id="closeBrowserButton2">Close GS Browser Automator</button>
         <button id="fetchJobButton2">Fetch Next Job</button>
       </div>
       <pre id="browserOutput">No browser automation job running.</pre>
@@ -137,7 +139,7 @@
 
     <section class="panel" data-tab-panel="logs" hidden>
       <h2>Logs</h2>
-      <pre id="logsOutput">Local App started.</pre>
+      <pre id="logsOutput">GS Agent started.</pre>
     </section>
 
     <section class="panel">

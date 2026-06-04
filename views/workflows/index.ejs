@@ -30,15 +30,15 @@
 
   <article class="panel">
     <p class="eyebrow">Safe Automation Boundary</p>
-    <h2>Visible Local App Jobs Only</h2>
-    <p class="muted">Automation jobs are queued for GS Local App. The browser must be visible, and CAPTCHA, 2FA, email verification, phone verification, and security checks must pause for manual completion.</p>
+    <h2>Visible GS Browser Automator Jobs Only</h2>
+    <p class="muted">Automation jobs are queued for GS Browser Automator. The browser must be visible, and CAPTCHA, 2FA, email verification, phone verification, and security checks must pause for manual completion.</p>
     <div class="checklist-grid">
       <p class="row-line"><span>Connected devices</span><strong><%= devices.length %></strong></p>
       <p class="row-line"><span>Available accounts</span><strong><%= accounts.length %></strong></p>
       <p class="row-line"><span>Available proxies</span><strong><%= proxies.length %></strong></p>
       <p class="row-line"><span>Successful tasks today</span><strong><%= access.usage.successful_count || 0 %> / <%= access.dailyTaskLimitLabel %></strong></p>
     </div>
-    <% if (!helper.connected) { %><p class="notice">Browser Automator requires GS Local App.</p><% } %>
+    <% if (!helper.connected) { %><p class="notice">Browser Automator requires GS Agent.</p><% } %>
     <% if (!access.gates.browserAutomator) { %><p class="notice">Browser Automator is not available on your current tier.</p><% } %>
     <% if (!access.gates.runBrowserTask) { %><p class="notice">Daily browser task limit reached for your tier.</p><% } %>
   </article>

@@ -171,15 +171,15 @@ If old records have no `user_id`, they are assigned to the first admin user when
 - Accounts: list, filters, add/edit account page, masked secrets with reveal/copy controls.
 - Accounts Import / Export: built into the Accounts page.
 - Proxies: proxy storage, proxy import/export, assignment counts, auto-assign request, private proxy credentials.
-- Browser Automator: automation definitions, run history, local app job handoff, and visible Playwright execution through GS Local App.
-- Setup Wizard: automation-first onboarding for Local App pairing, imports, launch profiles, jobs, and live sessions.
+- Browser Automator: automation definitions, run history, local app job handoff, and visible Playwright execution through GS Browser Automator.
+- Setup Wizard: automation-first onboarding for GS Agent one-time pairing, imports, launch profiles, jobs, and live sessions.
 - Setup Guide: local automation setup docs and safe operating boundaries.
-- Compatibility: matrix for GS Local App, Automation Browser, RuneLite, Jagex Launcher, Official Client, DreamBot, and custom local clients.
+- Compatibility: matrix for GS Agent, GS Browser Automator, RuneLite, Jagex Launcher, Official Client, DreamBot, and custom local clients.
 - Launch Profiles: local client launch profile foundation.
 - Live Sessions: user-scoped detected client sessions, account matching, public OSRS stats sync, and status summaries.
 - Local Jobs: local app queue visibility.
 - Client Monitor: pairing-code generation, connected device management, heartbeat/job/client status foundation, and clear Working/Placeholder/Coming Soon status.
-- Downloads: GS Local App packaging status, browser runtime notes, setup guide, and configurable client setup links.
+- Downloads: GS Agent packaging status, browser runtime notes, setup guide, and configurable client setup links.
 - Settings: user settings, URL settings, local app settings, Render checklist, production checklist, app version.
 - Logs: activity log list with filters.
 - Admin: dashboard, users, subscriptions, downloads manager, platform logs, and system health.
@@ -193,8 +193,9 @@ If old records have no `user_id`, they are assigned to the first admin user when
 - Logged-in UI flows still need manual browser testing with real admin credentials after each deploy.
 - No automated end-to-end browser test suite exists yet.
 - Emergency admin fallback is optional and creates its own isolated workspace.
-- Browser Automator job records, Local App handoff, visible Chromium execution, field fill, safe clicks, screenshots, and manual pauses are implemented in GS Local App.
-- Windows GS Local App packaging is scaffolded but not built yet.
+- Browser Automator job records, GS Agent handoff, visible Chromium execution, field fill, safe clicks, screenshots, and manual pauses are implemented in GS Browser Automator.
+- Windows GS Agent packaging is scaffolded but not built yet.
+- GS Agent one-time pairing is implemented with a stable local install ID. Re-pairing the same install refreshes the same device slot; a different install/computer counts against the user's subscription device limit.
 - Live snapshots are opt-in and Browser Automator screenshot steps require local user confirmation before upload.
 - Browser proxy launch support is not production-enabled yet.
 - Proxy testing is a Coming Soon placeholder.
@@ -212,10 +213,10 @@ Allowed:
 - generate/display OTP codes from stored OTP secrets
 - copy fields only when the user clicks a button
 - open configured external pages in a new tab
-- queue visible local browser automation jobs through GS Local App
-- fill visible browser fields only after user action through GS Local App
+- queue visible local browser automation jobs through GS Browser Automator
+- fill visible browser fields only after user action through GS Browser Automator
 - pause for CAPTCHA, 2FA, email verification, phone verification, Cloudflare, and security checks
-- launch configured local clients through user-triggered Local App jobs
+- launch configured local clients through user-triggered GS Agent jobs
 - detect local windows/process names without injection or memory reads
 - track manual workflow progress and status
 - mark accounts as upgraded, skipped, blocked, exported, or archived

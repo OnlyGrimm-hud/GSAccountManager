@@ -113,7 +113,7 @@ const companionLimiter = rateLimit({
   limit: 120,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many Local App API requests.' }
+  message: { error: 'Too many GS Agent API requests.' }
 });
 
 app.get('/login', (req, res) => {
@@ -167,7 +167,11 @@ app.post('/login', loginLimiter, async (req, res, next) => {
 app.post('/api/companion/pair/complete', companionLimiter, async (req, res, next) => {
   try {
     const code = escapeText(req.body.code).toUpperCase();
-    const deviceName = escapeText(req.body.device_name || req.body.deviceName || 'GS Local App');
+    const deviceName = escapeText(req.body.device_name || req.body.deviceName || 'GS Agent');
+    const companionVersion = escapeText(req.body.companion_version || req.body.version);
+    const deviceInstallId = escapeText(req.body.device_install_id || req.body.install_id || req.body.installId);
+    const deviceInstallHash = deviceInstallId ? hashDeviceInstallId(deviceInstallId) : null;
+    const deviceRole = oneOf(req.body.device_role || req.body.deviceRole, ['agent_browser', 'agent', 'browser'], 'agent_browser');
     if (!code) return res.status(400).json({ error: 'Pairing code is required.' });
     const codeHash = hashPairingCode(code);
     const pair = await db.query(
@@ -180,37 +184,85 @@ app.post('/api/companion/pair/complete', companionLimiter, async (req, res, next
     );
     if (!pair.rows[0]) return res.status(404).json({ error: 'Pairing code is invalid or expired.' });
     if (!await userIdHasFullAccess(pair.rows[0].user_id)) {
-      return res.status(403).json({ error: 'Local App pairing requires active access.' });
+      return res.status(403).json({ error: 'GS Agent pairing requires active access.' });
     }
     const owner = await db.query('SELECT * FROM users WHERE id=$1', [pair.rows[0].user_id]);
     const ownerAccess = await accessSummaryForUser(owner.rows[0]);
-    if (!ownerAccess.gates.addDevice) {
+    let existingDevice = null;
+    if (deviceInstallHash) {
+      const existing = await db.query(
+        `SELECT id
+         FROM companion_devices
+         WHERE user_id=$1 AND device_install_id_hash=$2 AND status <> 'revoked'
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+        [pair.rows[0].user_id, deviceInstallHash]
+      );
+      existingDevice = existing.rows[0] || null;
+    }
+    if (!existingDevice && !ownerAccess.gates.addDevice) {
       return res.status(403).json({ error: 'Connected device limit reached for this subscription tier.' });
     }
     const token = crypto.randomBytes(32).toString('base64url');
     const tokenHash = hashDeviceToken(token);
-    const result = await db.query(
-      `INSERT INTO companion_devices (user_id, device_name, device_token_hash, companion_version, status, last_seen_at, updated_at)
-       VALUES ($1, $2, $3, $4, 'connected', NOW(), NOW())
-       RETURNING id, device_name, status, created_at`,
-      [pair.rows[0].user_id, deviceName, tokenHash, escapeText(req.body.companion_version || req.body.version)]
-    );
+    const result = existingDevice
+      ? await db.query(
+        `UPDATE companion_devices
+         SET device_name=$1,
+             device_token_hash=$2,
+             companion_version=COALESCE($3, companion_version),
+             device_role=$4,
+             status='connected',
+             revoked_at=NULL,
+             last_seen_at=NOW(),
+             updated_at=NOW()
+         WHERE id=$5 AND user_id=$6
+         RETURNING id, device_name, device_role, status, paired_at, trusted_until_at, created_at`,
+        [deviceName, tokenHash, companionVersion || null, deviceRole, existingDevice.id, pair.rows[0].user_id]
+      )
+      : await db.query(
+        `INSERT INTO companion_devices (
+           user_id, device_name, device_token_hash, device_install_id_hash, device_role,
+           companion_version, status, last_seen_at, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, 'connected', NOW(), NOW())
+         RETURNING id, device_name, device_role, status, paired_at, trusted_until_at, created_at`,
+        [pair.rows[0].user_id, deviceName, tokenHash, deviceInstallHash, deviceRole, companionVersion]
+      );
     await db.query('UPDATE helper_pairing_codes SET used_at=NOW() WHERE id=$1', [pair.rows[0].id]);
-    await activity.log(pair.rows[0].user_id, 'companion_pair', 'companion_device', result.rows[0].id, `Local App device connected: ${deviceName}`);
-    await auditLog(null, pair.rows[0].user_id, 'companion_pair', 'companion_device', result.rows[0].id, 'Local App device connected');
-    res.json({ device: result.rows[0], token });
+    await activity.log(pair.rows[0].user_id, existingDevice ? 'companion_repaired' : 'companion_pair', 'companion_device', result.rows[0].id, `${existingDevice ? 'Re-paired' : 'Connected'} GS Agent device: ${deviceName}`);
+    await auditLog(null, pair.rows[0].user_id, existingDevice ? 'companion_repaired' : 'companion_pair', 'companion_device', result.rows[0].id, existingDevice ? 'GS Agent device re-paired' : 'GS Agent device connected');
+    res.json({
+      device: result.rows[0],
+      token,
+      pairing: {
+        reused_existing_device: Boolean(existingDevice),
+        long_lived: true,
+        valid_until: result.rows[0].trusted_until_at || null,
+        revoke_to_disconnect: true
+      }
+    });
   } catch (err) { next(err); }
 });
 
 app.post('/api/companion/heartbeat', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
     await db.query(
       `UPDATE companion_devices
-       SET status='connected', companion_version=COALESCE($1, companion_version), last_seen_at=NOW(), updated_at=NOW()
-       WHERE id=$2 AND user_id=$3`,
-      [escapeText(req.body.companion_version || req.body.version) || null, device.id, device.user_id]
+       SET status='connected',
+           companion_version=COALESCE($1, companion_version),
+           device_install_id_hash=COALESCE($2, device_install_id_hash),
+           last_seen_at=NOW(),
+           updated_at=NOW()
+       WHERE id=$3 AND user_id=$4`,
+      [
+        escapeText(req.body.companion_version || req.body.version) || null,
+        req.body.device_install_id || req.body.install_id || req.body.installId ? hashDeviceInstallId(escapeText(req.body.device_install_id || req.body.install_id || req.body.installId)) : null,
+        device.id,
+        device.user_id
+      ]
     );
     res.json({ ok: true, user_id: device.user_id, device_id: device.id });
   } catch (err) { next(err); }
@@ -219,8 +271,8 @@ app.post('/api/companion/heartbeat', companionLimiter, async (req, res, next) =>
 app.post('/api/companion/clients/status', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App client status requires active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Agent client status requires active access.' });
     const settings = await getSettings(device.user_id);
     if (settings.enable_local_client_detection !== 'true') {
       return res.status(403).json({ error: 'Local client detection is disabled in Settings.' });
@@ -233,8 +285,8 @@ app.post('/api/companion/clients/status', companionLimiter, async (req, res, nex
       saved.push(instance);
       await maybeAutoRefreshStats(device.user_id, instance.account_id, settings);
     }
-    await activity.log(device.user_id, 'companion_client_status_received', 'client_instance', null, `Local App reported ${saved.length} live session(s)`, { count: saved.length });
-    await auditLog(device.user_id, device.user_id, 'companion_client_status_received', 'client_instance', null, `Local App reported ${saved.length} live session(s)`, { count: saved.length });
+    await activity.log(device.user_id, 'companion_client_status_received', 'client_instance', null, `GS Agent reported ${saved.length} live session(s)`, { count: saved.length });
+    await auditLog(device.user_id, device.user_id, 'companion_client_status_received', 'client_instance', null, `GS Agent reported ${saved.length} live session(s)`, { count: saved.length });
     res.json({ ok: true, count: saved.length, instances: saved });
   } catch (err) { next(err); }
 });
@@ -242,8 +294,8 @@ app.post('/api/companion/clients/status', companionLimiter, async (req, res, nex
 app.post('/api/companion/clients/instance', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App client status requires active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Agent client status requires active access.' });
     const settings = await getSettings(device.user_id);
     if (settings.enable_local_client_detection !== 'true') {
       return res.status(403).json({ error: 'Local client detection is disabled in Settings.' });
@@ -259,8 +311,8 @@ app.post('/api/companion/clients/instance', companionLimiter, async (req, res, n
 app.post('/api/companion/browser/session', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App browser actions require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Browser Automator actions require active access.' });
     const accountId = req.body.selected_account_id ? Number(req.body.selected_account_id) : null;
     const proxyId = req.body.selected_proxy_id ? Number(req.body.selected_proxy_id) : null;
     if (accountId) await assertAccountOwnership(device.user_id, accountId);
@@ -286,11 +338,11 @@ app.post('/api/companion/browser/session', companionLimiter, async (req, res, ne
 app.post('/api/companion/browser/fill', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App fill actions require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Browser Automator fill actions require active access.' });
     const accountId = req.body.account_id ? Number(req.body.account_id) : null;
     if (accountId) await assertAccountOwnership(device.user_id, accountId);
-    await auditLog(device.user_id, device.user_id, 'companion_fill_event', 'account', accountId, 'Local App fill event recorded', {
+    await auditLog(device.user_id, device.user_id, 'companion_fill_event', 'account', accountId, 'GS Browser Automator fill event recorded', {
       field: escapeText(req.body.field),
       mode: 'user_triggered_fill_only'
     });
@@ -301,8 +353,8 @@ app.post('/api/companion/browser/fill', companionLimiter, async (req, res, next)
 app.post('/api/companion/status', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App status uploads require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Agent status uploads require active access.' });
     const settings = await getSettings(device.user_id);
     if (settings.enable_local_client_detection !== 'true') {
       return res.status(403).json({ error: 'Local client detection is disabled in Settings.' });
@@ -335,8 +387,8 @@ app.post('/api/companion/snapshots', companionLimiter, handleCompanionSnapshot);
 async function handleCompanionSnapshot(req, res, next) {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App snapshots require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Agent snapshots require active access.' });
     if (!device.allow_screenshots) return res.status(403).json({ error: 'Snapshots are disabled for this device.' });
     const settings = await getSettings(device.user_id);
     if (settings.allow_companion_snapshots !== 'true') return res.status(403).json({ error: 'Snapshots are disabled in user settings.' });
@@ -371,8 +423,8 @@ async function handleCompanionSnapshot(req, res, next) {
         retentionHours
       ]
     );
-    await activity.log(device.user_id, 'companion_screenshot_received', 'live_snapshot', result.rows[0].id, 'Local App snapshot received', { image_size: image.length });
-    await auditLog(device.user_id, device.user_id, 'companion_screenshot_received', 'live_snapshot', result.rows[0].id, 'Local App snapshot received', { image_size: image.length });
+    await activity.log(device.user_id, 'companion_screenshot_received', 'live_snapshot', result.rows[0].id, 'GS Agent snapshot received', { image_size: image.length });
+    await auditLog(device.user_id, device.user_id, 'companion_screenshot_received', 'live_snapshot', result.rows[0].id, 'GS Agent snapshot received', { image_size: image.length });
     res.json({ snapshot: result.rows[0] });
   } catch (err) { next(err); }
 }
@@ -380,8 +432,8 @@ async function handleCompanionSnapshot(req, res, next) {
 app.get('/api/companion/jobs/next', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App jobs require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Agent jobs require active access.' });
     const result = await db.query(
       `UPDATE companion_jobs
        SET status='accepted',
@@ -409,9 +461,9 @@ app.get('/api/companion/jobs/next', companionLimiter, async (req, res, next) => 
          WHERE id=$2 AND user_id=$3 AND status IN ('queued','paused','waiting_for_user')`,
         [device.id, job.workflow_run_id, device.user_id]
       );
-      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, 'accepted_by_companion', 'Local App accepted automation job.', { companion_job_id: job.id });
+      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, 'accepted_by_companion', 'GS Agent accepted automation job.', { companion_job_id: job.id });
     }
-    await insertCompanionJobEvent(device.user_id, job.id, job.workflow_run_id, 'accepted', 'Local App accepted job.');
+    await insertCompanionJobEvent(device.user_id, job.id, job.workflow_run_id, 'accepted', 'GS Agent accepted job.');
     res.json({ job: safeCompanionJob(job) });
   } catch (err) { next(err); }
 });
@@ -419,8 +471,8 @@ app.get('/api/companion/jobs/next', companionLimiter, async (req, res, next) => 
 app.get('/api/companion/jobs/poll', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App jobs require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Agent jobs require active access.' });
     const result = await db.query(
       `UPDATE companion_jobs
        SET status='accepted',
@@ -448,7 +500,7 @@ app.get('/api/companion/jobs/poll', companionLimiter, async (req, res, next) => 
          WHERE id=$2 AND user_id=$3 AND status IN ('queued','paused','waiting_for_user')`,
         [device.id, job.workflow_run_id, device.user_id]
       );
-      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, 'accepted_by_companion', 'Local App accepted automation job.', { companion_job_id: job.id });
+      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, 'accepted_by_companion', 'GS Agent accepted automation job.', { companion_job_id: job.id });
     }
     if (job.client_instance_id) {
       await db.query(
@@ -457,9 +509,9 @@ app.get('/api/companion/jobs/poll', companionLimiter, async (req, res, next) => 
          WHERE id=$2 AND user_id=$3`,
         [device.id, job.client_instance_id, device.user_id]
       );
-      await insertClientInstanceEvent(device.user_id, job.client_instance_id, 'accepted_by_companion', 'Local App accepted client job.', { companion_job_id: job.id });
+      await insertClientInstanceEvent(device.user_id, job.client_instance_id, 'accepted_by_companion', 'GS Agent accepted client job.', { companion_job_id: job.id });
     }
-    await insertCompanionJobEvent(device.user_id, job.id, job.workflow_run_id, 'accepted', 'Local App accepted job.');
+    await insertCompanionJobEvent(device.user_id, job.id, job.workflow_run_id, 'accepted', 'GS Agent accepted job.');
     res.json({ job: safeCompanionJob(job) });
   } catch (err) { next(err); }
 });
@@ -467,8 +519,8 @@ app.get('/api/companion/jobs/poll', companionLimiter, async (req, res, next) => 
 app.post('/api/companion/jobs/:id/status', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App jobs require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Agent jobs require active access.' });
     const status = oneOf(req.body.status, companionJobStatuses, 'running');
     const message = escapeText(req.body.message);
     const job = await loadCompanionJobForDevice(device, req.params.id);
@@ -508,7 +560,7 @@ app.post('/api/companion/jobs/:id/status', companionLimiter, async (req, res, ne
           [statusToClientInstanceStatus(status), nextClientState, activityForClientState(nextClientState), clientInstanceId, device.user_id, message || null]
         );
       }
-      if (clientInstanceId) await insertClientInstanceEvent(device.user_id, clientInstanceId, status, message || `Local App client job ${status}.`, { companion_job_id: job.id, job_type: job.job_type });
+      if (clientInstanceId) await insertClientInstanceEvent(device.user_id, clientInstanceId, status, message || `GS Agent client job ${status}.`, { companion_job_id: job.id, job_type: job.job_type });
       if (status === 'completed') await activity.log(device.user_id, 'client_job_completed', 'client_instance', clientInstanceId, `Client job completed: ${job.job_type}`);
       if (status === 'failed') await activity.log(device.user_id, 'client_job_failed', 'client_instance', clientInstanceId, `Client job failed: ${job.job_type}`);
     }
@@ -519,15 +571,15 @@ app.post('/api/companion/jobs/:id/status', companionLimiter, async (req, res, ne
          WHERE id=$3 AND user_id=$4`,
         [runStatus, completed, job.workflow_run_id, device.user_id]
       );
-      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, status, message || `Local App job ${status}.`, { companion_job_id: job.id });
+      await insertWorkflowRunEvent(device.user_id, job.workflow_run_id, status, message || `GS Agent job ${status}.`, { companion_job_id: job.id });
     }
     await insertCompanionJobEvent(device.user_id, job.id, job.workflow_run_id, status, message || `Job ${status}.`, req.body.metadata || {});
     if (job.status !== status && isBrowserTaskJob(job.job_type)) {
       if (status === 'completed') await recordBrowserTaskUsage(device.user_id, 'successful');
       if (status === 'failed') await recordBrowserTaskUsage(device.user_id, 'failed');
     }
-    if (status === 'completed') await activity.log(device.user_id, 'workflow_completed', 'workflow_run', job.workflow_run_id, 'Automation completed by Local App');
-    if (status === 'failed') await activity.log(device.user_id, 'workflow_failed', 'workflow_run', job.workflow_run_id, 'Automation failed in Local App');
+    if (status === 'completed') await activity.log(device.user_id, 'workflow_completed', 'workflow_run', job.workflow_run_id, 'Automation completed by GS Agent');
+    if (status === 'failed') await activity.log(device.user_id, 'workflow_failed', 'workflow_run', job.workflow_run_id, 'Automation failed in GS Agent');
     res.json({ ok: true, status });
   } catch (err) { next(err); }
 });
@@ -535,8 +587,8 @@ app.post('/api/companion/jobs/:id/status', companionLimiter, async (req, res, ne
 app.post('/api/companion/jobs/:id/events', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App jobs require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Agent jobs require active access.' });
     const job = await loadCompanionJobForDevice(device, req.params.id);
     const eventType = escapeText(req.body.event_type || req.body.type || 'status');
     const message = escapeText(req.body.message);
@@ -549,13 +601,13 @@ app.post('/api/companion/jobs/:id/events', companionLimiter, async (req, res, ne
 app.get('/api/companion/accounts/:id/field/:field', companionLimiter, async (req, res, next) => {
   try {
     const device = await companionDeviceFromRequest(req);
-    if (!device) return res.status(401).json({ error: 'Invalid Local App token.' });
-    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'Local App account fields require active access.' });
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Browser Automator account fields require active access.' });
     const { account, decrypted } = await loadAccount(device.user_id, req.params.id);
     const field = escapeText(req.params.field);
     const value = accountFieldForCompanion(account, decrypted, field);
-    await activity.log(device.user_id, 'companion_field_requested', 'account', account.id, `Local App requested ${field}`, { field });
-    await auditLog(device.user_id, device.user_id, 'companion_field_requested', 'account', account.id, `Local App requested ${field}`, { field });
+    await activity.log(device.user_id, 'companion_field_requested', 'account', account.id, `GS Browser Automator requested ${field}`, { field });
+    await auditLog(device.user_id, device.user_id, 'companion_field_requested', 'account', account.id, `GS Browser Automator requested ${field}`, { field });
     res.json({ field, value });
   } catch (err) { next(err); }
 });
@@ -583,9 +635,6 @@ app.post('/api/companion/pair/start', companionLimiter, requireAuth, async (req,
   try {
     const userId = req.currentUserId;
     const access = await accessSummaryForUser(req.currentUserRecord);
-    if (!access.gates.addDevice) {
-      return res.status(403).json({ error: 'Connected device limit reached for this subscription tier.' });
-    }
     const code = generatePairingCode();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await db.query(
@@ -599,15 +648,25 @@ app.post('/api/companion/pair/start', companionLimiter, requireAuth, async (req,
        VALUES ($1, $2, $3)`,
       [userId, hashPairingCode(code), expiresAt]
     );
-    await activity.log(userId, 'companion_pairing_started', 'companion', null, 'Generated Local App pairing code');
-    res.json({ code, expires_at: expiresAt.toISOString() });
+    await activity.log(userId, 'companion_pairing_started', 'companion', null, 'Generated GS Agent pairing code');
+    res.json({
+      code,
+      expires_at: expiresAt.toISOString(),
+      pairing: {
+        can_add_new_device: access.gates.addDevice,
+        same_install_repair_allowed: true,
+        note: access.gates.addDevice
+          ? 'Pair this PC once. The GS Agent token stays trusted until revoked or local app data is cleared.'
+          : 'Device limit reached. This code can refresh the same GS Agent install, but a new computer will be blocked by your tier limit.'
+      }
+    });
   } catch (err) { next(err); }
 });
 
 app.get('/api/companion/devices', requireAuth, async (req, res, next) => {
   try {
     const rows = await db.query(
-      `SELECT id, device_name, companion_version, status, allow_screenshots, last_seen_at, revoked_at, created_at, updated_at
+      `SELECT id, device_name, companion_version, device_role, status, allow_screenshots, paired_at, trusted_until_at, last_seen_at, revoked_at, created_at, updated_at
        FROM companion_devices
        WHERE user_id=$1
        ORDER BY updated_at DESC`,
@@ -626,9 +685,9 @@ app.post('/api/companion/devices/:id/revoke', requireAuth, async (req, res, next
        RETURNING id, device_name`,
       [req.params.id, req.currentUserId]
     );
-    if (!result.rows[0]) return res.status(404).json({ error: 'Local App device not found.' });
-    await activity.log(req.currentUserId, 'companion_revoke', 'companion_device', result.rows[0].id, `Revoked Local App device ${result.rows[0].device_name || result.rows[0].id}`);
-    await auditLog(req.currentUserId, req.currentUserId, 'companion_revoke', 'companion_device', result.rows[0].id, 'Revoked Local App device');
+    if (!result.rows[0]) return res.status(404).json({ error: 'GS Agent device not found.' });
+    await activity.log(req.currentUserId, 'companion_revoke', 'companion_device', result.rows[0].id, `Revoked GS Agent device ${result.rows[0].device_name || result.rows[0].id}`);
+    await auditLog(req.currentUserId, req.currentUserId, 'companion_revoke', 'companion_device', result.rows[0].id, 'Revoked GS Agent device');
     res.json({ ok: true, device: result.rows[0] });
   } catch (err) { next(err); }
 });
@@ -1822,7 +1881,7 @@ app.post('/workflows/:id/run', requireAuth, async (req, res, next) => {
        RETURNING id`,
       [userId, deviceId, workflow.id, run.rows[0].id, accountId, proxyId, payload]
     );
-    await insertWorkflowRunEvent(userId, run.rows[0].id, 'queued', 'Automation queued for Local App.', { companion_job_id: job.rows[0].id });
+    await insertWorkflowRunEvent(userId, run.rows[0].id, 'queued', 'Automation queued for GS Browser Automator.', { companion_job_id: job.rows[0].id });
     await activity.log(userId, 'workflow_started', 'workflow_run', run.rows[0].id, `Queued automation ${workflow.name}`, { workflow_id: workflow.id });
     await auditLog(userId, userId, 'workflow_started', 'workflow_run', run.rows[0].id, `Queued automation ${workflow.name}`, { workflow_id: workflow.id });
     res.redirect(`/workflows/runs/${run.rows[0].id}`);
@@ -2640,7 +2699,7 @@ app.get('/companion', requireAuth, async (req, res, next) => {
       helperStatus(userId),
       getSettings(userId),
       db.query(
-        `SELECT id, device_name, companion_version, status, allow_screenshots, last_seen_at, revoked_at, created_at, updated_at
+        `SELECT id, device_name, companion_version, device_role, status, allow_screenshots, paired_at, trusted_until_at, last_seen_at, revoked_at, created_at, updated_at
          FROM companion_devices
          WHERE user_id=$1
          ORDER BY
@@ -2706,11 +2765,6 @@ app.get('/companion', requireAuth, async (req, res, next) => {
 app.post('/companion/pairing-code', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
-    const access = await accessSummaryForUser(req.currentUserRecord);
-    if (!access.gates.addDevice) {
-      req.session.helperPairingCode = null;
-      throw new Error('Connected device limit reached for your subscription tier.');
-    }
     const code = generatePairingCode();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     await db.query(
@@ -2725,8 +2779,8 @@ app.post('/companion/pairing-code', requireAuth, async (req, res, next) => {
       [userId, hashPairingCode(code), expiresAt]
     );
     req.session.helperPairingCode = { code, expiresAt: expiresAt.toISOString() };
-    await activity.log(userId, 'companion_pair', 'companion', null, 'Generated a short-lived Local App pairing code');
-    await auditLog(userId, userId, 'companion_pair', 'companion', null, 'Generated a short-lived Local App pairing code');
+    await activity.log(userId, 'companion_pair', 'companion', null, 'Generated a short-lived GS Agent pairing code');
+    await auditLog(userId, userId, 'companion_pair', 'companion', null, 'Generated a short-lived GS Agent pairing code');
     res.redirect('/companion');
   } catch (err) { next(err); }
 });
@@ -2741,9 +2795,9 @@ app.post('/companion/devices/:id/revoke', requireAuth, async (req, res, next) =>
        RETURNING id, device_name`,
       [req.params.id, userId]
     );
-    if (!result.rows[0]) throw new Error('Local App device not found.');
-    await activity.log(userId, 'companion_revoke', 'companion_device', result.rows[0].id, `Revoked Local App device ${result.rows[0].device_name || result.rows[0].id}`);
-    await auditLog(userId, userId, 'companion_revoke', 'companion_device', result.rows[0].id, 'Revoked Local App device');
+    if (!result.rows[0]) throw new Error('GS Agent device not found.');
+    await activity.log(userId, 'companion_revoke', 'companion_device', result.rows[0].id, `Revoked GS Agent device ${result.rows[0].device_name || result.rows[0].id}`);
+    await auditLog(userId, userId, 'companion_revoke', 'companion_device', result.rows[0].id, 'Revoked GS Agent device');
     res.redirect('/companion');
   } catch (err) { next(err); }
 });
@@ -2756,10 +2810,10 @@ app.post('/companion/devices/:id', requireAuth, async (req, res, next) => {
        SET device_name=$1, allow_screenshots=$2, updated_at=NOW()
        WHERE id=$3 AND user_id=$4 AND status <> 'revoked'
        RETURNING id, device_name, allow_screenshots`,
-      [escapeText(req.body.device_name) || 'GS Local App', req.body.allow_screenshots === 'yes', req.params.id, userId]
+      [escapeText(req.body.device_name) || 'GS Agent', req.body.allow_screenshots === 'yes', req.params.id, userId]
     );
-    if (!result.rows[0]) throw new Error('Local App device not found.');
-    await activity.log(userId, 'companion_device_updated', 'companion_device', result.rows[0].id, 'Updated Local App device settings');
+    if (!result.rows[0]) throw new Error('GS Agent device not found.');
+    await activity.log(userId, 'companion_device_updated', 'companion_device', result.rows[0].id, 'Updated GS Agent device settings');
     res.redirect('/companion');
   } catch (err) { next(err); }
 });
@@ -2770,7 +2824,7 @@ app.get('/downloads/helper/windows', requireAuth, (req, res) => {
     return res.download(download.filePath, download.fileName);
   }
   return res.status(404).render('helper-download', {
-    title: 'GS Local App Download',
+    title: 'GS Agent Download',
     download
   });
 });
@@ -2784,7 +2838,7 @@ app.get('/downloads', requireAuth, async (req, res, next) => {
     res.render('downloads', {
       title: 'Downloads',
       download: helperDownloadMetadata(),
-      companionName: 'GS Local App',
+      companionName: 'GS Agent',
       downloadItems: downloadItems.rows,
       access
     });
@@ -3198,11 +3252,12 @@ function jobTypeLabel(type) {
 
 function helperDownloadMetadata() {
   const distDir = path.join(__dirname, '..', 'companion', 'dist');
+  const agentPath = path.join(distDir, 'GS Agent Setup.exe');
   const windowsPath = path.join(distDir, 'GS Local App Setup.exe');
   const legacyWindowsPath = path.join(distDir, 'GS Account Manager Companion Setup.exe');
-  const filePath = fs.existsSync(windowsPath) ? windowsPath : legacyWindowsPath;
+  const filePath = fs.existsSync(agentPath) ? agentPath : fs.existsSync(windowsPath) ? windowsPath : legacyWindowsPath;
   const fileName = path.basename(filePath);
-  const available = fs.existsSync(windowsPath);
+  const available = fs.existsSync(agentPath) || fs.existsSync(windowsPath);
   const legacyAvailable = !available && fs.existsSync(legacyWindowsPath);
   return {
     available: available || legacyAvailable,
@@ -3228,21 +3283,21 @@ function setupStepsForWorkspace(counts = {}, helper = {}, access = {}) {
     },
     {
       number: 2,
-      title: 'Install GS Local App',
+      title: 'Install GS Agent',
       status: helper && helper.connected ? 'complete' : 'current',
       label: helper && helper.connected ? 'Connected' : 'Required for automation',
-      description: 'Browser automation, client monitoring, launch jobs, and live status run locally on your PC.',
+      description: 'Client launching, client monitoring, browser automation, and live status run locally on your PC.',
       href: '/downloads',
       action: 'Open Downloads'
     },
     {
       number: 3,
-      title: 'Pair Local App Device',
+      title: 'Pair this PC once',
       status: Number(counts.devices || 0) > 0 ? 'complete' : helper && helper.connected ? 'complete' : 'current',
       label: `${Number(counts.connected_devices || 0)} connected`,
-      description: 'Create a short-lived code on the website, then enter it in GS Local App.',
+      description: 'Create a short-lived code on the website, then enter it in GS Agent. That install stays trusted until you revoke it or clear local app data.',
       href: '/companion',
-      action: 'Pair Device'
+      action: 'Create Pairing Code'
     },
     {
       number: 4,
@@ -3268,7 +3323,7 @@ function setupStepsForWorkspace(counts = {}, helper = {}, access = {}) {
       title: 'Build automation jobs',
       status: Number(counts.automations || 0) > 0 ? 'complete' : 'next',
       label: access && access.gates && access.gates.browserAutomator ? 'Enabled by tier' : 'Tier gated',
-      description: 'Browser Automator jobs are queued to GS Local App and must pause for CAPTCHA, 2FA, or security checks.',
+      description: 'Browser Automator jobs are queued to GS Browser Automator and must pause for CAPTCHA, 2FA, or security checks.',
       href: '/workflows',
       action: 'Open Browser Automator'
     },
@@ -3298,7 +3353,7 @@ function setupStepsForWorkspace(counts = {}, helper = {}, access = {}) {
 function automationCompatibilityMatrix() {
   return [
     {
-      name: 'GS Local App',
+      name: 'GS Agent',
       type: 'Local automation agent',
       detection: 'Supported',
       launchProfiles: 'Supported',
@@ -3310,14 +3365,14 @@ function automationCompatibilityMatrix() {
       notes: 'Required for paid automation features. Runs locally and reports safe job status to the website.'
     },
     {
-      name: 'Automation Browser',
+      name: 'GS Browser Automator',
       type: 'Visible controlled browser',
       detection: 'Not applicable',
-      launchProfiles: 'Managed by Local App',
+      launchProfiles: 'Managed by GS Agent',
       browserAutomator: 'Foundation ready',
       liveSessions: 'Job status only',
       snapshots: 'Opt-in starter',
-      proxyMode: 'Planned through Local App launch options',
+      proxyMode: 'Planned through GS Agent launch options',
       status: 'placeholder',
       notes: 'Designed for visible, user-triggered browser tasks. CAPTCHA, 2FA, and security checks must pause for manual completion.'
     },
@@ -3392,9 +3447,9 @@ function setupGuideSections() {
       body: 'Sign in with Discord. Your internal user ID scopes all accounts, proxies, settings, logs, devices, jobs, automations, live sessions, and stats.'
     },
     {
-      title: '2. Install and pair GS Local App',
+      title: '2. Install and pair GS Agent',
       status: 'Foundation ready',
-      body: 'Install the Windows Local App when the packaged installer is available. Create a pairing code on Client Monitor, enter it locally, then confirm heartbeat status.'
+      body: 'Install GS Agent when the packaged installer is available. Create a pairing code on Client Monitor, enter it locally, then that PC stays trusted until the device is revoked or local app data is cleared.'
     },
     {
       title: '3. Import account and proxy data',
@@ -3404,7 +3459,7 @@ function setupGuideSections() {
     {
       title: '4. Configure launch profiles',
       status: 'Foundation ready',
-      body: 'Create Launch Profiles for local client paths and startup options. Launches are queued to a visible Local App device and tracked as Local Jobs.'
+      body: 'Create Launch Profiles for local client paths and startup options. Launches are queued to a visible GS Agent device and tracked as Local Jobs.'
     },
     {
       title: '5. Run Browser Automator jobs',
@@ -3422,9 +3477,9 @@ function setupGuideSections() {
 function proxyMode(account, helper, settings) {
   const hasProxy = Boolean(account && account.proxy_host);
   return {
-    browserMode: helper && helper.connected ? 'Local App mode' : 'Website-only mode',
+    browserMode: helper && helper.connected ? 'GS Agent mode' : 'Website-only mode',
     modeDescription: helper && helper.connected
-      ? 'Local App mode: opens controlled Chrome through selected proxy when available.'
+      ? 'GS Agent mode: opens controlled Chrome through selected proxy when available.'
       : 'Website-only mode: opens in your current browser. No proxy control.',
     helperConnected: helper && helper.connected ? 'yes' : 'no',
     proxyType: hasProxy ? account.proxy_type || 'HTTP' : 'Direct',
@@ -3464,7 +3519,7 @@ function sensitiveCopyField(field) {
 async function helperStatus(userId) {
   const [devices, activePairing, commands] = await Promise.all([
     db.query(
-      `SELECT id, device_name, companion_version AS helper_version, status, last_seen_at, created_at, updated_at
+      `SELECT id, device_name, companion_version AS helper_version, device_role, status, paired_at, trusted_until_at, last_seen_at, created_at, updated_at
        FROM companion_devices
        WHERE user_id=$1 AND status <> 'revoked'
        ORDER BY
@@ -3520,6 +3575,13 @@ function hashPairingCode(code) {
     .digest('hex');
 }
 
+function hashDeviceInstallId(installId) {
+  return crypto
+    .createHash('sha256')
+    .update(`${config.sessionSecret}:install:${String(installId || '').trim()}`)
+    .digest('hex');
+}
+
 function hashDeviceToken(token) {
   return crypto
     .createHash('sha256')
@@ -3532,7 +3594,7 @@ async function companionDeviceFromRequest(req) {
   const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : escapeText(req.body.device_token || req.query.device_token);
   if (!token) return null;
   const result = await db.query(
-    `SELECT id, user_id, device_name, companion_version, status, allow_screenshots
+    `SELECT id, user_id, device_name, companion_version, device_role, status, allow_screenshots, paired_at, trusted_until_at
      FROM companion_devices
      WHERE device_token_hash=$1 AND status <> 'revoked' AND revoked_at IS NULL`,
     [hashDeviceToken(token)]
@@ -4132,7 +4194,7 @@ async function assertProxyOwnership(userId, proxyId) {
 
 async function assertDeviceOwnership(userId, deviceId) {
   const result = await db.query('SELECT id FROM companion_devices WHERE id=$1 AND user_id=$2 AND status <> $3', [deviceId, userId, 'revoked']);
-  if (!result.rows[0]) throw new Error('Local App device not found for this user.');
+  if (!result.rows[0]) throw new Error('GS Agent device not found for this user.');
 }
 
 async function loadWorkflow(userId, workflowId) {
@@ -4337,7 +4399,7 @@ async function loadCompanionJobForDevice(device, jobId) {
      WHERE id=$1 AND user_id=$2 AND (companion_device_id IS NULL OR companion_device_id=$3)`,
     [jobId, device.user_id, device.id]
   );
-  if (!result.rows[0]) throw new Error('Local App job not found.');
+  if (!result.rows[0]) throw new Error('GS Agent job not found.');
   return result.rows[0];
 }
 

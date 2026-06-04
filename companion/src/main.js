@@ -11,7 +11,7 @@ function createWindow() {
     height: 720,
     minWidth: 860,
     minHeight: 600,
-    title: 'GS Local App',
+    title: 'GS Agent',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

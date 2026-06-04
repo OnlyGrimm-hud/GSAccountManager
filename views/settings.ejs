@@ -24,7 +24,7 @@
     <label>Dense Table Mode<select name="dense_table_mode"><option value="false" <%= settings.dense_table_mode !== 'true' ? 'selected' : '' %>>false</option><option value="true" <%= settings.dense_table_mode === 'true' ? 'selected' : '' %>>true</option></select></label>
     <label>OTP Refresh Interval<input type="number" min="15" max="60" name="otp_refresh_interval" value="<%= settings.otp_refresh_interval || '30' %>"></label>
     <label>Snapshot Interval Seconds<input type="number" min="15" max="300" name="screenshot_interval_seconds" value="<%= settings.screenshot_interval_seconds || '30' %>"></label>
-    <label>Local App Heartbeat Interval Seconds<input type="number" min="10" max="300" name="companion_heartbeat_interval_seconds" value="<%= settings.companion_heartbeat_interval_seconds || '30' %>"></label>
+    <label>GS Agent Heartbeat Interval Seconds<input type="number" min="10" max="300" name="companion_heartbeat_interval_seconds" value="<%= settings.companion_heartbeat_interval_seconds || '30' %>"></label>
     <label>Enable Local Client Detection<select name="enable_local_client_detection"><option value="false" <%= settings.enable_local_client_detection !== 'true' ? 'selected' : '' %>>false</option><option value="true" <%= settings.enable_local_client_detection === 'true' ? 'selected' : '' %>>true</option></select></label>
     <label>Auto Sync Stats When Client Detected<select name="auto_sync_stats_on_client_detected"><option value="false" <%= settings.auto_sync_stats_on_client_detected !== 'true' ? 'selected' : '' %>>false</option><option value="true" <%= settings.auto_sync_stats_on_client_detected === 'true' ? 'selected' : '' %>>true</option></select></label>
     <label>Stats Refresh Cooldown Minutes<input type="number" min="1" max="1440" name="stats_refresh_cooldown_minutes" value="<%= settings.stats_refresh_cooldown_minutes || '30' %>"></label>
@@ -34,7 +34,7 @@
     <label>Require Launch Confirmation<select name="client_launcher_requires_confirmation"><option value="true" <%= settings.client_launcher_requires_confirmation !== 'false' ? 'selected' : '' %>>true</option><option value="false" <%= settings.client_launcher_requires_confirmation === 'false' ? 'selected' : '' %>>false</option></select></label>
     <label>Default Browser Type<select name="default_browser_type"><option value="chromium" <%= settings.default_browser_type === 'chromium' ? 'selected' : '' %>>Chromium</option><option value="chrome" <%= settings.default_browser_type === 'chrome' ? 'selected' : '' %>>Chrome placeholder</option></select></label>
     <label>Require Confirmation Before Export Delete<select name="require_confirmation_before_export_delete"><option value="true" <%= settings.require_confirmation_before_export_delete !== 'false' ? 'selected' : '' %>>true</option><option value="false" <%= settings.require_confirmation_before_export_delete === 'false' ? 'selected' : '' %>>false</option></select></label>
-    <label>Allow Local App Snapshots<select name="allow_companion_snapshots"><option value="false" <%= settings.allow_companion_snapshots !== 'true' ? 'selected' : '' %>>false</option><option value="true" <%= settings.allow_companion_snapshots === 'true' ? 'selected' : '' %>>true</option></select></label>
+    <label>Allow GS Agent Snapshots<select name="allow_companion_snapshots"><option value="false" <%= settings.allow_companion_snapshots !== 'true' ? 'selected' : '' %>>false</option><option value="true" <%= settings.allow_companion_snapshots === 'true' ? 'selected' : '' %>>true</option></select></label>
     <p class="row-line"><span>App Version</span><strong>v<%= appVersion %></strong></p>
     <button class="button primary">Save settings</button>
   </form>
@@ -74,7 +74,7 @@
   <% } %>
 </section>
 <section class="panel form-grid">
-  <h2>Local App</h2>
+  <h2>GS Agent</h2>
   <form method="post" action="/settings" class="form-grid three">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
     <label>Require helper for proxied browser actions

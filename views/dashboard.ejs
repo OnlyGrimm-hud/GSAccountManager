@@ -74,11 +74,11 @@
 </section>
 
 <section class="step-grid">
-  <% ['Pair Local App','Import / Add Data','Create Launch Profiles','Run Browser Automator','Monitor Jobs'].forEach((step, index) => { %>
+  <% ['Pair GS Agent','Import / Add Data','Create Launch Profiles','Run Browser Automator','Monitor Jobs'].forEach((step, index) => { %>
     <article class="panel step">
       <span class="step-num"><%= index + 1 %></span>
       <h2><%= step %></h2>
-      <p class="muted"><%= index === 0 ? 'Local automation runs on your PC through GS Local App.' : 'Everything remains visible, user-triggered, and manual-safe.' %></p>
+      <p class="muted"><%= index === 0 ? 'Local automation runs on your PC through GS Agent.' : 'Everything remains visible, user-triggered, and manual-safe.' %></p>
     </article>
   <% }) %>
 </section>
@@ -108,13 +108,13 @@
   <article class="panel">
     <div class="panel-head">
       <div>
-        <h2><%= helper.connected ? 'Open with GS Local App' : 'Open in this browser' %></h2>
+        <h2><%= helper.connected ? 'Open with GS Agent' : 'Open in this browser' %></h2>
         <p class="muted"><%= helper.connected ? 'Uses assigned proxy if selected.' : 'No proxy control from website.' %></p>
       </div>
       <a class="button small" href="/companion">Client Monitor</a>
     </div>
     <% if (!helper.connected && settings.warn_before_opening_without_helper === 'true') { %>
-      <p class="notice">To use Chrome with proxies, install and connect GS Local App. Website-only opens use your normal browser session.</p>
+      <p class="notice">To use Chrome with proxies, install and connect GS Agent. Website-only opens use your normal browser session.</p>
     <% } %>
     <% if (selected && settings.show_proxy_mode_before_open !== 'false') { %>
       <div class="proxy-mode-grid">
@@ -137,7 +137,7 @@
       <div class="assist-panel">
         <p class="eyebrow">Coming Soon</p>
         <h3>User-triggered browser fill</h3>
-        <p class="muted">The foundation is queued through GS Local App, but direct fill controls stay hidden until the local app flow is production-ready.</p>
+        <p class="muted">The foundation is queued through GS Browser Automator, but direct fill controls stay hidden until the local app flow is production-ready.</p>
         <div class="actions">
           <span class="tag">Visible browser only</span>
           <span class="tag">Requires your click</span>

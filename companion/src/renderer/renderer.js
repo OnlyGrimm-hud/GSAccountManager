@@ -11,6 +11,7 @@ const storageKeys = {
   baseUrl: 'gsam.baseUrl',
   deviceToken: 'gsam.deviceToken',
   deviceId: 'gsam.deviceId',
+  installId: 'gsam.installId',
   deviceName: 'gsam.deviceName',
   localProfileName: 'gsam.localProfileName',
   localExecutablePath: 'gsam.localExecutablePath',
@@ -26,6 +27,21 @@ function saved(key, fallback = '') {
 
 function save(key, value) {
   window.localStorage.setItem(key, value);
+}
+
+function getInstallId() {
+  const existing = saved(storageKeys.installId);
+  if (existing) return existing;
+  const generated = window.crypto && window.crypto.randomUUID
+    ? window.crypto.randomUUID()
+    : `gs-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  save(storageKeys.installId, generated);
+  return generated;
+}
+
+function shortInstallId() {
+  const installId = getInstallId();
+  return installId.length > 12 ? `${installId.slice(0, 8)}...${installId.slice(-4)}` : installId;
 }
 
 function log(message) {
@@ -45,7 +61,8 @@ function refreshStatus() {
   const detectionEnabled = saved(storageKeys.localDetectionEnabled) === 'true';
   document.getElementById('statusBaseUrl').textContent = baseUrl || 'Not configured';
   document.getElementById('statusToken').textContent = saved(storageKeys.deviceToken) ? 'Stored locally' : 'Not paired';
-  document.getElementById('deviceName').value = saved(storageKeys.deviceName, 'Windows Local App');
+  document.getElementById('statusInstallId').textContent = shortInstallId();
+  document.getElementById('deviceName').value = saved(storageKeys.deviceName, 'GS Agent');
   document.getElementById('localProfileName').value = saved(storageKeys.localProfileName);
   document.getElementById('localExecutablePath').value = saved(storageKeys.localExecutablePath);
   document.getElementById('localLaunchArgs').value = saved(storageKeys.localLaunchArgs);
@@ -96,7 +113,7 @@ function renderClientSummary() {
 async function pair() {
   const baseUrl = document.getElementById('baseUrl').value.replace(/\/+$/, '');
   const code = document.getElementById('pairingCode').value.trim();
-  const deviceName = document.getElementById('deviceName').value.trim() || 'Windows Local App';
+  const deviceName = document.getElementById('deviceName').value.trim() || 'GS Agent';
   pairOutput.textContent = 'Pairing...';
   try {
     const response = await fetch(`${baseUrl}/api/companion/pair/complete`, {
@@ -105,6 +122,8 @@ async function pair() {
       body: JSON.stringify({
         code,
         device_name: deviceName,
+        device_install_id: getInstallId(),
+        device_role: 'agent_browser',
         companion_version: '0.1.0'
       })
     });
@@ -114,8 +133,8 @@ async function pair() {
     save(storageKeys.deviceToken, data.token);
     save(storageKeys.deviceId, String(data.device.id));
     save(storageKeys.deviceName, deviceName);
-    pairOutput.textContent = `Paired device ${data.device.id}. Device token saved locally.`;
-    log(`Paired device ${data.device.id}.`);
+    pairOutput.textContent = `${data.pairing && data.pairing.reused_existing_device ? 'Re-paired' : 'Paired'} device ${data.device.id}. This install is trusted until you revoke it or clear local app data.`;
+    log(`${data.pairing && data.pairing.reused_existing_device ? 'Re-paired' : 'Paired'} device ${data.device.id}.`);
     refreshStatus();
   } catch (error) {
     pairOutput.textContent = error.message;
@@ -137,7 +156,7 @@ async function heartbeat() {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`
       },
-      body: JSON.stringify({ companion_version: '0.1.0' })
+      body: JSON.stringify({ companion_version: '0.1.0', device_install_id: getInstallId() })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Heartbeat failed.');
@@ -321,7 +340,7 @@ async function sendManualClientStatus() {
     return;
   }
   if (saved(storageKeys.localDetectionEnabled) !== 'true') {
-    log('Client status skipped: local detection is disabled in Local App settings.');
+    log('Client status skipped: local detection is disabled in GS Agent settings.');
     return;
   }
   if (!detectedClients.length) {
@@ -455,7 +474,7 @@ document.getElementById('markWaitingButton').addEventListener('click', () => upd
 document.getElementById('markCompleteButton').addEventListener('click', () => updateJobStatus('completed', 'User marked automation job complete.'));
 document.getElementById('markFailedButton').addEventListener('click', () => updateJobStatus('failed', 'User marked automation job failed.'));
 document.getElementById('saveSettingsButton').addEventListener('click', () => {
-  save(storageKeys.deviceName, document.getElementById('deviceName').value.trim() || 'Windows Local App');
+  save(storageKeys.deviceName, document.getElementById('deviceName').value.trim() || 'GS Agent');
   save(storageKeys.localDetectionEnabled, document.getElementById('settingsEnableLocalDetection').checked ? 'true' : 'false');
   save(storageKeys.processNames, document.getElementById('settingsProcessNames').value.trim() || 'RuneLite,Jagex Launcher,JagexLauncher,osclient,DreamBot');
   save(storageKeys.allowScreenshots, document.getElementById('allowScreenshots').checked ? 'true' : 'false');

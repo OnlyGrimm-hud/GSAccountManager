@@ -3,8 +3,8 @@
   <article class="panel helper-status-card">
     <div class="panel-head">
       <div>
-        <p class="eyebrow">GS Local App</p>
-        <h2>Connected Devices</h2>
+        <p class="eyebrow">GS Agent</p>
+        <h2>Paired Devices</h2>
       </div>
       <span class="status <%= helper.connected ? 'ready' : 'needs_review' %>"><%= helper.statusLabel %></span>
     </div>
@@ -17,12 +17,13 @@
       <p class="row-line"><span>Safe host/IP label</span><strong>Not collected</strong></p>
       <p class="row-line"><span>Token storage</span><strong><%= helper.tokenStatus %></strong></p>
     </div>
+    <p class="notice">Pair each PC once. The device token stays on that PC until you revoke it, clear local app data, or move to a different computer. New computers count against your subscription device limit.</p>
     <form method="post" action="/companion/pairing-code">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <button class="button primary" <%= access.gates.addDevice ? '' : 'disabled' %>>Pair Local App Device</button>
+      <button class="button primary">Create Pairing Code</button>
     </form>
     <% if (!access.gates.addDevice) { %>
-      <p class="notice">Connected device limit reached for your tier.</p>
+      <p class="notice">Connected device limit reached for your tier. You can still refresh this same GS Agent install, but pairing a different computer will be blocked until a device slot is available.</p>
     <% } %>
     <% if (pairingCode) { %>
       <div class="code-box">
@@ -36,12 +37,12 @@
   </article>
 
   <article class="panel download-card">
-    <p class="eyebrow">Local App</p>
-    <h2>GS Local App</h2>
-    <p class="muted">GS Local App connects only after you create a pairing code and enter it locally. It stores a device token locally and sends heartbeat, client status, and job updates.</p>
+    <p class="eyebrow">GS Agent + GS Browser Automator</p>
+    <h2>One app, two modules</h2>
+    <p class="muted">GS Agent starts and monitors local client tools. GS Browser Automator runs visible browser jobs. Both use the same paired device slot.</p>
     <div class="actions">
       <a class="button primary" href="/setup">Setup Wizard</a>
-      <a class="button" href="/downloads">Open Downloads</a>
+      <a class="button" href="/downloads">Download GS Agent</a>
       <a class="button" href="/setup-guide">Setup Guide</a>
       <a class="button" href="/clients">Launch Profiles</a>
       <a class="button" href="/instances">Live Sessions</a>
@@ -55,14 +56,14 @@
   <div class="panel-head">
     <div>
       <p class="eyebrow">Automation Agent Flow</p>
-      <h2>How GS Local App powers paid automation</h2>
+      <h2>How GS Agent powers paid automation</h2>
     </div>
     <a class="button small" href="/compatibility">Compatibility Matrix</a>
   </div>
   <div class="setup-steps compact">
     <article class="panel mini-card"><div class="step-num">1</div><h2>Pair device</h2><p class="muted">Connect this PC to your Discord-owned workspace with a short-lived pairing code.</p></article>
     <article class="panel mini-card"><div class="step-num">2</div><h2>Queue jobs</h2><p class="muted">Browser Automator, launch, detect, and snapshot requests are queued as Local Jobs.</p></article>
-    <article class="panel mini-card"><div class="step-num">3</div><h2>Run locally</h2><p class="muted">The Local App opens visible browsers or configured local clients on your PC.</p></article>
+    <article class="panel mini-card"><div class="step-num">3</div><h2>Run locally</h2><p class="muted">GS Agent opens configured local clients and GS Browser Automator opens visible browsers on your PC.</p></article>
     <article class="panel mini-card"><div class="step-num">4</div><h2>Pause safely</h2><p class="muted">CAPTCHA, 2FA, and verification steps require manual user completion.</p></article>
     <article class="panel mini-card"><div class="step-num">5</div><h2>Report status</h2><p class="muted">Jobs, live sessions, screenshots, and events sync back without exposing secrets.</p></article>
   </div>
@@ -72,17 +73,19 @@
   <div class="panel-head">
     <div>
       <p class="eyebrow">Feature Status</p>
-      <h2>Local App Foundation</h2>
+      <h2>GS Agent Foundation</h2>
     </div>
-    <span class="tag">Manual safe automation</span>
+    <span class="tag">One-time pairing</span>
   </div>
   <div class="checklist-grid">
-    <p class="row-line"><span>Device pairing</span><strong>Working</strong></p>
+    <p class="row-line"><span>One-time pairing</span><strong>Working</strong></p>
+    <p class="row-line"><span>Same install re-pair</span><strong>Reuses device slot</strong></p>
+    <p class="row-line"><span>New computer pairing</span><strong>Tier limited</strong></p>
     <p class="row-line"><span>Heartbeat and job queue</span><strong>Working</strong></p>
     <p class="row-line"><span>Opt-in client detection</span><strong>Working starter</strong></p>
-    <p class="row-line"><span>Browser Automator jobs</span><strong>Foundation ready</strong></p>
+    <p class="row-line"><span>Browser Automator jobs</span><strong>Working starter</strong></p>
     <p class="row-line"><span>Live snapshots</span><strong>Placeholder</strong></p>
-    <p class="row-line"><span>Controlled field fill</span><strong>Coming Soon</strong></p>
+    <p class="row-line"><span>Controlled field fill</span><strong>Working starter</strong></p>
     <p class="row-line"><span>CAPTCHA or security bypass</span><strong>Never</strong></p>
   </div>
 </section>
@@ -95,17 +98,19 @@
 
 <section class="panel">
   <div class="panel-head">
-  <h2>Local App Devices</h2>
+  <h2>GS Agent Devices</h2>
     <span class="tag"><%= devices.length %> device(s)</span>
   </div>
   <table>
-    <thead><tr><th>Name</th><th>Status</th><th>Version</th><th>Last Seen</th><th>Capabilities</th><th>Screenshots</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Name</th><th>Status</th><th>Role</th><th>Version</th><th>Paired</th><th>Last Seen</th><th>Capabilities</th><th>Screenshots</th><th>Actions</th></tr></thead>
     <tbody>
       <% devices.forEach(device => { %>
         <tr>
           <td><input class="table-input" form="device-<%= device.id %>" name="device_name" value="<%= device.device_name || `Device ${device.id}` %>"></td>
           <td><span class="status <%= device.status %>"><%= device.status %></span></td>
+          <td><%= device.device_role === 'agent' ? 'GS Agent' : device.device_role === 'browser' ? 'GS Browser' : 'Agent + Browser' %></td>
           <td><%= device.companion_version || 'Unknown' %></td>
+          <td><%= device.paired_at ? new Date(device.paired_at).toLocaleString() : 'Unknown' %></td>
           <td><%= device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : 'Never' %></td>
           <td>
             <span class="tag">Heartbeat</span>
@@ -130,7 +135,7 @@
           </td>
         </tr>
       <% }) %>
-      <% if (!devices.length) { %><tr><td colspan="7"><p class="muted">No local app devices paired yet.</p></td></tr><% } %>
+      <% if (!devices.length) { %><tr><td colspan="9"><p class="muted">No GS Agent devices paired yet.</p></td></tr><% } %>
     </tbody>
   </table>
 </section>
@@ -162,7 +167,7 @@
     <p class="eyebrow">Live Status</p>
     <h2>Local Client Status</h2>
     <% if (!helper.connected) { %>
-      <p class="notice">Download and pair GS Local App to monitor clients and run browser tasks.</p>
+      <p class="notice">Download and pair GS Agent to monitor clients and run browser tasks.</p>
       <div class="actions">
         <a class="button primary" href="/downloads">Go to Downloads</a>
         <a class="button" href="/companion">Pair Device</a>
@@ -185,7 +190,7 @@
         </tbody>
       </table>
     <% } else { %>
-      <p class="muted">No client status reported yet. Open Live Sessions after pairing GS Local App.</p>
+      <p class="muted">No client status reported yet. Open Live Sessions after pairing GS Agent.</p>
     <% } %>
     <div class="actions"><a class="button small" href="/instances">Open Live Sessions</a></div>
   </article>
@@ -222,7 +227,7 @@
     <h2>User-Triggered Browser Assist</h2>
     <ul class="helper-list">
       <li>Select account inside GS Account Manager.</li>
-      <li>Open a visible automation browser from GS Local App.</li>
+      <li>Open a visible automation browser from GS Browser Automator.</li>
       <li>Click Fill current page to fill visible fields.</li>
       <li>If CAPTCHA or security checks appear, stop and complete them manually.</li>
       <li>User reviews the page and clicks submit themselves.</li>

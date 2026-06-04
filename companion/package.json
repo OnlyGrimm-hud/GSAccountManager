@@ -2,7 +2,7 @@
   "name": "gs-account-manager-companion",
   "version": "0.1.0",
   "private": true,
-  "description": "GS Local App for user-controlled local monitoring and automation jobs.",
+  "description": "GS Agent for user-controlled client launching, monitoring, and browser automation jobs.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -19,8 +19,8 @@
   },
   "build": {
     "appId": "com.gsaccountmanager.companion",
-    "productName": "GS Local App",
-    "artifactName": "GS Local App Setup.${ext}",
+    "productName": "GS Agent",
+    "artifactName": "GS Agent Setup.${ext}",
     "win": {
       "target": "nsis",
       "signAndEditExecutable": false

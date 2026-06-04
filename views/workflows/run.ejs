@@ -3,7 +3,7 @@
   <div>
     <p class="eyebrow">Job Status</p>
     <h2><%= run.workflow_name || 'Browser automation job' %></h2>
-    <p class="muted">Local App job <%= run.companion_job_id || 'not queued' %> is <%= run.companion_job_status || run.status %>.</p>
+    <p class="muted">GS Browser Automator job <%= run.companion_job_id || 'not queued' %> is <%= run.companion_job_status || run.status %>.</p>
   </div>
   <span class="status <%= run.status %>"><%= run.status %></span>
 </section>
@@ -14,7 +14,7 @@
     <div class="checklist-grid">
       <p class="row-line"><span>Account</span><strong><%= run.account_display_name || run.account_legacy_login || run.account_username || 'None' %></strong></p>
       <p class="row-line"><span>Proxy</span><strong><%= run.proxy_host ? `${run.proxy_name || ''} ${run.proxy_type || ''} ${run.proxy_host}:${run.proxy_port}` : 'Account/default or direct' %></strong></p>
-      <p class="row-line"><span>Local App Device</span><strong><%= run.companion_device_name || 'Any paired device' %></strong></p>
+      <p class="row-line"><span>GS Agent Device</span><strong><%= run.companion_device_name || 'Any paired device' %></strong></p>
       <p class="row-line"><span>Created</span><strong><%= new Date(run.created_at).toLocaleString() %></strong></p>
       <p class="row-line"><span>Started</span><strong><%= run.started_at ? new Date(run.started_at).toLocaleString() : 'Not started' %></strong></p>
       <p class="row-line"><span>Completed</span><strong><%= run.completed_at ? new Date(run.completed_at).toLocaleString() : 'Not completed' %></strong></p>
@@ -55,7 +55,7 @@
     </table>
   </article>
   <article class="panel">
-    <h2>Local App Events</h2>
+    <h2>GS Agent Events</h2>
     <table>
       <thead><tr><th>Time</th><th>Type</th><th>Message</th></tr></thead>
       <tbody>

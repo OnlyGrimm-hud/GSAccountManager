@@ -10,7 +10,7 @@
       <a class="button" href="/clients">Launch Profiles</a>
     </div>
   </div>
-  <p class="muted">This view shows safe local process/window metadata reported by GS Local App. It does not include memory, sessions, cookies, tokens, or gameplay automation.</p>
+  <p class="muted">This view shows safe local process/window metadata reported by GS Agent. It does not include memory, sessions, cookies, tokens, or gameplay automation.</p>
 </section>
 
 <section class="content-grid">
@@ -24,7 +24,7 @@
     <p class="row-line"><span>Window</span><strong><%= instance.window_title || '-' %></strong></p>
     <p class="row-line"><span>Detected</span><strong><%= instance.detected_at ? new Date(instance.detected_at).toLocaleString() : '-' %></strong></p>
     <p class="row-line"><span>Last seen</span><strong><%= instance.last_seen_at ? new Date(instance.last_seen_at).toLocaleString() : '-' %></strong></p>
-    <p class="row-line"><span>Local App Device</span><strong><%= instance.device_name || 'Local App' %></strong></p>
+    <p class="row-line"><span>GS Agent Device</span><strong><%= instance.device_name || 'GS Agent' %></strong></p>
   </article>
 
   <article class="panel">

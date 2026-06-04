@@ -11,11 +11,11 @@
       <a class="button primary" href="/workflows">Browser Automator</a>
     </div>
   </div>
-  <p class="muted">This matrix shows what GS Account Manager can safely manage today and what remains placeholder work. Automation runs through GS Local App on the user's PC, not hidden server-side sessions.</p>
+  <p class="muted">This matrix shows what GS Account Manager can safely manage today and what remains placeholder work. Automation runs through GS Agent and GS Browser Automator on the user's PC, not hidden server-side sessions.</p>
 </section>
 
 <section class="metric-grid dashboard-metrics">
-  <article class="metric"><span>Local App</span><strong><%= helper.statusLabel %></strong></article>
+  <article class="metric"><span>GS Agent</span><strong><%= helper.statusLabel %></strong></article>
   <article class="metric"><span>Browser Automator</span><strong><%= access.gates.browserAutomator ? 'Enabled' : 'Locked' %></strong></article>
   <article class="metric"><span>Snapshots</span><strong><%= settings.allow_companion_snapshots === 'true' ? 'Opt-in On' : 'Off' %></strong></article>
   <article class="metric"><span>Client Detection</span><strong><%= settings.enable_local_client_detection === 'true' ? 'On' : 'Off' %></strong></article>

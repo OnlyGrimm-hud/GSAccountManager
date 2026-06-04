@@ -212,6 +212,9 @@ async function main() {
     assert(serverSource.includes("app.post('/clients/profiles/:id/delete'"));
     assert(serverSource.includes("app.post('/local-jobs/:id/cancel'"));
     assert(serverSource.includes("app.post('/api/companion/pair/complete'"));
+    assert(serverSource.includes('device_install_id_hash'));
+    assert(serverSource.includes('hashDeviceInstallId'));
+    assert(serverSource.includes('reused_existing_device'));
     assert(serverSource.includes("app.post('/api/companion/heartbeat'"));
     assert(serverSource.includes("app.post('/api/companion/clients/status'"));
     assert(serverSource.includes("app.post('/api/companion/clients/instance'"));
@@ -333,7 +336,7 @@ async function main() {
   assert.strictEqual(testInternals.isBrowserTaskJob('workflow_run'), true);
   assert.strictEqual(testInternals.isBrowserTaskJob('launch_client'), false);
   assert.strictEqual(testInternals.jobTypeLabel('workflow_run'), 'Browser Automator');
-  assert(testInternals.automationCompatibilityMatrix().some(item => item.name === 'GS Local App'));
+  assert(testInternals.automationCompatibilityMatrix().some(item => item.name === 'GS Agent'));
   const setupSteps = testInternals.setupStepsForWorkspace({ accounts: 1, devices: 1, connected_devices: 1, launch_profiles: 0 }, { connected: true }, { gates: { browserAutomator: true } });
   assert(setupSteps.some(step => step.title === 'Build automation jobs'));
 
