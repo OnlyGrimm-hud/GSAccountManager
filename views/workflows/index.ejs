@@ -32,15 +32,18 @@
 
   <article class="panel">
     <p class="eyebrow">Safe Automation Boundary</p>
-    <h2>Visible GS Browser Automator Jobs Only</h2>
-    <p class="muted">Automation jobs are queued for GS Browser Automator. The browser must be visible, and CAPTCHA, 2FA, email verification, phone verification, and security checks must pause for manual completion.</p>
+    <h2>Visible Browser Agent Jobs Only</h2>
+    <p class="muted">Automation jobs are queued for GS Browser Agent. The agent opens the visible local browser, applies proxy launch settings, and pauses for CAPTCHA, 2FA, email verification, phone verification, and security checks.</p>
     <div class="checklist-grid">
-      <p class="row-line"><span>Connected devices</span><strong><%= devices.length %></strong></p>
+      <p class="row-line"><span>Browser Agent status</span><strong><span class="status <%= browserAgent.connected ? 'connected' : 'unknown' %>"><%= browserAgent.statusLabel %></span></strong></p>
+      <p class="row-line"><span>Device name</span><strong><%= browserAgent.deviceName %></strong></p>
+      <p class="row-line"><span>Version</span><strong><%= browserAgent.version %></strong></p>
+      <p class="row-line"><span>Last seen</span><strong><%= browserAgent.lastSeenAt ? new Date(browserAgent.lastSeenAt).toLocaleString() : 'Not connected' %></strong></p>
       <p class="row-line"><span>Available accounts</span><strong><%= accounts.length %></strong></p>
       <p class="row-line"><span>Available proxies</span><strong><%= proxies.length %></strong></p>
       <p class="row-line"><span>Successful tasks today</span><strong><%= access.usage.successful_count || 0 %> / <%= access.dailyTaskLimitLabel %></strong></p>
     </div>
-    <% if (!helper.connected) { %><p class="notice">Browser Automator requires GS Agent.</p><% } %>
+    <% if (!browserAgent.connected) { %><p class="notice">GS Browser Agent is required to run browser automation. Download, open, and pair the agent first.</p><% } %>
     <% if (!access.gates.browserAutomator) { %><p class="notice">Browser Automator is not available on your current tier.</p><% } %>
     <% if (!access.gates.runBrowserTask) { %><p class="notice">Daily browser task limit reached for your tier.</p><% } %>
   </article>
@@ -48,16 +51,16 @@
   <article class="panel">
     <p class="eyebrow">One-click action</p>
     <h2>Email Upgrade</h2>
-    <p class="muted">Start from an account row to queue the guided Email Upgrade action. GS Browser Automator fills owner-stored fields in a visible browser, then pauses so you manually handle CAPTCHA, 2FA, email verification, and final submit.</p>
+    <p class="muted">Start from an account row to queue the guided Email Upgrade action. GS Browser Agent fills owner-stored fields in a visible local browser, then pauses so you manually handle CAPTCHA, 2FA, email verification, and final submit.</p>
     <div class="checklist-grid">
       <p class="row-line"><span>1. Queue</span><strong>Select account + device</strong></p>
-      <p class="row-line"><span>2. GS Agent</span><strong>Fetch Next Job</strong></p>
+      <p class="row-line"><span>2. Browser Agent</span><strong>Fetch Next Job</strong></p>
       <p class="row-line"><span>3. Browser</span><strong>Run Browser Automator Job</strong></p>
       <p class="row-line"><span>4. Manual</span><strong>Continue after checks</strong></p>
     </div>
     <div class="actions">
       <a class="button small primary" href="/accounts">Start From Accounts</a>
-      <a class="button small" href="/downloads">Download GS Agent</a>
+      <a class="button small" href="/downloads">Download Browser Agent</a>
       <a class="button small" href="/local-jobs">Open Local Jobs</a>
     </div>
   </article>
@@ -89,10 +92,12 @@
                 <% proxies.forEach(proxy => { %><option value="<%= proxy.id %>"><%= proxy.name || `${proxy.host}:${proxy.port}` %></option><% }) %>
               </select>
               <select name="companion_device_id">
-                <option value="">Any paired device</option>
-                <% devices.forEach(device => { %><option value="<%= device.id %>"><%= device.device_name || `Device ${device.id}` %> - <%= device.status %></option><% }) %>
+                <option value="">Any connected Browser Agent</option>
+                <% devices.forEach(device => { %>
+                  <option value="<%= device.id %>" <%= device.status === 'connected' && device.device_role !== 'agent' ? '' : 'disabled' %>><%= device.device_name || `Device ${device.id}` %> - <%= device.status %><%= device.companion_version ? ` - v${device.companion_version}` : '' %></option>
+                <% }) %>
               </select>
-              <button class="button small primary" <%= access.gates.runBrowserTask && helper.connected ? '' : 'disabled' %>>Queue Job</button>
+              <button class="button small primary" <%= access.gates.runBrowserTask && browserAgent.connected ? '' : 'disabled' %>>Queue Browser Agent Job</button>
             </form>
           </td>
           <td><a class="button small" href="/workflows/<%= workflow.id %>/edit">Edit</a></td>

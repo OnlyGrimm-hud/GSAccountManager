@@ -911,11 +911,6 @@ FROM (VALUES
   ('mask_sensitive_values', 'true'),
   ('otp_refresh_interval', '30'),
   ('require_helper_for_proxy_actions', 'true'),
-  ('allow_website_only_browser_open', 'true'),
-  ('warn_before_opening_without_helper', 'true'),
-  ('require_confirmation_before_direct_open', 'true'),
-  ('show_proxy_mode_before_open', 'true'),
-  ('enable_assisted_fill_buttons', 'false'),
   ('theme_name', 'Premium Dark'),
   ('app_version', '0.1.0')
 ) AS defaults(key, value)

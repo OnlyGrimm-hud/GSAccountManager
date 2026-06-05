@@ -44,6 +44,7 @@ const {
 } = require('./app-constants');
 
 const app = express();
+const browserAgentRequiredMessage = 'GS Browser Agent is required to run browser automation. Download, open, and pair the agent first.';
 const sensitiveFields = [
   'password', 'legacy_password', 'bank_pin', 'otp_secret', 'recovery_email', 'recovery_email_password',
   'target_email', 'target_email_password', 'email_password', 'jagex_email', 'jagex_password'
@@ -1238,12 +1239,13 @@ app.get('/', requireAuth, async (req, res, next) => {
     const userId = req.currentUserId;
     const settings = await getSettings(userId);
     const selectedId = req.query.account_id;
-    const [counts, recent, proxyCounts, selectable, helper, dashboardStats, latestExport] = await Promise.all([
+    const [counts, recent, proxyCounts, selectable, helper, browserAgent, dashboardStats, latestExport] = await Promise.all([
       db.query(`SELECT status, COUNT(*)::int count FROM accounts WHERE user_id=$1 GROUP BY status`, [userId]),
       db.query(`SELECT * FROM activity_logs WHERE user_id=$1 ORDER BY created_at DESC LIMIT 8`, [userId]),
       db.query(`SELECT status, COUNT(*)::int count FROM proxies WHERE user_id=$1 GROUP BY status`, [userId]),
       db.query(`SELECT id, username, legacy_login, display_name, status, upgrade_status FROM accounts WHERE user_id=$1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 100`, [userId]),
       helperStatus(userId),
+      browserAgentStatus(userId),
       db.query(
         `SELECT
           (SELECT COUNT(*)::int FROM accounts WHERE user_id=$1) total_accounts,
@@ -1284,9 +1286,10 @@ app.get('/', requireAuth, async (req, res, next) => {
       decrypted,
       settings,
       helper,
+      browserAgent,
       dashboardStats: dashboardStats.rows[0],
       latestExport: latestExport.rows[0] || null,
-      proxyMode: proxyMode(selected, helper, settings),
+      proxyMode: proxyMode(selected, browserAgent, settings),
       nextStep,
       mask
     });
@@ -1371,7 +1374,7 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
       status_asc: 'a.status ASC, a.updated_at DESC'
     };
     const orderBy = accountSorts[filters.sort_by] || accountSorts.updated_desc;
-    const [rows, stats, categories, proxyCategories, countries, proxies, clientProfiles, settings, access] = await Promise.all([
+    const [rows, stats, categories, proxyCategories, countries, proxies, clientProfiles, settings, access, browserAgent] = await Promise.all([
       db.query(
         `SELECT a.*, p.host proxy_host, p.port proxy_port, p.status proxy_status, p.proxy_type,
                 ci.id active_instance_id, ci.status active_instance_status, ci.window_title active_instance_window,
@@ -1412,7 +1415,8 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
       db.query(`SELECT id, name, proxy_type, host, port, status FROM proxies WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200`, [userId]),
       db.query(`SELECT id, name FROM client_profiles WHERE user_id=$1 AND enabled IS TRUE ORDER BY updated_at DESC LIMIT 50`, [userId]),
       getSettings(userId),
-      accessSummaryForUser(req.currentUserRecord)
+      accessSummaryForUser(req.currentUserRecord),
+      browserAgentStatus(userId)
     ]);
     res.render('accounts/index', {
       title: 'Accounts',
@@ -1426,6 +1430,7 @@ app.get('/accounts', requireAuth, async (req, res, next) => {
       filters,
       settings,
       access,
+      browserAgent,
       query: req.query,
       mask
     });
@@ -1628,11 +1633,12 @@ app.get('/accounts/:id/email-upgrade', requireAuth, async (req, res, next) => {
     const access = await accessSummaryForUser(req.currentUserRecord);
     const { account, decrypted } = await loadAccount(userId, req.params.id);
     const accountProxyId = account.assigned_http_proxy_id || account.proxy_id || account.assigned_socks5_proxy_id || null;
-    const [devices, proxies, workflow, helper] = await Promise.all([
-      db.query(`SELECT id, device_name, status, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId]),
+    const [devices, proxies, workflow, helper, browserAgent] = await Promise.all([
+      db.query(`SELECT id, device_name, companion_version, device_role, status, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId]),
       db.query(`SELECT id, name, proxy_type, host, port, status FROM proxies WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200`, [userId]),
       ensureEmailUpgradeWorkflow(userId),
-      helperStatus(userId)
+      helperStatus(userId),
+      browserAgentStatus(userId)
     ]);
     res.render('accounts/email-upgrade', {
       title: 'Start Email Upgrade',
@@ -1642,6 +1648,7 @@ app.get('/accounts/:id/email-upgrade', requireAuth, async (req, res, next) => {
       proxies: proxies.rows,
       workflow,
       helper,
+      browserAgent,
       access,
       accountProxyId
     });
@@ -1654,6 +1661,8 @@ app.post('/accounts/:id/email-upgrade', requireAuth, async (req, res, next) => {
     const access = await accessSummaryForUser(req.currentUserRecord);
     if (!access.gates.browserAutomator) throw new Error('Browser Automator is not available for your subscription tier.');
     if (!access.gates.runBrowserTask) throw new Error('Daily browser task limit reached for your tier.');
+    const deviceId = req.body.companion_device_id ? Number(req.body.companion_device_id) : null;
+    await requireConnectedBrowserAgent(userId, deviceId);
     const targetEmail = escapeText(req.body.target_email);
     if (targetEmail) {
       await db.query(
@@ -1663,9 +1672,7 @@ app.post('/accounts/:id/email-upgrade', requireAuth, async (req, res, next) => {
     }
     const { account, decrypted } = await loadAccount(userId, req.params.id);
     const accountId = Number(account.id);
-    const deviceId = req.body.companion_device_id ? Number(req.body.companion_device_id) : null;
     const proxyId = req.body.proxy_id ? Number(req.body.proxy_id) : (account.assigned_http_proxy_id || account.proxy_id || account.assigned_socks5_proxy_id || null);
-    if (deviceId) await assertDeviceOwnership(userId, deviceId);
     if (proxyId) await assertProxyOwnership(userId, proxyId);
     if (!(decrypted.target_email || decrypted.jagex_email)) {
       throw new Error('Add a target/Jagex email before starting Email Upgrade.');
@@ -1698,7 +1705,7 @@ app.post('/accounts/:id/email-upgrade', requireAuth, async (req, res, next) => {
        WHERE id=$1 AND user_id=$2`,
       [accountId, userId]
     );
-    await insertWorkflowRunEvent(userId, run.rows[0].id, 'queued', 'One-click Email Upgrade queued for GS Browser Automator.', { companion_job_id: job.rows[0].id, product_action: 'email_upgrade' });
+    await insertWorkflowRunEvent(userId, run.rows[0].id, 'queued', 'One-click Email Upgrade queued for GS Browser Agent.', { companion_job_id: job.rows[0].id, product_action: 'email_upgrade' });
     await activity.log(userId, 'email_upgrade_started', 'workflow_run', run.rows[0].id, 'Queued one-click Email Upgrade', { account_id: accountId, workflow_id: workflow.id });
     await auditLog(userId, userId, 'email_upgrade_started', 'workflow_run', run.rows[0].id, 'Queued one-click Email Upgrade', { account_id: accountId, workflow_id: workflow.id });
     res.redirect(`/workflows/runs/${run.rows[0].id}?email_upgrade=queued`);
@@ -1832,7 +1839,7 @@ app.get('/workflows', requireAuth, async (req, res, next) => {
   try {
     const userId = req.currentUserId;
     await ensureStarterWorkflows(userId);
-    const [workflows, runs, accounts, proxies, devices, counts, access, helper] = await Promise.all([
+    const [workflows, runs, accounts, proxies, devices, counts, access, helper, browserAgent] = await Promise.all([
       db.query(
         `SELECT w.*, COUNT(s.id)::int step_count
          FROM workflows w
@@ -1854,10 +1861,11 @@ app.get('/workflows', requireAuth, async (req, res, next) => {
       ),
       db.query(`SELECT id, username, legacy_login, display_name, account_type, status FROM accounts WHERE user_id=$1 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 200`, [userId]),
       db.query(`SELECT id, name, proxy_type, host, port, status FROM proxies WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200`, [userId]),
-      db.query(`SELECT id, device_name, status, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId]),
+      db.query(`SELECT id, device_name, companion_version, device_role, status, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId]),
       db.query(`SELECT status, COUNT(*)::int count FROM workflow_runs WHERE user_id=$1 GROUP BY status`, [userId]),
       accessSummaryForUser(req.currentUserRecord),
-      helperStatus(userId)
+      helperStatus(userId),
+      browserAgentStatus(userId)
     ]);
     res.render('workflows/index', {
       title: 'Browser Automator',
@@ -1869,6 +1877,7 @@ app.get('/workflows', requireAuth, async (req, res, next) => {
       counts: counts.rows,
       access,
       helper,
+      browserAgent,
       query: req.query,
       mask
     });
@@ -1982,7 +1991,7 @@ app.post('/workflows/:id/run', requireAuth, async (req, res, next) => {
     const deviceId = req.body.companion_device_id ? Number(req.body.companion_device_id) : null;
     if (accountId) await assertAccountOwnership(userId, accountId);
     if (proxyId) await assertProxyOwnership(userId, proxyId);
-    if (deviceId) await assertDeviceOwnership(userId, deviceId);
+    await requireConnectedBrowserAgent(userId, deviceId);
     const steps = await db.query(`SELECT * FROM workflow_steps WHERE user_id=$1 AND workflow_id=$2 ORDER BY step_order`, [userId, workflow.id]);
     if (!steps.rows.length) throw new Error('Automation has no steps.');
     await validateWorkflowRunPreflight(userId, steps.rows, { accountId });
@@ -1999,7 +2008,7 @@ app.post('/workflows/:id/run', requireAuth, async (req, res, next) => {
        RETURNING id`,
       [userId, deviceId, workflow.id, run.rows[0].id, accountId, proxyId, payload]
     );
-    await insertWorkflowRunEvent(userId, run.rows[0].id, 'queued', 'Automation queued for GS Browser Automator.', { companion_job_id: job.rows[0].id });
+    await insertWorkflowRunEvent(userId, run.rows[0].id, 'queued', 'Automation queued for GS Browser Agent.', { companion_job_id: job.rows[0].id });
     await activity.log(userId, 'workflow_started', 'workflow_run', run.rows[0].id, `Queued automation ${workflow.name}`, { workflow_id: workflow.id });
     await auditLog(userId, userId, 'workflow_started', 'workflow_run', run.rows[0].id, `Queued automation ${workflow.name}`, { workflow_id: workflow.id });
     res.redirect(`/workflows/runs/${run.rows[0].id}`);
@@ -2502,7 +2511,7 @@ app.get('/local-jobs', requireAuth, async (req, res, next) => {
       clauses.push(`j.job_type=$${params.length}`);
     }
     const where = clauses.join(' AND ');
-    const [jobs, stats, events, devices] = await Promise.all([
+    const [jobs, stats, events, devices, browserAgent] = await Promise.all([
       db.query(
         `SELECT j.*, d.device_name, w.name workflow_name, wr.status workflow_run_status,
                 cp.name profile_name, ci.instance_name, a.username account_username, a.legacy_login account_legacy_login,
@@ -2541,7 +2550,8 @@ app.get('/local-jobs', requireAuth, async (req, res, next) => {
          LIMIT 80`,
         [userId]
       ),
-      db.query(`SELECT id, device_name, status, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId])
+      db.query(`SELECT id, device_name, companion_version, device_role, status, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId]),
+      browserAgentStatus(userId)
     ]);
     res.render('local-jobs', {
       title: 'Local Jobs',
@@ -2549,6 +2559,7 @@ app.get('/local-jobs', requireAuth, async (req, res, next) => {
       stats: stats.rows[0],
       events: events.rows,
       devices: devices.rows,
+      browserAgent,
       filters,
       companionJobStatuses,
       companionJobTypes,
@@ -2949,16 +2960,18 @@ app.get('/downloads/helper/windows', requireAuth, (req, res) => {
 
 app.get('/downloads', requireAuth, async (req, res, next) => {
   try {
-    const [downloadItems, access] = await Promise.all([
+    const [downloadItems, access, browserAgent] = await Promise.all([
       db.query(`SELECT * FROM download_items WHERE status <> 'hidden' ORDER BY sort_order, category, title`),
-      accessSummaryForUser(req.currentUserRecord)
+      accessSummaryForUser(req.currentUserRecord),
+      browserAgentStatus(req.currentUserId)
     ]);
     res.render('downloads', {
       title: 'Downloads',
       download: helperDownloadMetadata(),
       companionName: 'GS Agent',
       downloadItems: downloadItems.rows,
-      access
+      access,
+      browserAgent
     });
   } catch (err) { next(err); }
 });
@@ -2982,9 +2995,7 @@ app.post('/settings', requireAuth, async (req, res, next) => {
       'companion_heartbeat_interval_seconds', 'default_browser_type', 'require_confirmation_before_export_delete', 'allow_companion_snapshots',
       'client_detection_process_names', 'client_snapshot_retention_hours', 'client_launcher_requires_confirmation',
       'enable_local_client_detection', 'auto_sync_stats_on_client_detected', 'stats_refresh_cooldown_minutes', 'custom_client_process_names',
-      'require_helper_for_proxy_actions', 'allow_website_only_browser_open',
-      'warn_before_opening_without_helper', 'require_confirmation_before_direct_open',
-      'show_proxy_mode_before_open', 'enable_assisted_fill_buttons', 'theme_name', 'workflow_mode'
+      'require_helper_for_proxy_actions', 'theme_name', 'workflow_mode'
       , 'dense_table_mode', 'screenshot_interval_seconds',
       'payment_method_ltc_enabled', 'payment_method_btc_enabled', 'payment_method_eth_enabled',
       'manual_admin_activation_enabled'
@@ -3090,11 +3101,6 @@ const defaultSettings = {
   mask_sensitive_values: 'true',
   otp_refresh_interval: '30',
   require_helper_for_proxy_actions: 'true',
-  allow_website_only_browser_open: 'true',
-  warn_before_opening_without_helper: 'true',
-  require_confirmation_before_direct_open: 'true',
-  show_proxy_mode_before_open: 'true',
-  enable_assisted_fill_buttons: 'false',
   theme_name: 'Premium Dark',
   app_version: config.appVersion
 };
@@ -3357,8 +3363,8 @@ function jobTypeLabel(type) {
   return {
     workflow_run: 'Browser Automator',
     run_workflow: 'Browser Automator',
-    open_browser: 'Open Browser',
-    fill_visible_fields: 'Fill Visible Fields',
+    open_browser: 'Browser Agent Open URL',
+    fill_visible_fields: 'Browser Agent Field Fill',
     launch_client: 'Launch Client',
     stop_client: 'Stop Client',
     detect_clients: 'Detect Clients',
@@ -3595,14 +3601,13 @@ function setupGuideSections() {
 function proxyMode(account, helper, settings) {
   const hasProxy = Boolean(account && account.proxy_host);
   return {
-    browserMode: helper && helper.connected ? 'GS Agent mode' : 'Website-only mode',
+    browserMode: helper && helper.connected ? 'GS Browser Agent' : 'Browser Agent required',
     modeDescription: helper && helper.connected
-      ? 'GS Agent mode: opens controlled Chrome through selected proxy when available.'
-      : 'Website-only mode: opens in your current browser. No proxy control.',
+      ? 'Website queues jobs; GS Browser Agent opens the visible local browser and applies proxy settings when available.'
+      : browserAgentRequiredMessage,
     helperConnected: helper && helper.connected ? 'yes' : 'no',
     proxyType: hasProxy ? account.proxy_type || 'HTTP' : 'Direct',
-    proxyEndpoint: hasProxy ? `${maskEndpoint(account.proxy_host)}:${account.proxy_port}` : 'No proxy assigned',
-    directFallback: settings && settings.allow_website_only_browser_open !== 'false' ? 'enabled' : 'disabled'
+    proxyEndpoint: hasProxy ? `${maskEndpoint(account.proxy_host)}:${account.proxy_port}` : 'No proxy assigned'
   };
 }
 
@@ -3675,6 +3680,52 @@ async function helperStatus(userId) {
     activePairingExpiresAt: activePairing.rows[0] ? activePairing.rows[0].expires_at : null,
     commandCounts: Object.fromEntries(commands.rows.map(row => [row.status, row.count]))
   };
+}
+
+function isBrowserAgentDevice(device = {}) {
+  const role = String(device.device_role || 'agent_browser').toLowerCase();
+  return role === 'agent_browser' || role === 'browser' || role === 'agent_browser_agent' || role === '';
+}
+
+async function browserAgentStatus(userId, requestedDeviceId = null) {
+  const params = [userId];
+  let filter = '';
+  if (requestedDeviceId) {
+    params.push(Number(requestedDeviceId));
+    filter = ` AND id=$${params.length}`;
+  }
+  const result = await db.query(
+    `SELECT id, device_name, companion_version, device_role, status, paired_at, trusted_until_at, last_seen_at, updated_at
+     FROM companion_devices
+     WHERE user_id=$1 AND status <> 'revoked'${filter}
+     ORDER BY
+       CASE WHEN status='connected' THEN 0 ELSE 1 END,
+       last_seen_at DESC NULLS LAST,
+       updated_at DESC`,
+    params
+  );
+  const devices = result.rows.filter(isBrowserAgentDevice);
+  const connectedDevices = devices.filter(device => device.status === 'connected');
+  const device = requestedDeviceId ? devices[0] || null : connectedDevices[0] || devices[0] || null;
+  const connected = requestedDeviceId
+    ? Boolean(device && device.status === 'connected')
+    : connectedDevices.length > 0;
+  return {
+    connected,
+    statusLabel: connected ? 'Connected' : 'Not Connected',
+    device,
+    devices,
+    connectedDevices,
+    deviceName: device && device.device_name ? device.device_name : 'No connected Browser Agent',
+    version: device && device.companion_version ? device.companion_version : 'Not available',
+    lastSeenAt: device && device.last_seen_at ? device.last_seen_at : null
+  };
+}
+
+async function requireConnectedBrowserAgent(userId, requestedDeviceId = null) {
+  const status = await browserAgentStatus(userId, requestedDeviceId);
+  if (!status.connected) throw new Error(browserAgentRequiredMessage);
+  return status;
 }
 
 function generatePairingCode() {
@@ -5372,6 +5423,8 @@ module.exports = {
     canUseSnapshots,
     canAddDevice,
     canRunBrowserTask,
+    isBrowserAgentDevice,
+    browserAgentRequiredMessage,
     isBrowserTaskJob,
     jobTypeLabel,
     workflowTemplateName,

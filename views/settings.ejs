@@ -74,46 +74,16 @@
   <% } %>
 </section>
 <section class="panel form-grid">
-  <h2>GS Agent</h2>
+  <h2>GS Browser Agent</h2>
   <form method="post" action="/settings" class="form-grid three">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-    <label>Require helper for proxied browser actions
+    <label>Require Browser Agent for automation
       <select name="require_helper_for_proxy_actions">
-        <option value="true" <%= settings.require_helper_for_proxy_actions !== 'false' ? 'selected' : '' %>>true</option>
-        <option value="false" <%= settings.require_helper_for_proxy_actions === 'false' ? 'selected' : '' %>>false</option>
+        <option value="true" selected>true</option>
       </select>
     </label>
-    <label>Allow website-only normal browser open
-      <select name="allow_website_only_browser_open">
-        <option value="true" <%= settings.allow_website_only_browser_open !== 'false' ? 'selected' : '' %>>true</option>
-        <option value="false" <%= settings.allow_website_only_browser_open === 'false' ? 'selected' : '' %>>false</option>
-      </select>
-    </label>
-    <label>Warn before opening without helper/proxy
-      <select name="warn_before_opening_without_helper">
-        <option value="true" <%= settings.warn_before_opening_without_helper !== 'false' ? 'selected' : '' %>>true</option>
-        <option value="false" <%= settings.warn_before_opening_without_helper === 'false' ? 'selected' : '' %>>false</option>
-      </select>
-    </label>
-    <label>Require confirmation before direct/no-proxy open
-      <select name="require_confirmation_before_direct_open">
-        <option value="true" <%= settings.require_confirmation_before_direct_open !== 'false' ? 'selected' : '' %>>true</option>
-        <option value="false" <%= settings.require_confirmation_before_direct_open === 'false' ? 'selected' : '' %>>false</option>
-      </select>
-    </label>
-    <label>Show proxy mode before opening page
-      <select name="show_proxy_mode_before_open">
-        <option value="true" <%= settings.show_proxy_mode_before_open !== 'false' ? 'selected' : '' %>>true</option>
-        <option value="false" <%= settings.show_proxy_mode_before_open === 'false' ? 'selected' : '' %>>false</option>
-      </select>
-    </label>
-    <label>Enable assisted fill buttons
-      <select name="enable_assisted_fill_buttons">
-        <option value="false" <%= settings.enable_assisted_fill_buttons !== 'true' ? 'selected' : '' %>>false</option>
-        <option value="true" <%= settings.enable_assisted_fill_buttons === 'true' ? 'selected' : '' %>>true</option>
-      </select>
-    </label>
-    <button class="button primary">Save helper settings</button>
+    <p class="notice">Browser automation is always queued to GS Browser Agent. The website shows status, controls, and logs, but it does not open automation browsers.</p>
+    <button class="button primary">Save Browser Agent settings</button>
   </form>
 </section>
 <section class="panel">

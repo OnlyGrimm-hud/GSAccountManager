@@ -16,19 +16,19 @@
     </div>
     <% if (isAdmin) { %><a class="button" href="/admin/downloads">Downloads Manager</a><% } %>
   </div>
-  <p class="muted">GS Account Manager runs on Render, but client launching, client monitoring, and browser automation run locally through GS Agent on your PC.</p>
+  <p class="muted">GS Account Manager runs on Render, but browser automation requires GS Browser Agent running on your Windows PC. The website queues jobs; the agent opens the visible local browser and reports status.</p>
 </section>
 
 <section class="content-grid">
   <article class="panel download-card">
     <div class="panel-head">
       <div>
-        <p class="eyebrow">GS Agent</p>
-        <h2>GS Agent</h2>
+        <p class="eyebrow">GS Browser Agent</p>
+        <h2>GS Browser Agent / GS Agent</h2>
       </div>
       <span class="status <%= localAppAvailable ? 'ready' : 'needs_review' %>"><%= localAppAvailable ? 'Available' : 'Coming Soon' %></span>
     </div>
-    <p class="muted"><%= localApp.description || 'Connects this PC to GS Account Manager, launches configured clients, monitors local status, sends live updates, and runs GS Browser Automator jobs.' %></p>
+    <p class="muted"><%= localApp.description || 'Connects this PC to GS Account Manager, launches configured clients, monitors local status, sends live updates, and runs Browser Agent jobs.' %></p>
     <div class="helper-detail-grid">
       <p class="row-line"><span>Build</span><strong>Windows test build</strong></p>
       <p class="row-line"><span>Version</span><strong><%= download.available ? download.version : (localApp.version || 'Coming soon') %></strong></p>
@@ -36,10 +36,11 @@
       <p class="row-line"><span>File size</span><strong><%= download.fileSize || 'Not available' %></strong></p>
       <p class="row-line"><span>Connected devices</span><strong><%= access.deviceCount %></strong></p>
       <p class="row-line"><span>Device limit</span><strong><%= access.tier && access.tier.max_devices !== null ? access.tier.max_devices : 'Unlimited' %></strong></p>
+      <p class="row-line"><span>Browser Agent status</span><strong><%= browserAgent.statusLabel %></strong></p>
     </div>
     <div class="actions">
       <% if (localAppAvailable && localAppUrl) { %>
-        <a class="button primary" href="<%= localAppUrl %>">Download GS Agent</a>
+        <a class="button primary" href="<%= localAppUrl %>">Download Browser Agent</a>
       <% } else { %>
         <span class="tag">Installer not packaged yet</span>
       <% } %>
@@ -54,18 +55,18 @@
     <div class="panel-head">
       <div>
         <p class="eyebrow">Browser Runtime</p>
-        <h2>GS Browser Automator</h2>
+        <h2>Browser Automator Runtime</h2>
       </div>
       <span class="status needs_review"><%= browserRuntime.status === 'available' ? 'Available' : 'Managed locally' %></span>
     </div>
-    <p class="muted"><%= browserRuntime.description || 'Required for browser automation tasks and controlled locally on your PC by GS Agent.' %></p>
+    <p class="muted"><%= browserRuntime.description || 'Required for browser automation tasks and controlled locally on your PC by GS Browser Agent.' %></p>
     <div class="checklist-grid">
-      <p class="row-line"><span>Used by</span><strong>GS Browser Automator</strong></p>
+      <p class="row-line"><span>Used by</span><strong>GS Browser Agent</strong></p>
       <p class="row-line"><span>Runs on</span><strong>Your PC</strong></p>
       <p class="row-line"><span>Render requirement</span><strong>None</strong></p>
       <p class="row-line"><span>Browser Automator</span><strong><%= access.gates.browserAutomator ? 'Enabled by tier' : 'Locked by tier' %></strong></p>
     </div>
-    <p class="notice">GS Browser Automator uses Playwright Chromium when installed and can fall back to system Microsoft Edge or Chrome. Future packaged builds should include a managed browser runtime.</p>
+    <p class="notice">Browser Automator uses Playwright Chromium when installed and can fall back to system Microsoft Edge or Chrome. The browser is launched by the local agent, never by the website.</p>
     <div class="actions">
       <a class="button small" href="/workflows">Open Browser Automator</a>
       <a class="button small" href="/local-jobs">View Local Jobs</a>

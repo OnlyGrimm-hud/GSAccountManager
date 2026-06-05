@@ -13,12 +13,12 @@
       <a class="button" href="/instances">Live Sessions</a>
     </div>
   </div>
-  <p class="muted">Local jobs are commands queued for a paired GS Agent device. Jobs are user-scoped, visible, pausable, and safe-logged without passwords, OTP secrets, cookies, or tokens.</p>
+  <p class="muted">Local jobs are commands queued for a paired local app device. Browser jobs are executed only by GS Browser Agent; the website does not open browsers itself. Status updates come from the agent.</p>
   <% if (query.launch_job) { %>
     <p class="notice">Launch job <%= query.launch_job %> is queued. Open GS Agent, go to Jobs, click Fetch Next Job, then click Run Current Launch Job.</p>
   <% } %>
   <% if (query.workflow_job) { %>
-    <p class="notice">Browser Automator job <%= query.workflow_job %> is queued. Open GS Agent, go to Jobs or GS Browser Automator, fetch the job, then run it visibly.</p>
+    <p class="notice">Browser Automator job <%= query.workflow_job %> is queued. Open GS Browser Agent, fetch the job, then run it visibly.</p>
   <% } %>
 </section>
 
@@ -31,11 +31,33 @@
     <span class="tag">Visible local automation</span>
   </div>
   <div class="status-lane">
-    <span><strong>Queued</strong><br><small>Waiting for an eligible GS Agent device</small></span>
-    <span><strong>Accepted / Running</strong><br><small>GS Agent is processing the job visibly</small></span>
+    <span><strong>Queued</strong><br><small>Waiting for an eligible local app device</small></span>
+    <span><strong>Accepted / Running</strong><br><small>GS Browser Agent or GS Agent is processing the job visibly</small></span>
     <span><strong>Waiting for User</strong><br><small>Manual verification or review is required</small></span>
     <span><strong>Completed / Failed</strong><br><small>Safe result details are logged</small></span>
   </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <p class="eyebrow">Connected Browser Agent</p>
+      <h2><%= browserAgent.statusLabel %></h2>
+    </div>
+    <span class="status <%= browserAgent.connected ? 'connected' : 'unknown' %>"><%= browserAgent.statusLabel %></span>
+  </div>
+  <div class="checklist-grid">
+    <p class="row-line"><span>Device</span><strong><%= browserAgent.deviceName %></strong></p>
+    <p class="row-line"><span>Version</span><strong><%= browserAgent.version %></strong></p>
+    <p class="row-line"><span>Last Seen</span><strong><%= browserAgent.lastSeenAt ? new Date(browserAgent.lastSeenAt).toLocaleString() : 'Not connected' %></strong></p>
+  </div>
+  <% if (!browserAgent.connected) { %>
+    <p class="notice">Browser automation requires GS Browser Agent running on your Windows PC.</p>
+    <div class="actions">
+      <a class="button small" href="/downloads">Download Browser Agent</a>
+      <a class="button small" href="/companion">Connect Browser Agent</a>
+    </div>
+  <% } %>
 </section>
 
 <section class="metric-grid dashboard-metrics">
@@ -95,7 +117,7 @@
       <h2>Browser Automator Jobs</h2>
       <span class="status working">Core focus</span>
     </div>
-    <p class="muted">These jobs are the main paid automation path. They run through GS Browser Automator in a visible browser and pause for manual verification.</p>
+    <p class="muted">These jobs are the main paid automation path. They run through GS Browser Agent in a visible local browser and pause for manual verification.</p>
     <div class="actions">
       <a class="button small" href="/workflows">Open Browser Automator</a>
       <a class="button small" href="/setup-guide">Read Setup Guide</a>

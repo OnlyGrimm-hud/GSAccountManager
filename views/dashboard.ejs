@@ -108,41 +108,44 @@
   <article class="panel">
     <div class="panel-head">
       <div>
-        <h2><%= helper.connected ? 'Open with GS Agent' : 'Open in this browser' %></h2>
-        <p class="muted"><%= helper.connected ? 'Uses assigned proxy if selected.' : 'No proxy control from website.' %></p>
+        <h2>Browser Agent Jobs</h2>
+        <p class="muted">The website queues browser work. GS Browser Agent opens the visible browser locally on your PC.</p>
       </div>
       <a class="button small" href="/companion">Client Monitor</a>
     </div>
-    <% if (!helper.connected && settings.warn_before_opening_without_helper === 'true') { %>
-      <p class="notice">To use Chrome with proxies, install and connect GS Agent. Website-only opens use your normal browser session.</p>
+    <% if (!browserAgent.connected) { %>
+      <p class="notice"><%= proxyMode.modeDescription %></p>
     <% } %>
-    <% if (selected && settings.show_proxy_mode_before_open !== 'false') { %>
+    <% if (selected) { %>
       <div class="proxy-mode-grid">
         <p class="row-line"><span>Browser mode</span><strong><%= proxyMode.browserMode %></strong></p>
-        <p class="row-line"><span>Helper connected</span><strong><%= proxyMode.helperConnected %></strong></p>
+        <p class="row-line"><span>Browser Agent</span><strong><%= browserAgent.statusLabel %></strong></p>
+        <p class="row-line"><span>Device</span><strong><%= browserAgent.deviceName %></strong></p>
+        <p class="row-line"><span>Version</span><strong><%= browserAgent.version %></strong></p>
+        <p class="row-line"><span>Last seen</span><strong><%= browserAgent.lastSeenAt ? new Date(browserAgent.lastSeenAt).toLocaleString() : 'Not connected' %></strong></p>
         <p class="row-line"><span>Selected proxy type</span><strong><%= proxyMode.proxyType %></strong></p>
         <p class="row-line"><span>Selected proxy</span><strong><%= proxyMode.proxyEndpoint %></strong></p>
-        <p class="row-line"><span>Direct fallback</span><strong><%= proxyMode.directFallback %></strong></p>
       </div>
       <p class="muted"><%= proxyMode.modeDescription %></p>
     <% } %>
-    <div class="copy-grid">
-      <a class="button" target="_blank" rel="noopener" href="<%= settings.email_signup_url || 'https://signup.live.com/' %>">Open email signup page</a>
-      <a class="button" target="_blank" rel="noopener" href="<%= settings.email_signin_url || 'https://outlook.live.com/' %>">Open email sign-in page</a>
-      <a class="button" target="_blank" rel="noopener" href="<%= settings.account_settings_url || 'https://account.jagex.com/' %>">Open account settings page</a>
-      <a class="button" target="_blank" rel="noopener" href="<%= settings.upgrade_url || 'https://account.jagex.com/' %>">Open upgrade page</a>
-    </div>
-    <p class="muted">Browser Automator can fill the selected account's stored login fields after you start a visible local job. Submits, CAPTCHA, 2FA, email/phone verification, and security checks stay manual.</p>
+    <p class="muted">Browser Automator can fill the selected account's stored login fields after you queue a Browser Agent job. CAPTCHA, 2FA, email/phone verification, and security checks stay manual.</p>
     <% if (selected) { %>
       <div class="assist-panel">
-        <p class="eyebrow">Coming Soon</p>
-        <h3>User-triggered browser fill</h3>
-        <p class="muted">GS Browser Automator can type user-owned saved credentials into visible forms from queued jobs. It does not log the values or bypass manual checks.</p>
+        <p class="eyebrow">Browser Agent required</p>
+        <h3>Email Upgrade</h3>
+        <p class="muted">Queue the guided action, then run it from GS Browser Agent on your Windows PC.</p>
         <div class="actions">
+          <a class="button primary" href="/accounts/<%= selected.id %>/email-upgrade">Queue Browser Agent Job</a>
+          <a class="button" href="/downloads">Download Browser Agent</a>
+          <a class="button" href="/local-jobs">Local Jobs</a>
           <span class="tag">Visible browser only</span>
-          <span class="tag">Requires your click</span>
           <span class="tag">No CAPTCHA bypass</span>
         </div>
+      </div>
+    <% } else { %>
+      <div class="actions">
+        <a class="button" href="/downloads">Download Browser Agent</a>
+        <a class="button" href="/companion">Connect Browser Agent</a>
       </div>
     <% } %>
   </article>

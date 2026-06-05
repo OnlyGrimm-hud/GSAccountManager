@@ -37,6 +37,25 @@
     <p class="notice">Stats sync <%= query.stats_sync %><%= query.stats_error ? `: ${query.stats_error}` : '' %>.</p>
   <% } %>
   <p class="notice">Account details are owner-only. Full usernames display directly; passwords, OTP secrets, recovery credentials, and email passwords stay encrypted until you click Reveal or Copy.</p>
+  <div class="agent-status-card">
+    <div>
+      <p class="eyebrow">Connected Browser Agent</p>
+      <h2><%= browserAgent.statusLabel %></h2>
+      <p class="muted">Browser automation is queued here and executed only by GS Browser Agent on your Windows PC.</p>
+    </div>
+    <div class="checklist-grid">
+      <p class="row-line"><span>Status</span><strong><span class="status <%= browserAgent.connected ? 'connected' : 'unknown' %>"><%= browserAgent.statusLabel %></span></strong></p>
+      <p class="row-line"><span>Device</span><strong><%= browserAgent.deviceName %></strong></p>
+      <p class="row-line"><span>Version</span><strong><%= browserAgent.version %></strong></p>
+      <p class="row-line"><span>Last Seen</span><strong><%= browserAgent.lastSeenAt ? new Date(browserAgent.lastSeenAt).toLocaleString() : 'Not connected' %></strong></p>
+    </div>
+    <% if (!browserAgent.connected) { %>
+      <div class="actions">
+        <a class="button small" href="/downloads">Download Browser Agent</a>
+        <a class="button small" href="/companion">Connect Browser Agent</a>
+      </div>
+    <% } %>
+  </div>
 
   <form class="filters account-filters" method="get">
     <input name="q" placeholder="Search" value="<%= filters.q || '' %>">
@@ -186,7 +205,7 @@
               <span class="tag">Export only</span>
             <% } else { %>
               <a class="button small" href="/accounts/<%= account.id %>">View</a>
-              <a class="button small primary" href="/accounts/<%= account.id %>/email-upgrade">Start Email Upgrade</a>
+              <a class="button small primary" href="/accounts/<%= account.id %>/email-upgrade">Queue Browser Agent Job</a>
               <details class="action-menu">
                 <summary>More actions</summary>
                 <div class="action-menu-panel">
@@ -198,7 +217,7 @@
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <button class="button small">Refresh Stats</button>
                   </form>
-                  <a class="button small" href="/workflows?account_id=<%= account.id %>">Start Automation</a>
+                  <a class="button small" href="/workflows?account_id=<%= account.id %>">Open Browser Automator</a>
                   <form method="post" action="/accounts/bulk">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <input type="hidden" name="bulk_action" value="launch_selected">
