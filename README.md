@@ -90,11 +90,12 @@ Discord redirect URLs:
 - Admin subscription assignment at `/admin/subscriptions`.
 - Crypto payment placeholders for LTC, BTC, and ETH. No real payment verification is implemented.
 - Logs with user scoping and admin high-level visibility.
+- One-click Email Upgrade action from Accounts that queues a visible local Browser Automator job with manual pauses for CAPTCHA, Cloudflare, 2FA, email verification, phone verification, and security checks.
 
 ## Placeholders And Coming Soon
 
 - Windows GS Agent packaged download is still a packaging placeholder unless `companion/dist/GS Agent Setup.exe` exists. The app also supports `GS Local App Setup.exe` and the previous companion installer filename as fallbacks.
-- Browser proxy launch is not production-enabled yet. Browser jobs currently open a visible local Playwright-controlled browser without authenticated proxy launch.
+- Browser proxy launch is enabled through the paired GS Agent when a selected proxy has saved credentials. Proxy passwords are fetched only by the paired device for the logged-in user's job and are never shown in UI/logs.
 - Live snapshots are opt-in and Browser Automator screenshot steps require local user confirmation before upload.
 - Proxy testing is a Coming Soon placeholder.
 - Subscription payment processing is not implemented. Admins can assign tiers/status manually.
@@ -195,8 +196,8 @@ Legacy duplicate pages for imports/exports, local helper, and the old singular w
 ## Next Development Priorities
 
 1. Package and test the Windows GS Agent installer.
-2. Add browser proxy launch support in GS Browser Automator.
-3. Add production-quality live snapshot controls with clear opt-in behavior.
-4. Expand safe client detection and matching without injection or memory reads.
+2. Add production-quality live snapshot controls with clear opt-in behavior.
+3. Expand safe client detection and matching without injection or memory reads.
+4. Add owned-webmail verification integration later, without CAPTCHA/security bypass.
 5. Add real subscription/payment flow when ready.
 6. Add deeper integration tests for user isolation, admin-only actions, and local automation jobs.

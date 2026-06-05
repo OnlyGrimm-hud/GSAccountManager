@@ -4,6 +4,7 @@ const { chromium } = require('playwright');
 let automationBrowser = null;
 let automationContext = null;
 let automationPage = null;
+let automationProxyKey = '';
 
 const browserJobTypes = new Set(['workflow_run', 'run_workflow', 'open_browser', 'fill_visible_fields']);
 const manualCheckPatterns = [
@@ -32,7 +33,7 @@ async function runBrowserAutomationJob(request, emit = () => {}, ownerWindow = n
 
     const page = await ensureAutomationPage(ctx);
     if (ctx.payload.proxy) {
-      await postJobEvent(ctx, 'proxy_notice', 'Proxy details are shown on the website. Local browser proxy launch is not enabled in this build.', {
+      await postJobEvent(ctx, 'proxy_selected', 'Selected proxy will be applied to the visible browser launch when credentials are available.', {
         proxy_id: ctx.job.proxy_id || ctx.payload.proxy.id || null
       });
     }
@@ -68,6 +69,7 @@ async function closeAutomationBrowser() {
     automationBrowser = null;
   }
   automationPage = null;
+  automationProxyKey = '';
   return { ok: true };
 }
 
@@ -121,7 +123,6 @@ async function waitForConfiguredElement(ctx, page, config) {
 }
 
 async function fillConfiguredField(ctx, page, config) {
-  const locator = await locatorFromConfig(page, config);
   const valueRefs = configuredValueRefs(config);
   const valueRefLabel = configuredValueLabel(valueRefs);
   if (valueRefs.some(valueRef => /otp_secret/i.test(valueRef))) {
@@ -129,13 +130,32 @@ async function fillConfiguredField(ctx, page, config) {
   }
   const value = await resolveStepValue(ctx, config);
   if (value === undefined || value === null || value === '') {
+    if (config.optional === true) {
+      await postJobEvent(ctx, 'optional_fill_skipped', `Skipped optional field: ${valueRefLabel || 'configured field'} was not available.`, {
+        value_ref: valueRefs.length === 1 ? valueRefs[0] : null,
+        value_refs: valueRefs.length > 1 ? valueRefs : null
+      });
+      return;
+    }
     throw new Error(`No value available for ${valueRefLabel || 'configured field'}.`);
   }
   const sensitive = valueRefs.some(value => isSensitiveReference(value)) || config.sensitive === true;
   if (sensitive) {
     await confirmSensitiveFill(ctx, valueRefLabel || 'sensitive field');
   }
-  await locator.waitFor({ state: 'visible', timeout: safeTimeout(config.timeout, 30000) });
+  let locator;
+  try {
+    locator = await locatorFromConfig(page, config);
+    await locator.waitFor({ state: 'visible', timeout: safeTimeout(config.timeout, config.optional === true ? 5000 : 30000) });
+  } catch (error) {
+    if (config.optional === true) {
+      await postJobEvent(ctx, 'optional_fill_skipped', `Skipped optional field: ${safeMatcherLabel(config)} was not visible.`, {
+        matcher: safeMatcherLabel(config)
+      });
+      return;
+    }
+    throw error;
+  }
   await locator.fill(String(value), { timeout: safeTimeout(config.timeout, 30000) });
   await postJobEvent(ctx, 'fill_field', 'Filled visible field.', {
     value_ref: valueRefs.length === 1 ? valueRefs[0] : null,
@@ -236,9 +256,14 @@ async function confirmSensitiveFill(ctx, valueRef) {
 }
 
 async function ensureAutomationPage(ctx) {
+  const requiredProxyKey = proxyKeyFromPayload(ctx);
+  if (automationBrowser && requiredProxyKey !== automationProxyKey) {
+    await closeAutomationBrowser();
+  }
   if (!automationBrowser || !automationBrowser.isConnected()) {
     const launched = await launchVisibleBrowser(ctx);
     automationBrowser = launched.browser;
+    automationProxyKey = launched.proxyKey || '';
     automationContext = await automationBrowser.newContext({
       viewport: null,
       acceptDownloads: false
@@ -248,6 +273,7 @@ async function ensureAutomationPage(ctx) {
       automationBrowser = null;
       automationContext = null;
       automationPage = null;
+      automationProxyKey = '';
     });
     await postJobEvent(ctx, 'browser_opened', 'Visible Chromium browser opened.');
   }
@@ -257,10 +283,18 @@ async function ensureAutomationPage(ctx) {
 }
 
 async function launchVisibleBrowser(ctx) {
+  const proxyOptions = await proxyLaunchOptions(ctx);
   const launchOptions = {
     headless: false,
-    args: ['--start-maximized']
+    args: ['--start-maximized'],
+    ...(proxyOptions ? { proxy: proxyOptions.proxy } : {})
   };
+  if (proxyOptions) {
+    await postJobEvent(ctx, 'browser_proxy_enabled', 'Visible browser will launch with the selected proxy.', {
+      proxy_id: ctx.job.proxy_id || (ctx.payload.proxy && ctx.payload.proxy.id) || null,
+      proxy_type: proxyOptions.proxyType
+    });
+  }
   const attempts = [
     { label: 'Playwright Chromium', options: launchOptions },
     { label: 'Microsoft Edge', options: { ...launchOptions, channel: 'msedge' } },
@@ -271,12 +305,39 @@ async function launchVisibleBrowser(ctx) {
     try {
       const browser = await chromium.launch(attempt.options);
       await postJobEvent(ctx, 'browser_runtime_selected', `Visible browser runtime selected: ${attempt.label}.`, { runtime: attempt.label });
-      return { browser, runtime: attempt.label };
+      return { browser, runtime: attempt.label, proxyKey: proxyOptions ? proxyOptions.proxyKey : '' };
     } catch (error) {
       errors.push(`${attempt.label}: ${error.message.split('\n')[0]}`);
     }
   }
   throw new Error(`No usable browser runtime found. Install the Browser Runtime from Downloads or install Microsoft Edge/Chrome. ${errors.join(' | ')}`);
+}
+
+async function proxyLaunchOptions(ctx) {
+  const proxy = ctx.payload.proxy || {};
+  if (!proxy.credentials_url) return null;
+  const data = await apiFetch(ctx, proxy.credentials_url, { method: 'GET' });
+  const type = String(data.proxy_type || 'HTTP').toLowerCase();
+  const scheme = type.includes('socks') ? 'socks5' : 'http';
+  const host = String(data.host || '').trim();
+  const port = Number(data.port);
+  if (!host || !port) throw new Error('Selected proxy is missing host or port.');
+  const config = {
+    server: `${scheme}://${host}:${port}`
+  };
+  if (data.username) config.username = String(data.username);
+  if (data.password) config.password = String(data.password);
+  return {
+    proxy: config,
+    proxyType: data.proxy_type || 'HTTP',
+    proxyKey: `${scheme}:${data.id || ''}:${host}:${port}`
+  };
+}
+
+function proxyKeyFromPayload(ctx) {
+  const proxy = ctx.payload && ctx.payload.proxy;
+  if (!proxy) return '';
+  return `${proxy.id || ''}:${proxy.endpoint || ''}:${proxy.credentials_url || ''}`;
 }
 
 async function locatorFromConfig(page, config = {}) {

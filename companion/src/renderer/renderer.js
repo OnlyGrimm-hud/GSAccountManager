@@ -143,6 +143,23 @@ function renderClientSummary() {
   document.getElementById('lastWealthValue').textContent = formatOptionalNumber(first.reported_wealth_value);
 }
 
+function safeClientDetails(clients, emptyLabel = 'No live sessions detected.') {
+  if (!clients || !clients.length) return emptyLabel;
+  return clients.map((client, index) => {
+    const lines = [
+      `Client ${index + 1}: ${client.process_name || 'Unknown client'}`,
+      `State: ${clientStateActivity(client.client_state)}`,
+      `Window: ${client.window_title || 'Unknown'}`,
+      `PID: ${client.process_id || client.pid || 'Unknown'}`,
+      `Account: ${client.linked_account_label || (client.account_id ? `Account ${client.account_id}` : 'Unlinked')}`,
+      `Display name: ${client.reported_display_name || 'Unknown'}`,
+      `Wealth: ${formatOptionalNumber(client.reported_wealth_value)}`,
+      `Last seen: ${client.last_seen_at ? new Date(client.last_seen_at).toLocaleString() : 'Unknown'}`
+    ];
+    return lines.join('\n');
+  }).join('\n\n');
+}
+
 function browserJob(job) {
   return job && ['workflow_run', 'run_workflow', 'open_browser', 'fill_visible_fields'].includes(job.job_type);
 }
@@ -175,6 +192,25 @@ function jobHint(job, note = '') {
   return 'Use the action buttons below to update this local job.';
 }
 
+function safeJobDetails(job) {
+  if (!job) return 'No job loaded.';
+  const payload = job.payload || {};
+  const proxy = payload.proxy || {};
+  const workflow = payload.workflow || {};
+  const profile = payload.client_profile || {};
+  const steps = Array.isArray(payload.steps) ? payload.steps.length : 0;
+  return [
+    `Job: ${job.id}`,
+    `Status: ${job.status || 'queued'}`,
+    `Type: ${job.job_type ? job.job_type.replace(/_/g, ' ') : 'local job'}`,
+    `Action: ${workflow.name || profile.name || 'GS Agent task'}`,
+    `Target: ${jobTarget(job)}`,
+    `Proxy: ${proxy.id ? `${proxy.name || 'Selected proxy'} (${proxy.proxy_type || 'HTTP'} / ${proxy.status || 'unknown'})` : 'None / direct'}`,
+    `Steps: ${steps || 'Not applicable'}`,
+    'Safety: visible, user-triggered, manual checks pause'
+  ].join('\n');
+}
+
 function renderCurrentJob(note = '') {
   setText('currentJobTitle', jobTitle(currentJob));
   setText('currentJobId', currentJob ? String(currentJob.id) : 'None');
@@ -186,6 +222,7 @@ function renderCurrentJob(note = '') {
   setText('browserJobId', currentJob && browserJob(currentJob) ? `Job ${currentJob.id}` : 'No browser job loaded');
   setText('browserJobStatus', currentJob && browserJob(currentJob) ? currentJob.status : 'Idle');
   setPill('pairStatusPill', saved(storageKeys.deviceToken) ? 'Paired' : 'Not paired', saved(storageKeys.deviceToken) ? 'ready' : 'needs');
+  if (jobOutput) jobOutput.textContent = safeJobDetails(currentJob);
 }
 
 async function pair() {
@@ -268,7 +305,6 @@ async function fetchNextJob() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Could not fetch job.');
     currentJob = data.job || null;
-    jobOutput.textContent = currentJob ? JSON.stringify(currentJob, null, 2) : 'No queued jobs.';
     renderCurrentJob();
     log(currentJob ? `Fetched job ${currentJob.id}.` : 'No queued jobs.');
   } catch (error) {
@@ -291,7 +327,6 @@ async function updateJobStatus(status, message) {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Status update failed.');
     currentJob.status = status;
-    jobOutput.textContent = JSON.stringify(currentJob, null, 2);
     renderCurrentJob(message);
     log(`Job ${currentJob.id} marked ${status}.`);
   } catch (error) {
@@ -333,7 +368,6 @@ async function runCurrentBrowserJob() {
       allowScreenshots: saved(storageKeys.allowScreenshots) === 'true'
     });
     currentJob.status = result.status || 'completed';
-    jobOutput.textContent = JSON.stringify(currentJob, null, 2);
     renderCurrentJob('Browser Automator finished. Review the visible browser before closing it.');
     browserLog(`Browser Automator job ${currentJob.id} ${currentJob.status}.`);
   } catch (error) {
@@ -412,7 +446,6 @@ async function runCurrentLaunchJob() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Launch status update failed.');
     currentJob.status = 'running';
-    jobOutput.textContent = JSON.stringify(currentJob, null, 2);
     renderCurrentJob('Local client launch started visibly on this PC.');
     log(`Launch job ${currentJob.id} started.`);
   } catch (error) {
@@ -468,12 +501,12 @@ async function detectClients() {
     const result = await window.gsCompanion.detectClients(names);
     detectedClients = result.clients || [];
     clientsOutput.textContent = detectedClients.length
-      ? JSON.stringify(detectedClients, null, 2)
+      ? safeClientDetails(detectedClients)
       : (result.warning || 'No clients detected.');
     renderClientSummary();
     if (instancesOutput) {
       instancesOutput.textContent = detectedClients.length
-        ? JSON.stringify(detectedClients, null, 2)
+        ? safeClientDetails(detectedClients)
         : (result.warning || 'No live sessions detected.');
     }
     log(`Detected ${detectedClients.length} client window(s).`);
@@ -506,7 +539,12 @@ async function launchLocalProfile() {
   }
   try {
     const result = await window.gsCompanion.launchClient({ executablePath, args });
-    profilesOutput.textContent = JSON.stringify(result, null, 2);
+    profilesOutput.textContent = [
+      'Launch requested visibly on this PC.',
+      `Process: ${result.process_name || 'Unknown'}`,
+      `PID: ${result.process_id || 'Unknown'}`,
+      `Path: ${executablePath}`
+    ].join('\n');
     const now = new Date().toISOString();
     detectedClients = [{
       process_name: result.process_name,
@@ -527,7 +565,7 @@ async function launchLocalProfile() {
         screenshots_captured: false
       }
     }];
-    if (instancesOutput) instancesOutput.textContent = JSON.stringify(detectedClients, null, 2);
+    if (instancesOutput) instancesOutput.textContent = safeClientDetails(detectedClients);
     renderClientSummary();
     log(`Launch requested for ${result.process_name}.`);
   } catch (error) {
@@ -542,8 +580,8 @@ document.getElementById('sendStatusButton').addEventListener('click', sendManual
 document.getElementById('detectClientsButton').addEventListener('click', detectClients);
 document.getElementById('stopTrackingButton').addEventListener('click', () => {
   detectedClients = detectedClients.map(item => ({ ...item, status: 'stopped', client_state: 'offline', current_activity: 'Offline / Last Seen', running: false, last_seen_at: new Date().toISOString() }));
-  clientsOutput.textContent = JSON.stringify(detectedClients, null, 2);
-  if (instancesOutput) instancesOutput.textContent = JSON.stringify(detectedClients, null, 2);
+  clientsOutput.textContent = safeClientDetails(detectedClients, 'No tracked clients.');
+  if (instancesOutput) instancesOutput.textContent = safeClientDetails(detectedClients, 'No live sessions detected.');
   renderClientSummary();
   log('Local tracking marked stopped. Send Status Update to publish.');
 });
@@ -606,8 +644,8 @@ document.getElementById('applyManualBankReportButton').addEventListener('click',
     wealth_source: 'companion_reported',
     wealth_updated_at: new Date().toISOString()
   };
-  clientsOutput.textContent = JSON.stringify(detectedClients, null, 2);
-  if (instancesOutput) instancesOutput.textContent = JSON.stringify(detectedClients, null, 2);
+  clientsOutput.textContent = safeClientDetails(detectedClients);
+  if (instancesOutput) instancesOutput.textContent = safeClientDetails(detectedClients);
   renderClientSummary();
   log('Manual bank report added to the selected detection. Click Send Status Update to publish it.');
 });

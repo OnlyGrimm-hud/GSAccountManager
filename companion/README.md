@@ -42,12 +42,12 @@ Current local-only automation behavior:
 - passwords, OTP codes, and other sensitive values are not written to logs
 - OTP code fill requires explicit user confirmation
 - screenshot steps require local opt-in and a user confirmation
-- selected proxy display is noted, but proxy browser launch is not production-enabled yet
+- selected workflow/account proxy credentials can be applied to the visible Playwright browser launch through the paired-device API
 
 Planned local-only features:
 
 - stronger selected-window screenshot controls
-- browser proxy launch support
+- broader proxy-provider testing and clearer connection diagnostics
 
 Commands:
 

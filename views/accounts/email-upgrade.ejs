@@ -1,0 +1,168 @@
+<%- include('../partials/head') %>
+<%
+  const loginValue = account.legacy_login || account.username || decrypted.login_email || '';
+  const targetEmail = decrypted.target_email || decrypted.jagex_email || '';
+  const currentEmail = decrypted.jagex_email || decrypted.target_email || account.username || '';
+  const selectedProxyId = accountProxyId ? String(accountProxyId) : '';
+  const selectedProxy = proxies.find(proxy => String(proxy.id) === selectedProxyId);
+  const connectedDevices = devices.filter(device => device.status === 'connected');
+  const passwordReady = Boolean(decrypted.legacy_password || decrypted.login_password || decrypted.jagex_password);
+  const maskHost = value => {
+    const text = String(value || '');
+    if (!text) return '';
+    return text.length <= 8 ? text : `${text.slice(0, 3)}...${text.slice(-3)}`;
+  };
+  const readiness = [
+    { label: 'Current login/email', ready: Boolean(loginValue), text: loginValue || 'Missing login/email' },
+    { label: 'Account password', ready: passwordReady, text: passwordReady ? 'Saved and encrypted' : 'Missing password' },
+    { label: 'Target/Jagex email', ready: Boolean(targetEmail), text: targetEmail || 'Add target email below' },
+    { label: 'GS Agent device', ready: devices.length > 0, text: connectedDevices.length ? `${connectedDevices.length} connected` : (devices.length ? 'Paired device available' : 'No paired device') },
+    { label: 'Browser Automator access', ready: Boolean(access && access.gates && access.gates.browserAutomator && access.gates.runBrowserTask), text: access && access.gates && access.gates.runBrowserTask ? 'Ready' : 'Upgrade or daily limit required' },
+    { label: 'OTP status', ready: true, text: decrypted.otp_secret ? 'OTP secret saved - fill requires confirmation' : 'No OTP secret saved' }
+  ];
+  const canQueue = readiness.every(item => item.ready);
+  const canSubmit = readiness.filter(item => item.label !== 'Target/Jagex email').every(item => item.ready);
+%>
+
+<section class="workflow-hero">
+  <div>
+    <p class="eyebrow">One-click account action</p>
+    <h2>Email Upgrade</h2>
+    <p class="muted">Queue a visible GS Browser Automator job for this account. Manual checks stay manual and the browser remains visible on your PC.</p>
+  </div>
+  <div class="actions">
+    <span class="status <%= canQueue ? 'ready' : 'needs_review' %>"><%= canQueue ? 'Ready' : 'Missing Info' %></span>
+    <a class="button small" href="/accounts">Cancel</a>
+  </div>
+</section>
+
+<section class="content-grid email-upgrade-grid">
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Selected Account</p>
+        <h2><%= account.display_name || loginValue || `Account ${account.id}` %></h2>
+      </div>
+      <a class="button small" href="/accounts/<%= account.id %>">Edit Account</a>
+    </div>
+    <div class="checklist-grid">
+      <p class="row-line"><span>Current login</span><strong class="full-value"><%= loginValue || 'Not saved' %></strong></p>
+      <p class="row-line"><span>Email/Jagex email</span><strong class="full-value"><%= currentEmail || 'Not saved' %></strong></p>
+      <p class="row-line"><span>Target email</span><strong class="full-value"><%= targetEmail || 'Missing' %></strong></p>
+      <p class="row-line"><span>Account type</span><strong><%= account.account_type || 'legacy' %></strong></p>
+      <p class="row-line"><span>Status</span><strong><%= account.status || 'available' %></strong></p>
+      <p class="row-line"><span>Assigned proxy</span><strong><%= selectedProxy ? `${selectedProxy.name || 'Proxy'} - ${maskHost(selectedProxy.host)}:${selectedProxy.port}` : 'Account/default or direct' %></strong></p>
+      <p class="row-line"><span>Proxy type/status</span><strong><%= selectedProxy ? `${selectedProxy.proxy_type || 'HTTP'} / ${selectedProxy.status || 'unknown'}` : 'No selected proxy' %></strong></p>
+      <p class="row-line"><span>OTP</span><strong><%= decrypted.otp_secret ? 'Available, confirmation required' : 'Not saved' %></strong></p>
+    </div>
+    <% if (decrypted.otp_secret) { %>
+      <div class="actions">
+        <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP Code</button>
+      </div>
+    <% } %>
+    <div class="notice">
+      <strong>Owned Webmail Verification - Coming Later</strong>
+      <p class="muted">This pass does not add webmail pools, email generation, or email verification automation. Email verification remains a manual step in the visible browser.</p>
+    </div>
+  </article>
+
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Readiness</p>
+        <h2>Preflight Checklist</h2>
+      </div>
+      <span class="status <%= helper.connected ? 'connected' : 'unknown' %>"><%= helper.statusLabel %></span>
+    </div>
+    <div class="checklist-grid">
+      <% readiness.forEach(item => { %>
+        <p class="row-line"><span><%= item.label %></span><strong><span class="status <%= item.ready ? 'ready' : 'failed' %>"><%= item.ready ? 'Ready' : 'Missing' %></span> <span class="muted"><%= item.text %></span></strong></p>
+      <% }) %>
+    </div>
+    <% if (!canSubmit) { %>
+      <p class="notice danger">Fix the missing checklist items before queuing this action. GS will not silently start a broken browser job.</p>
+    <% } else if (!targetEmail) { %>
+      <p class="notice">Add the target/Jagex email in the start form, then queue the job. The server validates it again before creating the local job.</p>
+    <% } else if (!helper.connected) { %>
+      <p class="notice">A paired device exists but is not currently connected. The job can queue, then GS Agent can fetch it when opened.</p>
+    <% } else { %>
+      <p class="notice">GS Agent is connected. Queue the job, then use GS Agent to fetch and run it visibly.</p>
+    <% } %>
+  </article>
+</section>
+
+<section class="content-grid email-upgrade-grid">
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Queue Job</p>
+        <h2>Start Email Upgrade</h2>
+      </div>
+      <span class="status queued">Visible browser</span>
+    </div>
+    <form method="post" action="/accounts/<%= account.id %>/email-upgrade" class="form-grid">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <label>Target/Jagex Email
+        <input name="target_email" value="<%= targetEmail %>" placeholder="new-email@example.com" required>
+      </label>
+      <label>GS Agent Device
+        <select name="companion_device_id">
+          <option value="">Any paired GS Agent</option>
+          <% devices.forEach(device => { %>
+            <option value="<%= device.id %>"><%= device.device_name || `Device ${device.id}` %> - <%= device.status || 'unknown' %><%= device.last_seen_at ? ` - ${new Date(device.last_seen_at).toLocaleString()}` : '' %></option>
+          <% }) %>
+        </select>
+      </label>
+      <label>Proxy
+        <select name="proxy_id">
+          <option value="">Use account/default proxy or direct</option>
+          <% proxies.forEach(proxy => { %>
+            <option value="<%= proxy.id %>" <%= String(proxy.id) === selectedProxyId ? 'selected' : '' %>><%= proxy.name || `${proxy.host}:${proxy.port}` %> - <%= proxy.proxy_type || 'HTTP' %> - <%= proxy.status || 'unknown' %></option>
+          <% }) %>
+        </select>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="include_otp" value="yes" <%= decrypted.otp_secret ? 'checked' : '' %>>
+        Include optional OTP fill step. GS Agent asks before filling the generated code.
+      </label>
+      <div class="notice">
+        <strong>Manual checks pause the job</strong>
+        <p class="muted">CAPTCHA, Cloudflare, 2FA prompts, email verification, phone verification, and security checks are never bypassed. Complete them in the visible browser, then click Continue in GS Agent to resume.</p>
+      </div>
+      <div class="actions">
+        <button class="button primary" <%= canSubmit ? '' : 'disabled' %>>Queue Email Upgrade</button>
+        <a class="button" href="/accounts/<%= account.id %>">Edit Account</a>
+        <a class="button" href="/proxies">Change Proxy</a>
+        <a class="button" href="/companion">Change GS Agent</a>
+      </div>
+    </form>
+  </article>
+
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Estimated Flow</p>
+        <h2>What GS Agent Will Do</h2>
+      </div>
+      <span class="tag">User-triggered</span>
+    </div>
+    <div class="setup-timeline">
+      <% [
+        ['1', 'Open visible browser', 'GS Agent launches Playwright locally.'],
+        ['2', 'Apply proxy if selected', selectedProxy ? 'Saved proxy credentials are requested by the paired device only.' : 'Runs direct unless you select or assign a proxy.'],
+        ['3', 'Fill current login/password', 'Values are pulled from your encrypted account record and are not logged.'],
+        ['4', 'Pause for manual checks', 'CAPTCHA, Cloudflare, security, email, phone, and 2FA checks stay manual.'],
+        ['5', 'Optional OTP fill', 'If saved, GS Agent asks before filling the generated OTP code.'],
+        ['6', 'Fill target email', 'GS fills the target/Jagex email and pauses for your final review.']
+      ].forEach(step => { %>
+        <article>
+          <div class="step-num"><%= step[0] %></div>
+          <h2><%= step[1] %></h2>
+          <p class="muted"><%= step[2] %></p>
+        </article>
+      <% }) %>
+    </div>
+  </article>
+</section>
+
+<%- include('../partials/foot') %>

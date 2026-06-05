@@ -186,31 +186,36 @@
               <span class="tag">Export only</span>
             <% } else { %>
               <a class="button small" href="/accounts/<%= account.id %>">View</a>
-              <a class="button small" href="/accounts/<%= account.id %>">Edit</a>
-              <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_login">Copy login</button>
-              <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_password">Copy pass</button>
-              <% if (account.otp_secret_encrypted) { %><button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP</button><% } %>
-              <form method="post" action="/accounts/<%= account.id %>/refresh-stats">
-                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                <button class="button small">Refresh Stats</button>
-              </form>
-              <a class="button small" href="/workflows?account_id=<%= account.id %>&template=email_upgrade">Email Upgrade</a>
-              <a class="button small" href="/workflows?account_id=<%= account.id %>">Start Automation</a>
-              <form method="post" action="/accounts/bulk">
-                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                <input type="hidden" name="bulk_action" value="launch_selected">
-                <input type="hidden" name="account_ids" value="<%= account.id %>">
-                <input type="hidden" name="bulk_client_profile_id" value="<%= clientProfiles[0] ? clientProfiles[0].id : '' %>">
-                <button class="button small" <%= clientProfiles.length && (isAdmin || (access && access.tier && access.tier.client_launcher_enabled)) ? '' : 'disabled' %>>Launch Client</button>
-              </form>
-              <form method="post" action="/accounts/<%= account.id %>/archive">
-                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                <button class="button small">Archive</button>
-              </form>
-              <form method="post" action="/accounts/<%= account.id %>/delete" data-confirm="Delete this local account record?">
-                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                <button class="button small danger">Delete</button>
-              </form>
+              <a class="button small primary" href="/accounts/<%= account.id %>/email-upgrade">Start Email Upgrade</a>
+              <details class="action-menu">
+                <summary>More actions</summary>
+                <div class="action-menu-panel">
+                  <a class="button small" href="/accounts/<%= account.id %>">Edit</a>
+                  <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_login">Copy login</button>
+                  <button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/legacy_password">Copy pass</button>
+                  <% if (account.otp_secret_encrypted) { %><button class="button small copy-api" data-url="/accounts/<%= account.id %>/copy/otp_code">Copy OTP</button><% } %>
+                  <form method="post" action="/accounts/<%= account.id %>/refresh-stats">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button class="button small">Refresh Stats</button>
+                  </form>
+                  <a class="button small" href="/workflows?account_id=<%= account.id %>">Start Automation</a>
+                  <form method="post" action="/accounts/bulk">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" name="bulk_action" value="launch_selected">
+                    <input type="hidden" name="account_ids" value="<%= account.id %>">
+                    <input type="hidden" name="bulk_client_profile_id" value="<%= clientProfiles[0] ? clientProfiles[0].id : '' %>">
+                    <button class="button small" <%= clientProfiles.length && (isAdmin || (access && access.tier && access.tier.client_launcher_enabled)) ? '' : 'disabled' %>>Launch Client</button>
+                  </form>
+                  <form method="post" action="/accounts/<%= account.id %>/archive">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button class="button small">Archive</button>
+                  </form>
+                  <form method="post" action="/accounts/<%= account.id %>/delete" data-confirm="Delete this local account record?">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button class="button small danger">Delete</button>
+                  </form>
+                </div>
+              </details>
             <% } %>
           </td>
         </tr>

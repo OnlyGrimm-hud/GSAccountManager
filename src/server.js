@@ -612,6 +612,34 @@ app.get('/api/companion/accounts/:id/field/:field', companionLimiter, async (req
   } catch (err) { next(err); }
 });
 
+app.get('/api/companion/proxies/:id/credentials', companionLimiter, async (req, res, next) => {
+  try {
+    const device = await companionDeviceFromRequest(req);
+    if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
+    if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Browser Automator proxy credentials require active access.' });
+    const result = await db.query(
+      `SELECT id, name, proxy_type, host, port, username_encrypted, password_encrypted, status
+       FROM proxies
+       WHERE id=$1 AND user_id=$2`,
+      [req.params.id, device.user_id]
+    );
+    const proxy = result.rows[0];
+    if (!proxy) return res.status(404).json({ error: 'Proxy not found.' });
+    await activity.log(device.user_id, 'companion_proxy_requested', 'proxy', proxy.id, 'GS Browser Automator requested proxy configuration', { proxy_type: proxy.proxy_type, status: proxy.status });
+    await auditLog(device.user_id, device.user_id, 'companion_proxy_requested', 'proxy', proxy.id, 'GS Browser Automator requested proxy configuration', { proxy_type: proxy.proxy_type, status: proxy.status });
+    res.json({
+      id: proxy.id,
+      name: proxy.name || '',
+      proxy_type: proxy.proxy_type || 'HTTP',
+      host: proxy.host,
+      port: proxy.port,
+      username: decrypt(proxy.username_encrypted) || '',
+      password: decrypt(proxy.password_encrypted) || '',
+      status: proxy.status
+    });
+  } catch (err) { next(err); }
+});
+
 app.use(requireAuth, requireUserRecord);
 
 app.post('/logout', requireAuth, async (req, res, next) => {
@@ -1585,6 +1613,89 @@ app.post('/accounts/bulk', requireAuth, async (req, res, next) => {
     await auditLog(userId, userId, action, 'account', null, `Bulk account action ${action} affected ${affected} account(s)`, { count: affected });
     if (action === 'launch_selected') return res.redirect(`/local-jobs?queued=${affected}`);
     res.redirect(`/accounts?bulk=${encodeURIComponent(action)}&affected=${affected}`);
+  } catch (err) { next(err); }
+});
+
+app.get('/accounts/:id/email-upgrade', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const access = await accessSummaryForUser(req.currentUserRecord);
+    const { account, decrypted } = await loadAccount(userId, req.params.id);
+    const accountProxyId = account.assigned_http_proxy_id || account.proxy_id || account.assigned_socks5_proxy_id || null;
+    const [devices, proxies, workflow, helper] = await Promise.all([
+      db.query(`SELECT id, device_name, status, last_seen_at FROM companion_devices WHERE user_id=$1 AND status <> 'revoked' ORDER BY last_seen_at DESC NULLS LAST`, [userId]),
+      db.query(`SELECT id, name, proxy_type, host, port, status FROM proxies WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 200`, [userId]),
+      ensureEmailUpgradeWorkflow(userId),
+      helperStatus(userId)
+    ]);
+    res.render('accounts/email-upgrade', {
+      title: 'Start Email Upgrade',
+      account,
+      decrypted,
+      devices: devices.rows,
+      proxies: proxies.rows,
+      workflow,
+      helper,
+      access,
+      accountProxyId
+    });
+  } catch (err) { next(err); }
+});
+
+app.post('/accounts/:id/email-upgrade', requireAuth, async (req, res, next) => {
+  try {
+    const userId = req.currentUserId;
+    const access = await accessSummaryForUser(req.currentUserRecord);
+    if (!access.gates.browserAutomator) throw new Error('Browser Automator is not available for your subscription tier.');
+    if (!access.gates.runBrowserTask) throw new Error('Daily browser task limit reached for your tier.');
+    const targetEmail = escapeText(req.body.target_email);
+    if (targetEmail) {
+      await db.query(
+        `UPDATE accounts SET target_email_encrypted=$1, updated_at=NOW() WHERE id=$2 AND user_id=$3`,
+        [encrypt(targetEmail), req.params.id, userId]
+      );
+    }
+    const { account, decrypted } = await loadAccount(userId, req.params.id);
+    const accountId = Number(account.id);
+    const deviceId = req.body.companion_device_id ? Number(req.body.companion_device_id) : null;
+    const proxyId = req.body.proxy_id ? Number(req.body.proxy_id) : (account.assigned_http_proxy_id || account.proxy_id || account.assigned_socks5_proxy_id || null);
+    if (deviceId) await assertDeviceOwnership(userId, deviceId);
+    if (proxyId) await assertProxyOwnership(userId, proxyId);
+    if (!(decrypted.target_email || decrypted.jagex_email)) {
+      throw new Error('Add a target/Jagex email before starting Email Upgrade.');
+    }
+    const workflow = await ensureEmailUpgradeWorkflow(userId);
+    const steps = emailUpgradeRunSteps({ includeOtp: req.body.include_otp === 'yes' });
+    await validateWorkflowRunPreflight(userId, steps, { accountId });
+    const run = await db.query(
+      `INSERT INTO workflow_runs (user_id, workflow_id, account_id, proxy_id, companion_device_id, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'queued', NOW(), NOW())
+       RETURNING id`,
+      [userId, workflow.id, accountId, proxyId, deviceId]
+    );
+    const payload = await workflowJobPayload(userId, workflow, steps, { accountId, proxyId, deviceId });
+    payload.product_action = {
+      type: 'email_upgrade',
+      label: 'Email Upgrade',
+      one_click: true,
+      manual_checks_pause: true,
+      future_email_verification_provider: 'owned_webmail_placeholder'
+    };
+    const job = await db.query(
+      `INSERT INTO companion_jobs (user_id, companion_device_id, workflow_id, workflow_run_id, account_id, proxy_id, job_type, status, payload, safe_payload_json, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'workflow_run', 'queued', $7, $7, NOW())
+       RETURNING id`,
+      [userId, deviceId, workflow.id, run.rows[0].id, accountId, proxyId, payload]
+    );
+    await db.query(
+      `UPDATE accounts SET upgrade_status='in_progress', status=CASE WHEN status='available' THEN 'in_progress' ELSE status END, updated_at=NOW()
+       WHERE id=$1 AND user_id=$2`,
+      [accountId, userId]
+    );
+    await insertWorkflowRunEvent(userId, run.rows[0].id, 'queued', 'One-click Email Upgrade queued for GS Browser Automator.', { companion_job_id: job.rows[0].id, product_action: 'email_upgrade' });
+    await activity.log(userId, 'email_upgrade_started', 'workflow_run', run.rows[0].id, 'Queued one-click Email Upgrade', { account_id: accountId, workflow_id: workflow.id });
+    await auditLog(userId, userId, 'email_upgrade_started', 'workflow_run', run.rows[0].id, 'Queued one-click Email Upgrade', { account_id: accountId, workflow_id: workflow.id });
+    res.redirect(`/workflows/runs/${run.rows[0].id}?email_upgrade=queued`);
   } catch (err) { next(err); }
 });
 
@@ -3856,7 +3967,8 @@ async function clientLaunchPayload(userId, profile, options) {
       name: proxy.name,
       proxy_type: proxy.proxy_type,
       endpoint: `${maskEndpoint(proxy.host)}:${proxy.port}`,
-      status: proxy.status
+      status: proxy.status,
+      credentials_url: `/api/companion/proxies/${proxy.id}/credentials`
     } : null,
     safety: {
       visible_user_triggered_launch: true,
@@ -4270,7 +4382,9 @@ function workflowTemplateSteps(type) {
       { step_type: 'open_url', label: 'Open account portal', config: { url: 'https://account.jagex.com/', visible_browser: true } },
       { step_type: 'fill_field', label: 'Fill current login/email', config: { selector: '', matcher: 'email, username, login', value_ref: 'account.login_email' } },
       { step_type: 'fill_field', label: 'Fill current password', config: { selector: '', matcher: 'password', value_ref: 'account.login_password', sensitive: true } },
-      { step_type: 'pause_for_user', label: 'Sign in and open email change screen', manual_pause: true, config: { message: 'Sign in manually, complete any CAPTCHA, 2FA, email, phone, or security checks, then open the email upgrade/change email screen before continuing.' } },
+      { step_type: 'pause_for_user', label: 'Manual CAPTCHA/security check', manual_pause: true, config: { message: 'Sign in or continue manually. If CAPTCHA, Cloudflare, or a security check appears, complete it in the visible browser, then click Continue in GS Agent.' } },
+      { step_type: 'fill_field', label: 'Fill OTP code if requested', config: { matcher: 'otp, authenticator, verification code, one-time code, 2fa', value_ref: 'account.otp_code', sensitive: true, optional: true, timeout: 5000 } },
+      { step_type: 'pause_for_user', label: 'Open email change screen', manual_pause: true, config: { message: 'If an OTP/security step appeared, submit it manually. Then open the email upgrade/change email screen and click Continue in GS Agent.' } },
       { step_type: 'fill_field', label: 'Fill target/Jagex email', config: { selector: '', matcher: 'new email, target email, jagex email, email address', value_refs: ['account.target_email', 'account.jagex_email'] } },
       { step_type: 'pause_for_user', label: 'Review and submit manually', manual_pause: true, config: { message: 'Review the visible page. Submit manually, complete email verification manually, and finish any account-security steps manually.' } }
     ],
@@ -4343,6 +4457,7 @@ async function validateWorkflowRunPreflight(userId, steps, options = {}) {
       }
     }
     if (!hasValue) {
+      if (item.step.config && item.step.config.optional === true) continue;
       const label = item.step.label || item.step.step_type || 'configured step';
       throw new Error(`Selected account is missing ${item.refs.map(readableAccountRef).join(' or ')} for "${label}". Add the value on the account first, then queue the job again.`);
     }
@@ -4366,6 +4481,39 @@ function readableAccountRef(ref) {
   return String(ref || '').replace(/^account\./, '').replace(/_/g, ' ');
 }
 
+async function ensureEmailUpgradeWorkflow(userId) {
+  await ensureStarterWorkflows(userId);
+  const existing = await db.query(
+    `SELECT * FROM workflows
+     WHERE user_id=$1 AND type='email_upgrade'
+     ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END, created_at ASC
+     LIMIT 1`,
+    [userId]
+  );
+  if (existing.rows[0]) return existing.rows[0];
+  const workflow = await db.query(
+    `INSERT INTO workflows (user_id, name, description, type, status, updated_at)
+     VALUES ($1, $2, $3, 'email_upgrade', 'active', NOW())
+     RETURNING *`,
+    [userId, workflowTemplateName('email_upgrade'), workflowTemplateDescription('email_upgrade')]
+  );
+  await replaceWorkflowSteps(userId, workflow.rows[0].id, workflowTemplateSteps('email_upgrade'));
+  return workflow.rows[0];
+}
+
+function emailUpgradeRunSteps(options = {}) {
+  const includeOtp = options.includeOtp !== false;
+  return workflowTemplateSteps('email_upgrade')
+    .filter(step => includeOtp || step.config.value_ref !== 'account.otp_code')
+    .map((step, index) => ({
+      step_order: index + 1,
+      step_type: step.step_type,
+      label: step.label,
+      manual_pause: Boolean(step.manual_pause),
+      config: safeWorkflowStepConfig(step.config || {})
+    }));
+}
+
 async function replaceWorkflowSteps(userId, workflowId, steps) {
   await db.query('DELETE FROM workflow_steps WHERE user_id=$1 AND workflow_id=$2', [userId, workflowId]);
   const normalized = Array.isArray(steps) ? steps : workflowTemplateSteps('custom');
@@ -4385,7 +4533,7 @@ async function workflowJobPayload(userId, workflow, steps, options) {
   if (options.accountId) {
     const result = await db.query(
       `SELECT id, account_type, username, legacy_login, display_name, status, category,
-              COALESCE(assigned_http_proxy_id, proxy_id) account_proxy_id
+              COALESCE(assigned_http_proxy_id, proxy_id, assigned_socks5_proxy_id) account_proxy_id
        FROM accounts WHERE id=$1 AND user_id=$2`,
       [options.accountId, userId]
     );
@@ -4414,7 +4562,8 @@ async function workflowJobPayload(userId, workflow, steps, options) {
       name: proxy.name,
       proxy_type: proxy.proxy_type,
       endpoint: `${maskEndpoint(proxy.host)}:${proxy.port}`,
-      status: proxy.status
+      status: proxy.status,
+      credentials_url: `/api/companion/proxies/${proxy.id}/credentials`
     } : null,
     safety: {
       visible_browser_required: true,
@@ -5195,6 +5344,7 @@ module.exports = {
     workflowTemplateName,
     workflowTemplateDescription,
     workflowTemplateSteps,
+    emailUpgradeRunSteps,
     accountValueRefsFromConfig,
     readableAccountRef,
     setupStepsForWorkspace,

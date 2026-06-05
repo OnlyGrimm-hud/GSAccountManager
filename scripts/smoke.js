@@ -20,6 +20,13 @@ assert(browserAutomatorSource.includes('manualCheckPatterns'));
 assert(browserAutomatorSource.includes('click_skipped_for_manual_submit'));
 assert(browserAutomatorSource.includes('bypass CAPTCHA, 2FA, email verification, phone verification, or security checks'));
 assert(browserAutomatorSource.includes('configuredValueRefs'));
+assert(browserAutomatorSource.includes('optional_fill_skipped'));
+assert(browserAutomatorSource.includes('proxyLaunchOptions'));
+assert(browserAutomatorSource.includes('browser_proxy_enabled'));
+const companionRendererSource = fs.readFileSync(path.join(__dirname, '..', 'companion', 'src', 'renderer', 'renderer.js'), 'utf8');
+assert(companionRendererSource.includes('safeJobDetails'));
+assert(companionRendererSource.includes('safeClientDetails'));
+assert(!companionRendererSource.includes('JSON.stringify(currentJob'));
 
 let requireAuth;
 let db;
@@ -203,8 +210,13 @@ async function main() {
     assert(serverSource.includes("app.get('/downloads'"));
     assert(serverSource.includes("app.get('/companion'"));
     assert(serverSource.includes("app.get('/workflows'"));
+    assert(serverSource.includes("app.get('/accounts/:id/email-upgrade'"));
+    assert(serverSource.includes("app.post('/accounts/:id/email-upgrade'"));
+    assert(serverSource.includes("app.get('/api/companion/proxies/:id/credentials'"));
     assert(serverSource.includes('email_upgrade'));
     assert(serverSource.includes('Email upgrade / change email'));
+    assert(serverSource.includes('emailUpgradeRunSteps'));
+    assert(serverSource.includes('account.otp_code'));
     assert(serverSource.includes("app.post('/accounts/import'"));
     assert(serverSource.includes("app.post('/accounts/export'"));
     assert(serverSource.includes("app.post('/accounts/:id/refresh-stats'"));
@@ -282,6 +294,8 @@ async function main() {
   assert(routeExists('post', '/admin/subscriptions/payment-settings/:id'));
   assert(routeExists('post', '/accounts/import'));
   assert(routeExists('post', '/accounts/export'));
+  assert(routeExists('get', '/accounts/:id/email-upgrade'));
+  assert(routeExists('post', '/accounts/:id/email-upgrade'));
   assert(routeExists('post', '/accounts/:id/refresh-stats'));
   assert(routeExists('post', '/accounts/bulk'));
   assert(routeExists('post', '/proxies/import'));
@@ -294,6 +308,7 @@ async function main() {
   assert(routeExists('post', '/api/companion/clients/status'));
   assert(routeExists('post', '/api/companion/clients/instance'));
   assert(routeExists('post', '/api/companion/snapshots'));
+  assert(routeExists('get', '/api/companion/proxies/:id/credentials'));
   assert(routeExists('get', '/api/companion/jobs/next'));
   assert(routeExists('get', '/api/companion/jobs/poll'));
   assert(routeExists('post', '/api/companion/jobs/:id/status'));
@@ -342,7 +357,10 @@ async function main() {
   assert.strictEqual(testInternals.workflowTemplateName('email_upgrade'), 'Email upgrade / change email');
   const emailUpgradeSteps = testInternals.workflowTemplateSteps('email_upgrade');
   assert(emailUpgradeSteps.some(step => step.step_type === 'fill_field' && Array.isArray(step.config.value_refs)));
+  assert(emailUpgradeSteps.some(step => step.config.value_ref === 'account.otp_code' && step.config.optional === true));
   assert(emailUpgradeSteps.some(step => step.step_type === 'pause_for_user' && /email verification/i.test(step.config.message)));
+  const emailUpgradeWithoutOtp = testInternals.emailUpgradeRunSteps({ includeOtp: false });
+  assert(!emailUpgradeWithoutOtp.some(step => step.config.value_ref === 'account.otp_code'));
   assert.deepStrictEqual(
     testInternals.accountValueRefsFromConfig({ value_refs: ['account.target_email', 'account.jagex_email'], value_ref: 'account.login_email' }),
     ['account.target_email', 'account.jagex_email', 'account.login_email']
