@@ -23,9 +23,12 @@ assert(browserAutomatorSource.includes('configuredValueRefs'));
 assert(browserAutomatorSource.includes('optional_fill_skipped'));
 assert(browserAutomatorSource.includes('proxyLaunchOptions'));
 assert(browserAutomatorSource.includes('browser_proxy_enabled'));
+assert(browserAutomatorSource.includes('normalizeWebsiteUrl'));
+assert(browserAutomatorSource.includes('www.gsaccountmanager.com'));
 const companionRendererSource = fs.readFileSync(path.join(__dirname, '..', 'companion', 'src', 'renderer', 'renderer.js'), 'utf8');
 assert(companionRendererSource.includes('safeJobDetails'));
 assert(companionRendererSource.includes('safeClientDetails'));
+assert(companionRendererSource.includes('normalizeWebsiteUrl'));
 assert(!companionRendererSource.includes('JSON.stringify(currentJob'));
 
 let requireAuth;
@@ -213,6 +216,8 @@ async function main() {
     assert(serverSource.includes("app.get('/accounts/:id/email-upgrade'"));
     assert(serverSource.includes("app.post('/accounts/:id/email-upgrade'"));
     assert(serverSource.includes("app.get('/api/companion/proxies/:id/credentials'"));
+    assert(serverSource.includes('companionHasActiveJobDataAccess'));
+    assert(serverSource.includes('Proxy credential access requires an active GS Agent job'));
     assert(serverSource.includes('email_upgrade'));
     assert(serverSource.includes('Email upgrade / change email'));
     assert(serverSource.includes('emailUpgradeRunSteps'));

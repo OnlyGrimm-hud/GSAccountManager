@@ -604,6 +604,9 @@ app.get('/api/companion/accounts/:id/field/:field', companionLimiter, async (req
     if (!device) return res.status(401).json({ error: 'Invalid GS Agent token.' });
     if (!await userIdHasFullAccess(device.user_id)) return res.status(403).json({ error: 'GS Browser Automator account fields require active access.' });
     const { account, decrypted } = await loadAccount(device.user_id, req.params.id);
+    if (!await companionHasActiveJobDataAccess(device, { accountId: account.id })) {
+      return res.status(403).json({ error: 'Account field access requires an active GS Agent job for this account.' });
+    }
     const field = escapeText(req.params.field);
     const value = accountFieldForCompanion(account, decrypted, field);
     await activity.log(device.user_id, 'companion_field_requested', 'account', account.id, `GS Browser Automator requested ${field}`, { field });
@@ -625,6 +628,9 @@ app.get('/api/companion/proxies/:id/credentials', companionLimiter, async (req, 
     );
     const proxy = result.rows[0];
     if (!proxy) return res.status(404).json({ error: 'Proxy not found.' });
+    if (!await companionHasActiveJobDataAccess(device, { proxyId: proxy.id })) {
+      return res.status(403).json({ error: 'Proxy credential access requires an active GS Agent job for this proxy.' });
+    }
     await activity.log(device.user_id, 'companion_proxy_requested', 'proxy', proxy.id, 'GS Browser Automator requested proxy configuration', { proxy_type: proxy.proxy_type, status: proxy.status });
     await auditLog(device.user_id, device.user_id, 'companion_proxy_requested', 'proxy', proxy.id, 'GS Browser Automator requested proxy configuration', { proxy_type: proxy.proxy_type, status: proxy.status });
     res.json({
@@ -3712,6 +3718,33 @@ async function companionDeviceFromRequest(req) {
     [hashDeviceToken(token)]
   );
   return result.rows[0] || null;
+}
+
+async function companionHasActiveJobDataAccess(device, options = {}) {
+  const clauses = [
+    'user_id=$1',
+    '(companion_device_id IS NULL OR companion_device_id=$2)',
+    "status IN ('accepted','running','paused','waiting_for_user')"
+  ];
+  const params = [device.user_id, device.id];
+  if (options.accountId) {
+    params.push(Number(options.accountId));
+    clauses.push(`(account_id=$${params.length} OR payload->'account'->>'id'=$${params.length}::text)`);
+  }
+  if (options.proxyId) {
+    params.push(Number(options.proxyId));
+    clauses.push(`(proxy_id=$${params.length} OR payload->'proxy'->>'id'=$${params.length}::text)`);
+  }
+  if (params.length === 2) return false;
+  const result = await db.query(
+    `SELECT id
+     FROM companion_jobs
+     WHERE ${clauses.join(' AND ')}
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    params
+  );
+  return Boolean(result.rows[0]);
 }
 
 async function clientProfileFromBody(userId, body) {

@@ -30,6 +30,28 @@ function save(key, value) {
   window.localStorage.setItem(key, value);
 }
 
+function normalizeWebsiteUrl(value) {
+  let raw = String(value || '').trim();
+  if (!raw) return '';
+  if (!/^https?:\/\//i.test(raw)) {
+    const local = /^localhost(?::|\/|$)|^127\.|^\[::1\]/i.test(raw);
+    raw = `${local ? 'http' : 'https'}://${raw}`;
+  }
+  try {
+    const url = new URL(raw);
+    if (url.hostname.toLowerCase() === 'gsaccountmanager.com') {
+      url.hostname = 'www.gsaccountmanager.com';
+    }
+    return url.origin.replace(/\/+$/, '');
+  } catch (_) {
+    return raw.replace(/\/+$/, '');
+  }
+}
+
+function savedBaseUrl(fallback = '') {
+  return normalizeWebsiteUrl(saved(storageKeys.baseUrl, fallback));
+}
+
 function el(id) {
   return document.getElementById(id);
 }
@@ -83,7 +105,11 @@ function browserLog(message) {
 }
 
 function refreshStatus() {
-  const baseUrl = saved(storageKeys.baseUrl, document.getElementById('baseUrl').value).replace(/\/+$/, '');
+  const baseUrl = savedBaseUrl(document.getElementById('baseUrl').value);
+  if (baseUrl) {
+    save(storageKeys.baseUrl, baseUrl);
+    document.getElementById('baseUrl').value = baseUrl;
+  }
   const processNames = saved(storageKeys.processNames, 'RuneLite,Jagex Launcher,JagexLauncher,osclient,DreamBot');
   const detectionEnabled = saved(storageKeys.localDetectionEnabled) === 'true';
   const paired = Boolean(saved(storageKeys.deviceToken));
@@ -226,7 +252,7 @@ function renderCurrentJob(note = '') {
 }
 
 async function pair() {
-  const baseUrl = document.getElementById('baseUrl').value.replace(/\/+$/, '');
+  const baseUrl = normalizeWebsiteUrl(document.getElementById('baseUrl').value);
   const code = document.getElementById('pairingCode').value.trim();
   const deviceName = document.getElementById('deviceName').value.trim() || 'GS Agent';
   pairOutput.textContent = 'Pairing...';
@@ -258,7 +284,7 @@ async function pair() {
 }
 
 async function heartbeat() {
-  const baseUrl = saved(storageKeys.baseUrl).replace(/\/+$/, '');
+  const baseUrl = savedBaseUrl();
   const token = saved(storageKeys.deviceToken);
   if (!baseUrl || !token) {
     log('Heartbeat skipped: device is not paired.');
@@ -292,7 +318,7 @@ function authHeaders() {
 }
 
 async function fetchNextJob() {
-  const baseUrl = saved(storageKeys.baseUrl).replace(/\/+$/, '');
+  const baseUrl = savedBaseUrl();
   const token = saved(storageKeys.deviceToken);
   if (!baseUrl || !token) {
     log('Job fetch skipped: device is not paired.');
@@ -313,7 +339,7 @@ async function fetchNextJob() {
 }
 
 async function updateJobStatus(status, message) {
-  const baseUrl = saved(storageKeys.baseUrl).replace(/\/+$/, '');
+  const baseUrl = savedBaseUrl();
   if (!currentJob) {
     log('No current job loaded.');
     return;
@@ -351,7 +377,7 @@ async function runCurrentBrowserJob() {
     log('Browser Automator job cancelled before start.');
     return;
   }
-  const baseUrl = saved(storageKeys.baseUrl).replace(/\/+$/, '');
+  const baseUrl = savedBaseUrl();
   const token = saved(storageKeys.deviceToken);
   if (!baseUrl || !token) {
     log('Browser Automator skipped: device is not paired.');
@@ -409,7 +435,7 @@ async function runCurrentLaunchJob() {
   }
   try {
     const launch = await window.gsCompanion.launchClient({ executablePath, args });
-    const baseUrl = saved(storageKeys.baseUrl).replace(/\/+$/, '');
+    const baseUrl = savedBaseUrl();
     const now = new Date().toISOString();
     const clientInstance = {
       client_profile_id: currentJob.client_profile_id,
@@ -455,7 +481,7 @@ async function runCurrentLaunchJob() {
 }
 
 async function sendManualClientStatus() {
-  const baseUrl = saved(storageKeys.baseUrl).replace(/\/+$/, '');
+  const baseUrl = savedBaseUrl();
   const token = saved(storageKeys.deviceToken);
   if (!baseUrl || !token) {
     log('Client status skipped: device is not paired.');
@@ -679,7 +705,7 @@ document.addEventListener('click', event => {
   });
 });
 
-document.getElementById('baseUrl').value = saved(storageKeys.baseUrl, 'https://gsaccountmanager.com');
+document.getElementById('baseUrl').value = savedBaseUrl('https://www.gsaccountmanager.com');
 refreshStatus();
 renderClientSummary();
 

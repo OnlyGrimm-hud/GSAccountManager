@@ -453,7 +453,7 @@ async function isSubmitLikeClick(locator) {
 function normalizeRequest(request, emit, ownerWindow) {
   const job = request && request.job ? request.job : {};
   const payload = job.payload || {};
-  const baseUrl = String(request && request.baseUrl ? request.baseUrl : '').replace(/\/+$/, '');
+  const baseUrl = normalizeWebsiteUrl(request && request.baseUrl ? request.baseUrl : '');
   const token = String(request && request.token ? request.token : '').trim();
   if (!baseUrl) throw new Error('Website URL is required.');
   if (!token) throw new Error('Device token is required.');
@@ -467,6 +467,24 @@ function normalizeRequest(request, emit, ownerWindow) {
     emit,
     ownerWindow
   };
+}
+
+function normalizeWebsiteUrl(value) {
+  let raw = String(value || '').trim();
+  if (!raw) return '';
+  if (!/^https?:\/\//i.test(raw)) {
+    const local = /^localhost(?::|\/|$)|^127\.|^\[::1\]/i.test(raw);
+    raw = `${local ? 'http' : 'https'}://${raw}`;
+  }
+  try {
+    const url = new URL(raw);
+    if (url.hostname.toLowerCase() === 'gsaccountmanager.com') {
+      url.hostname = 'www.gsaccountmanager.com';
+    }
+    return url.origin.replace(/\/+$/, '');
+  } catch (_) {
+    return raw.replace(/\/+$/, '');
+  }
 }
 
 function normalizeSteps(job) {
