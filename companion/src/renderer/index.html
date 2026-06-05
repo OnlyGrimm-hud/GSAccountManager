@@ -29,11 +29,24 @@
     </nav>
 
     <section class="panel" data-tab-panel="pair">
-      <h2>Pair This PC Once</h2>
-      <p>Pairing stores a long-lived device token locally. You should not need to pair again unless you revoke this device, clear local app data, or move to another computer.</p>
+      <div class="panel-head">
+        <div>
+          <h2>Pair This PC Once</h2>
+          <p>Pairing stores a long-lived device token locally. You should not need to pair again unless you revoke this device, clear local app data, or move to another computer.</p>
+        </div>
+        <span id="pairStatusPill" class="status-pill">Not paired</span>
+      </div>
+      <div class="status-grid compact">
+        <p><span>Website</span><strong id="pairWebsite">Not configured</strong></p>
+        <p><span>Device</span><strong id="pairDeviceId">Not paired</strong></p>
+        <p><span>Install ID</span><strong id="pairInstallId">Not generated</strong></p>
+      </div>
       <label>Website URL <input id="baseUrl" value="https://gsaccountmanager.com"></label>
       <label>Pairing Code <input id="pairingCode" placeholder="GS-XXXXXXXX"></label>
-      <button id="pairButton">Pair GS Agent</button>
+      <div class="actions">
+        <button id="pairButton">Pair GS Agent</button>
+        <button id="heartbeatButtonPair" type="button">Test Heartbeat</button>
+      </div>
       <pre id="pairOutput">Not paired.</pre>
     </section>
 
@@ -45,7 +58,9 @@
         <p><span>Install ID</span><strong id="statusInstallId">Not generated</strong></p>
         <p><span>Heartbeat</span><strong id="statusHeartbeat">Not sent</strong></p>
       </div>
-      <button id="heartbeatButton">Send Heartbeat</button>
+      <div class="actions">
+        <button id="heartbeatButton">Send Heartbeat</button>
+      </div>
       <p>GS Agent starts and monitors local client tools. GS Browser Automator runs visible browser jobs. Both use the same paired device slot.</p>
     </section>
 
@@ -94,12 +109,28 @@
     <section class="panel" data-tab-panel="jobs" hidden>
       <h2>Jobs</h2>
       <p>Fetch jobs from GS Account Manager and run only user-approved visible actions. Use Run Current Launch Job for queued client launches, and Run Browser Automator Job for email upgrade/change-email browser jobs.</p>
+      <div class="job-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Current Job</p>
+            <h3 id="currentJobTitle">No job loaded</h3>
+          </div>
+          <span id="currentJobStatus" class="status-pill">Idle</span>
+        </div>
+        <div class="status-grid compact">
+          <p><span>Job ID</span><strong id="currentJobId">None</strong></p>
+          <p><span>Type</span><strong id="currentJobType">None</strong></p>
+          <p><span>Target</span><strong id="currentJobTarget">None</strong></p>
+          <p><span>Last update</span><strong id="currentJobUpdated">Never</strong></p>
+        </div>
+        <p id="currentJobHint" class="notice">Click Fetch Next Job after queueing a launch or Browser Automator job on the website.</p>
+      </div>
       <div class="actions">
         <button id="fetchJobButton">Fetch Next Job</button>
         <button id="runBrowserJobButton">Run Browser Automator Job</button>
         <button id="runLaunchJobButton">Run Current Launch Job</button>
         <button id="closeBrowserButton">Close GS Browser Automator</button>
-        <button id="markRunningButton">Mark Running</button>
+        <button id="continueJobButton">Continue After Manual Step</button>
         <button id="markWaitingButton">Pause For Manual Check</button>
         <button id="markCompleteButton">Mark Complete</button>
         <button id="markFailedButton">Mark Failed</button>
@@ -128,17 +159,28 @@
     <section class="panel" data-tab-panel="browser" hidden>
       <h2>GS Browser Automator</h2>
       <p>Run queued Browser Automator jobs in a visible local Chromium window. Jobs can open pages, wait for fields, fill configured visible fields including user-owned passwords after confirmation, click safe non-submit controls, request screenshots, and pause for manual verification.</p>
+      <div class="status-grid compact">
+        <p><span>Browser job</span><strong id="browserJobId">No job loaded</strong></p>
+        <p><span>Status</span><strong id="browserJobStatus">Idle</strong></p>
+        <p><span>Last event</span><strong id="browserLastEvent">None</strong></p>
+      </div>
       <div class="actions">
         <button id="runBrowserJobButton2">Run Current Browser Job</button>
         <button id="closeBrowserButton2">Close GS Browser Automator</button>
         <button id="fetchJobButton2">Fetch Next Job</button>
+        <button id="browserPauseButton">Pause For Manual Check</button>
+        <button id="browserContinueButton">Continue After Manual Step</button>
+        <button id="clearBrowserLogsButton" type="button">Clear Browser Logs</button>
       </div>
       <pre id="browserOutput">No browser automation job running.</pre>
       <p>CAPTCHA, 2FA, email verification, phone verification, Cloudflare, and security checks pause for manual completion. Submit-like clicks are left for the user.</p>
     </section>
 
     <section class="panel" data-tab-panel="logs" hidden>
-      <h2>Logs</h2>
+      <div class="panel-head">
+        <h2>Logs</h2>
+        <button id="clearLogsButton" type="button">Clear Logs</button>
+      </div>
       <pre id="logsOutput">GS Agent started.</pre>
     </section>
 

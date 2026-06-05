@@ -7,6 +7,7 @@ const profilesOutput = document.getElementById('profilesOutput');
 const browserOutput = document.getElementById('browserOutput');
 let currentJob = null;
 let detectedClients = [];
+const maxLogLines = 120;
 const storageKeys = {
   baseUrl: 'gsam.baseUrl',
   deviceToken: 'gsam.deviceToken',
@@ -29,6 +30,31 @@ function save(key, value) {
   window.localStorage.setItem(key, value);
 }
 
+function el(id) {
+  return document.getElementById(id);
+}
+
+function setText(id, value) {
+  const node = el(id);
+  if (node) node.textContent = value || '';
+}
+
+function statusClass(value) {
+  return String(value || 'idle').toLowerCase().replace(/[^a-z0-9_ -]/g, '').replace(/\s+/g, '_');
+}
+
+function setPill(id, label, state) {
+  const node = el(id);
+  if (!node) return;
+  node.textContent = label || 'Idle';
+  node.className = `status-pill ${statusClass(state || label)}`;
+}
+
+function prependLogLine(target, line) {
+  const existing = String(target.textContent || '').split('\n').filter(Boolean);
+  target.textContent = [line, ...existing].slice(0, maxLogLines).join('\n');
+}
+
 function getInstallId() {
   const existing = saved(storageKeys.installId);
   if (existing) return existing;
@@ -46,12 +72,13 @@ function shortInstallId() {
 
 function log(message) {
   const line = `${new Date().toLocaleTimeString()} ${message}`;
-  logsOutput.textContent = `${line}\n${logsOutput.textContent || ''}`.trim();
+  prependLogLine(logsOutput, line);
 }
 
 function browserLog(message) {
   const line = `${new Date().toLocaleTimeString()} ${message}`;
-  browserOutput.textContent = `${line}\n${browserOutput.textContent || ''}`.trim();
+  prependLogLine(browserOutput, line);
+  setText('browserLastEvent', message);
   log(message);
 }
 
@@ -59,9 +86,14 @@ function refreshStatus() {
   const baseUrl = saved(storageKeys.baseUrl, document.getElementById('baseUrl').value).replace(/\/+$/, '');
   const processNames = saved(storageKeys.processNames, 'RuneLite,Jagex Launcher,JagexLauncher,osclient,DreamBot');
   const detectionEnabled = saved(storageKeys.localDetectionEnabled) === 'true';
+  const paired = Boolean(saved(storageKeys.deviceToken));
   document.getElementById('statusBaseUrl').textContent = baseUrl || 'Not configured';
-  document.getElementById('statusToken').textContent = saved(storageKeys.deviceToken) ? 'Stored locally' : 'Not paired';
+  document.getElementById('statusToken').textContent = paired ? 'Stored locally' : 'Not paired';
   document.getElementById('statusInstallId').textContent = shortInstallId();
+  setText('pairWebsite', baseUrl || 'Not configured');
+  setText('pairDeviceId', paired ? `Device ${saved(storageKeys.deviceId, 'paired')}` : 'Not paired');
+  setText('pairInstallId', shortInstallId());
+  setPill('pairStatusPill', paired ? 'Paired' : 'Not paired', paired ? 'ready' : 'needs');
   document.getElementById('deviceName').value = saved(storageKeys.deviceName, 'GS Agent');
   document.getElementById('localProfileName').value = saved(storageKeys.localProfileName);
   document.getElementById('localExecutablePath').value = saved(storageKeys.localExecutablePath);
@@ -74,6 +106,7 @@ function refreshStatus() {
   profilesOutput.textContent = saved(storageKeys.localExecutablePath)
     ? `Local profile: ${saved(storageKeys.localProfileName, 'Unnamed profile')}\nPath: ${saved(storageKeys.localExecutablePath)}`
     : 'No local launch profile saved.';
+  renderCurrentJob();
 }
 
 function clientStateLabel(state) {
@@ -108,6 +141,51 @@ function renderClientSummary() {
   document.getElementById('linkedAccountLabel').textContent = first.linked_account_label || (first.account_id ? `Account ${first.account_id}` : 'Unlinked');
   document.getElementById('lastDisplayName').textContent = first.reported_display_name || 'Unknown';
   document.getElementById('lastWealthValue').textContent = formatOptionalNumber(first.reported_wealth_value);
+}
+
+function browserJob(job) {
+  return job && ['workflow_run', 'run_workflow', 'open_browser', 'fill_visible_fields'].includes(job.job_type);
+}
+
+function jobTitle(job) {
+  if (!job) return 'No job loaded';
+  const payload = job.payload || {};
+  if (payload.workflow && payload.workflow.name) return payload.workflow.name;
+  if (payload.client_profile && payload.client_profile.name) return payload.client_profile.name;
+  return job.job_type.replace(/_/g, ' ');
+}
+
+function jobTarget(job) {
+  if (!job) return 'None';
+  const payload = job.payload || {};
+  const parts = [];
+  if (payload.account && payload.account.label) parts.push(payload.account.label);
+  if (payload.proxy && payload.proxy.name) parts.push(`Proxy: ${payload.proxy.name}`);
+  if (!parts.length && job.account_id) parts.push(`Account ${job.account_id}`);
+  if (!parts.length && job.client_profile_id) parts.push(`Profile ${job.client_profile_id}`);
+  return parts.join(' / ') || 'GS Agent';
+}
+
+function jobHint(job, note = '') {
+  if (note) return note;
+  if (!job) return 'Click Fetch Next Job after queueing a launch or Browser Automator job on the website.';
+  if (job.status === 'waiting_for_user') return 'Complete the manual step in the visible browser, then click Continue After Manual Step.';
+  if (job.job_type === 'launch_client') return 'Click Run Current Launch Job to start the configured local executable visibly on this PC.';
+  if (browserJob(job)) return 'Click Run Browser Automator Job. CAPTCHA, 2FA, email verification, and final submit remain manual.';
+  return 'Use the action buttons below to update this local job.';
+}
+
+function renderCurrentJob(note = '') {
+  setText('currentJobTitle', jobTitle(currentJob));
+  setText('currentJobId', currentJob ? String(currentJob.id) : 'None');
+  setText('currentJobType', currentJob ? currentJob.job_type.replace(/_/g, ' ') : 'None');
+  setText('currentJobTarget', jobTarget(currentJob));
+  setText('currentJobUpdated', currentJob ? new Date().toLocaleString() : 'Never');
+  setText('currentJobHint', jobHint(currentJob, note));
+  setPill('currentJobStatus', currentJob ? currentJob.status : 'Idle', currentJob ? currentJob.status : 'idle');
+  setText('browserJobId', currentJob && browserJob(currentJob) ? `Job ${currentJob.id}` : 'No browser job loaded');
+  setText('browserJobStatus', currentJob && browserJob(currentJob) ? currentJob.status : 'Idle');
+  setPill('pairStatusPill', saved(storageKeys.deviceToken) ? 'Paired' : 'Not paired', saved(storageKeys.deviceToken) ? 'ready' : 'needs');
 }
 
 async function pair() {
@@ -161,6 +239,7 @@ async function heartbeat() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Heartbeat failed.');
     document.getElementById('statusHeartbeat').textContent = new Date().toLocaleString();
+    setPill('pairStatusPill', 'Paired', 'ready');
     log('Heartbeat sent.');
   } catch (error) {
     log(`Heartbeat failed: ${error.message}`);
@@ -190,6 +269,7 @@ async function fetchNextJob() {
     if (!response.ok) throw new Error(data.error || 'Could not fetch job.');
     currentJob = data.job || null;
     jobOutput.textContent = currentJob ? JSON.stringify(currentJob, null, 2) : 'No queued jobs.';
+    renderCurrentJob();
     log(currentJob ? `Fetched job ${currentJob.id}.` : 'No queued jobs.');
   } catch (error) {
     log(`Job fetch failed: ${error.message}`);
@@ -212,6 +292,7 @@ async function updateJobStatus(status, message) {
     if (!response.ok) throw new Error(data.error || 'Status update failed.');
     currentJob.status = status;
     jobOutput.textContent = JSON.stringify(currentJob, null, 2);
+    renderCurrentJob(message);
     log(`Job ${currentJob.id} marked ${status}.`);
   } catch (error) {
     log(`Job status failed: ${error.message}`);
@@ -243,6 +324,8 @@ async function runCurrentBrowserJob() {
   }
   browserLog(`Starting Browser Automator job ${currentJob.id}.`);
   try {
+    currentJob.status = 'running';
+    renderCurrentJob('Visible browser is running this job.');
     const result = await window.gsCompanion.runBrowserJob({
       baseUrl,
       token,
@@ -251,8 +334,11 @@ async function runCurrentBrowserJob() {
     });
     currentJob.status = result.status || 'completed';
     jobOutput.textContent = JSON.stringify(currentJob, null, 2);
+    renderCurrentJob('Browser Automator finished. Review the visible browser before closing it.');
     browserLog(`Browser Automator job ${currentJob.id} ${currentJob.status}.`);
   } catch (error) {
+    currentJob.status = 'failed';
+    renderCurrentJob('Browser Automator failed. Check the local logs for safe details.');
     browserLog(`Browser Automator failed: ${error.message}`);
   }
 }
@@ -280,6 +366,7 @@ async function runCurrentLaunchJob() {
   const args = saved(storageKeys.localLaunchArgs) || jobProfile.launch_args_template || '';
   if (!executablePath) {
     log('Launch job needs a local executable path in Settings.');
+    renderCurrentJob('Add the executable path in Settings before running this launch job.');
     return;
   }
   if (!window.confirm('Run this launch job visibly on this PC now?')) {
@@ -326,6 +413,7 @@ async function runCurrentLaunchJob() {
     if (!response.ok) throw new Error(data.error || 'Launch status update failed.');
     currentJob.status = 'running';
     jobOutput.textContent = JSON.stringify(currentJob, null, 2);
+    renderCurrentJob('Local client launch started visibly on this PC.');
     log(`Launch job ${currentJob.id} started.`);
   } catch (error) {
     log(`Launch job failed: ${error.message}`);
@@ -449,6 +537,7 @@ async function launchLocalProfile() {
 
 document.getElementById('pairButton').addEventListener('click', pair);
 document.getElementById('heartbeatButton').addEventListener('click', heartbeat);
+document.getElementById('heartbeatButtonPair').addEventListener('click', heartbeat);
 document.getElementById('sendStatusButton').addEventListener('click', sendManualClientStatus);
 document.getElementById('detectClientsButton').addEventListener('click', detectClients);
 document.getElementById('stopTrackingButton').addEventListener('click', () => {
@@ -470,10 +559,19 @@ document.getElementById('runBrowserJobButton2').addEventListener('click', runCur
 document.getElementById('closeBrowserButton').addEventListener('click', closeAutomationBrowser);
 document.getElementById('closeBrowserButton2').addEventListener('click', closeAutomationBrowser);
 document.getElementById('runLaunchJobButton').addEventListener('click', runCurrentLaunchJob);
-document.getElementById('markRunningButton').addEventListener('click', () => updateJobStatus('running', 'Visible browser placeholder started.'));
+document.getElementById('continueJobButton').addEventListener('click', () => updateJobStatus('running', 'User continued after manual step.'));
 document.getElementById('markWaitingButton').addEventListener('click', () => updateJobStatus('waiting_for_user', 'Paused for manual CAPTCHA, 2FA, verification, or security check.'));
 document.getElementById('markCompleteButton').addEventListener('click', () => updateJobStatus('completed', 'User marked automation job complete.'));
 document.getElementById('markFailedButton').addEventListener('click', () => updateJobStatus('failed', 'User marked automation job failed.'));
+document.getElementById('browserPauseButton').addEventListener('click', () => updateJobStatus('waiting_for_user', 'Paused for manual CAPTCHA, 2FA, email verification, phone verification, Cloudflare, or security check.'));
+document.getElementById('browserContinueButton').addEventListener('click', () => updateJobStatus('running', 'User continued after manual browser step.'));
+document.getElementById('clearBrowserLogsButton').addEventListener('click', () => {
+  browserOutput.textContent = 'Browser logs cleared.';
+  setText('browserLastEvent', 'Logs cleared');
+});
+document.getElementById('clearLogsButton').addEventListener('click', () => {
+  logsOutput.textContent = 'Logs cleared.';
+});
 document.getElementById('saveSettingsButton').addEventListener('click', () => {
   save(storageKeys.deviceName, document.getElementById('deviceName').value.trim() || 'GS Agent');
   save(storageKeys.localDetectionEnabled, document.getElementById('settingsEnableLocalDetection').checked ? 'true' : 'false');
@@ -553,5 +651,13 @@ window.gsCompanion.safetySummary().then(summary => {
 
 window.gsCompanion.onBrowserJobLog(progress => {
   if (!progress) return;
+  if (currentJob && progress.job_id && String(currentJob.id) === String(progress.job_id)) {
+    if (['running', 'waiting_for_user', 'completed', 'failed'].includes(progress.type)) {
+      currentJob.status = progress.type === 'waiting_for_user' ? 'waiting_for_user' : progress.type;
+      renderCurrentJob(progress.message);
+    } else {
+      setText('browserJobStatus', currentJob.status || 'running');
+    }
+  }
   browserLog(`${progress.type}: ${progress.message}`);
 });

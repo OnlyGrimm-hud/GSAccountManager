@@ -16,6 +16,8 @@ Current status:
 - local device token storage
 - heartbeat support
 - job polling and job status reporting
+- polished pairing, job status, and Browser Automator local logging UI
+- visible local pause/continue controls for queued jobs
 - visible Browser Automator execution through Playwright Chromium
 - browser runtime fallback to system Microsoft Edge or Chrome when Playwright Chromium is not installed
 - Browser Automator support for open_url, wait_for_selector, fill_field, click, screenshot, pause_for_user, wait_for_user_continue, mark_complete, fail, and note steps
@@ -44,10 +46,8 @@ Current local-only automation behavior:
 
 Planned local-only features:
 
-- packaged Windows installer
 - stronger selected-window screenshot controls
 - browser proxy launch support
-- richer pause/resume controls in the UI
 
 Commands:
 
@@ -58,4 +58,17 @@ npm run build
 npm run package
 ```
 
-The packaged Windows artifact is planned as `GS Agent Setup.exe`.
+For Windows testing, run:
+
+```bash
+npm install
+npm run package:win
+```
+
+The expected packaged artifact is:
+
+```text
+companion/dist/GS Agent Setup.exe
+```
+
+The website Downloads page and `/downloads/helper/windows` route serve that file when it exists on the deployment host. If the installer is hosted elsewhere, set the public download URL in Admin -> Downloads Manager.

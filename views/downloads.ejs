@@ -30,7 +30,10 @@
     </div>
     <p class="muted"><%= localApp.description || 'Connects this PC to GS Account Manager, launches configured clients, monitors local status, sends live updates, and runs GS Browser Automator jobs.' %></p>
     <div class="helper-detail-grid">
+      <p class="row-line"><span>Build</span><strong>Windows test build</strong></p>
       <p class="row-line"><span>Version</span><strong><%= download.available ? download.version : (localApp.version || 'Coming soon') %></strong></p>
+      <p class="row-line"><span>Installer</span><strong><%= download.available ? download.fileName : 'Not packaged on this server' %></strong></p>
+      <p class="row-line"><span>File size</span><strong><%= download.fileSize || 'Not available' %></strong></p>
       <p class="row-line"><span>Connected devices</span><strong><%= access.deviceCount %></strong></p>
       <p class="row-line"><span>Device limit</span><strong><%= access.tier && access.tier.max_devices !== null ? access.tier.max_devices : 'Unlimited' %></strong></p>
     </div>
@@ -44,6 +47,7 @@
       <a class="button" href="/companion">Pair Once</a>
       <a class="button" href="/compatibility">Compatibility</a>
     </div>
+    <p class="notice"><%= download.available ? 'This installer is served from the packaged companion/dist artifact on the deployment host.' : 'Package GS Agent with npm run package:win in the companion folder, then upload or place GS Agent Setup.exe where the deployment can serve it.' %></p>
   </article>
 
   <article class="panel">
